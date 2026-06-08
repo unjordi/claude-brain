@@ -39,8 +39,10 @@ issues API abuse warnings for tighter cadences, so the timer's
 - KDE Plasma 6 (Fedora 41+ ships it; this was developed on Fedora 44).
 - `systemd --user` (any modern Linux desktop).
 - `jq`.
-- `ccusage` — either installed globally (`npm i -g ccusage`) or available via
-  `npx`; the fetch script falls back to `npx -y ccusage@latest` automatically.
+- `npm` (to install `ccusage`). The installer runs `npm i -g ccusage` unless
+  `ccusage` is already on `PATH`, or you pass `--no-ccusage` (in which case the
+  fetch script falls back to `npx -y ccusage@latest` at runtime — slower per
+  fire because of cold-start, ~7 s vs ~1 s).
 
 ## Install
 

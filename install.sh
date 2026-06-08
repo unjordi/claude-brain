@@ -21,10 +21,12 @@ LIMITS_DEFAULT="$HOME/.config/claude-quota/limits.env"
 
 REINSTALL=0
 SKIP_PLASMOID=0
+SKIP_CCUSAGE=0
 for arg in "$@"; do
   case "$arg" in
     --reinstall)    REINSTALL=1 ;;
     --no-plasmoid)  SKIP_PLASMOID=1 ;;
+    --no-ccusage)   SKIP_CCUSAGE=1 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
@@ -33,12 +35,26 @@ echo "==> Checking prerequisites"
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing: $1" >&2; exit 1; }; }
 need systemctl
 need jq
-if ! command -v ccusage >/dev/null 2>&1 && ! command -v npx >/dev/null 2>&1; then
-  echo "missing: ccusage or npx (need one to fetch quota data)" >&2
-  exit 1
-fi
 if [[ "$SKIP_PLASMOID" -eq 0 ]]; then
   need kpackagetool6
+fi
+
+echo "==> Ensuring ccusage is installed"
+if command -v ccusage >/dev/null 2>&1; then
+  echo "    already present ($(command -v ccusage))"
+elif [[ "$SKIP_CCUSAGE" -eq 1 ]]; then
+  if command -v npx >/dev/null 2>&1; then
+    echo "    --no-ccusage set; will fall back to 'npx -y ccusage@latest' at runtime"
+  else
+    echo "missing: ccusage and npx (need one); rerun without --no-ccusage or install npm" >&2
+    exit 1
+  fi
+elif command -v npm >/dev/null 2>&1; then
+  echo "    installing globally via npm"
+  npm i -g ccusage
+else
+  echo "missing: npm (needed to install ccusage); install Node.js or pass --no-ccusage if you have npx" >&2
+  exit 1
 fi
 
 echo "==> Installing fetch script -> $BIN_DEST"
