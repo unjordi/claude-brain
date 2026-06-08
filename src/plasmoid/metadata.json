@@ -1,0 +1,21 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "fuziontech@gmail.com",
+                "Name": "James"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Shows Claude Code 5-hour block and weekly usage on hover",
+        "Icon": "applications-development",
+        "Id": "com.jamesh.claudequota",
+        "License": "MIT",
+        "Name": "Claude Code Quota",
+        "Version": "0.1"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-API": "declarativeappletscript",
+    "X-Plasma-MainScript": "ui/main.qml"
+}

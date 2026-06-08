@@ -1,0 +1,16 @@
+[Unit]
+Description=Refresh Claude Code quota snapshot every 5 minutes
+Documentation=https://github.com/anthropics/claude-code
+
+[Timer]
+# Fire 30s after the user session boots, then every 5 min.
+# The 5-min floor is enforced here so the widget can never accidentally
+# poll faster — Anthropic's API issues abuse warnings on tighter cadence.
+OnBootSec=30s
+OnUnitActiveSec=5min
+AccuracySec=15s
+Persistent=true
+Unit=claude-quota.service
+
+[Install]
+WantedBy=timers.target

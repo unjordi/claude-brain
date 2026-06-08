@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# Fetches Claude Code 5-hour and weekly usage via ccusage and writes a
+# normalized JSON snapshot to ~/.cache/claude-quota/state.json.
+#
+# Tune caps to match your subscription tier. Override by exporting in
+# ~/.config/claude-quota/limits.env (the systemd unit sources it).
+#
+# Rough defaults assume Max-20x; trim down for Pro/Max-5x.
+
+set -euo pipefail
+
+FIVE_HOUR_CAP_TOKENS="${FIVE_HOUR_CAP_TOKENS:-140000000}"
+WEEKLY_CAP_TOKENS="${WEEKLY_CAP_TOKENS:-2000000000}"
+WARN_PCT="${WARN_PCT:-60}"
+CRIT_PCT="${CRIT_PCT:-85}"
+
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude-quota"
+STATE_FILE="$CACHE_DIR/state.json"
+TMP_FILE="$CACHE_DIR/state.json.tmp"
+
+mkdir -p "$CACHE_DIR"
+
+write_error() {
+  local msg="$1"
+  jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg err "$msg" '{
+    updated_at: $ts,
+    status: "error",
+    error: $err,
+    five_hour: null,
+    weekly: null
+  }' > "$TMP_FILE"
+  mv "$TMP_FILE" "$STATE_FILE"
+}
+
+resolve_ccusage() {
+  if command -v ccusage >/dev/null 2>&1; then
+    echo "ccusage"
+  elif command -v npx >/dev/null 2>&1; then
+    echo "npx -y ccusage@latest"
+  else
+    return 1
+  fi
+}
+
+CCUSAGE="$(resolve_ccusage)" || { write_error "ccusage not found (install ccusage or npm/npx)"; exit 0; }
+
+BLOCKS_JSON="$($CCUSAGE blocks --json --active --token-limit "$FIVE_HOUR_CAP_TOKENS" --offline 2>/dev/null || true)"
+SINCE="$(date -u -d '8 days ago' +%Y%m%d)"
+WEEKLY_JSON="$($CCUSAGE weekly --json --since "$SINCE" --offline 2>/dev/null || true)"
+
+if [[ -z "$BLOCKS_JSON" || -z "$WEEKLY_JSON" ]]; then
+  write_error "ccusage returned empty output"
+  exit 0
+fi
+
+NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+# Next Monday 00:00 UTC — ISO week boundary that ccusage groups by.
+NEXT_MONDAY="$(date -u -d "next Monday 00:00:00" +%Y-%m-%dT%H:%M:%SZ)"
+
+jq -n \
+  --argjson blocks "$BLOCKS_JSON" \
+  --argjson weekly "$WEEKLY_JSON" \
+  --arg ts "$NOW_ISO" \
+  --arg next_monday "$NEXT_MONDAY" \
+  --argjson five_cap "$FIVE_HOUR_CAP_TOKENS" \
+  --argjson week_cap "$WEEKLY_CAP_TOKENS" \
+  --argjson warn "$WARN_PCT" \
+  --argjson crit "$CRIT_PCT" '
+  def pct(used; cap): if cap > 0 then (used * 100 / cap) else 0 end;
+  def round1(x): (x * 10 | floor) / 10;
+
+  ($blocks.blocks[0] // null) as $blk
+  | ($weekly.weekly[0] // null) as $wk
+  | (if $blk then $blk.totalTokens else 0 end) as $five_used
+  | (if $wk then $wk.totalTokens else 0 end) as $week_used
+  | pct($five_used; $five_cap) as $five_pct
+  | pct($week_used; $week_cap) as $week_pct
+  | ([$five_pct, $week_pct] | max) as $max_pct
+  | (if $max_pct >= $crit then "crit"
+     elif $max_pct >= $warn then "warn"
+     else "ok" end) as $status
+  | {
+      updated_at: $ts,
+      status: $status,
+      error: null,
+      five_hour: (if $blk then {
+        tokens_used: $five_used,
+        tokens_cap: $five_cap,
+        percent: round1($five_pct),
+        cost_usd: round1($blk.costUSD // 0),
+        resets_at: $blk.endTime,
+        is_active: ($blk.isActive // false),
+        models: ($blk.models // []),
+        burn_tokens_per_minute: round1($blk.burnRate.tokensPerMinute // 0)
+      } else null end),
+      weekly: (if $wk then {
+        tokens_used: $week_used,
+        tokens_cap: $week_cap,
+        percent: round1($week_pct),
+        cost_usd: round1($wk.totalCost // 0),
+        resets_at: $next_monday,
+        week_start: ($wk.period // $wk.week)
+      } else null end)
+    }
+' > "$TMP_FILE"
+
+mv "$TMP_FILE" "$STATE_FILE"

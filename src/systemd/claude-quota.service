@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Claude Code quota snapshot
+Documentation=https://github.com/anthropics/claude-code
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/claude-quota/limits.env
+ExecStart=%h/.local/bin/claude-quota-fetch
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
