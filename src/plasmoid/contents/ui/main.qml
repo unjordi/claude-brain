@@ -40,8 +40,22 @@ PlasmoidItem {
         }
     }
 
+    // Fires the systemd fetch service on demand (refresh button), then re-reads.
+    P5Support.DataSource {
+        id: refreshRunner
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            disconnectSource(source)
+            loadSnapshot()
+        }
+    }
+
     function loadSnapshot() {
         catSource.connectSource("cat " + stateFilePath)
+    }
+    function forceRefresh() {
+        refreshRunner.connectSource("systemctl --user start claude-quota.service")
     }
 
     Timer {
@@ -52,184 +66,229 @@ PlasmoidItem {
         onTriggered: loadSnapshot()
     }
 
-    // ---------- Status derivation ----------
+    // ---------- Status / color derivation ----------
     readonly property string statusKey: {
         if (snapshotError !== "" || snapshot === null) return "error"
         if (snapshot.status) return snapshot.status
         return "error"
     }
-    readonly property color statusColor: {
-        switch (statusKey) {
-            case "ok":    return "#3aa757"  // green
-            case "warn":  return "#e0a800"  // amber
-            case "crit":  return "#dc3545"  // red
-            case "error": return "#666666"  // gray
-        }
-        return "#666666"
+
+    // FelixDes-style single orange accent; escalates to red only at the wall (>90%).
+    function pctColor(p) {
+        if (p === undefined || p === null) return "#777777"
+        if (p > 90) return "#dc3545"   // red — about to get throttled
+        return "#e8884a"               // orange accent
     }
-    readonly property string compactText: {
-        if (snapshot && snapshot.five_hour)
-            return Math.round(snapshot.five_hour.percent) + "%"
-        if (snapshotError) return "!"
-        return "…"
-    }
+
+    readonly property real fivePct: snapshot && snapshot.five_hour ? snapshot.five_hour.percent : -1
+    readonly property real weekPct: snapshot && snapshot.weekly    ? snapshot.weekly.percent    : -1
 
     Plasmoid.status: PlasmaCore.Types.ActiveStatus
     Plasmoid.icon: "applications-development"
 
-    // ---------- Compact representation (panel/tray) ----------
-    // Self-contained colored pill — no icon-theme dependency. Renders even if
-    // Kirigami.Icon fails to resolve (which it does in some Plasma 6 builds for
-    // emblem-* names on certain themes).
-    compactRepresentation: Item {
+    // ---------- Compact representation (panel) — two rows w/ mini bars, FelixDes-style ----------
+    compactRepresentation: MouseArea {
         id: compactRoot
-        implicitWidth: Math.max(Kirigami.Units.iconSizes.medium, pillText.implicitWidth + Kirigami.Units.smallSpacing * 2)
+        hoverEnabled: true
+        onClicked: root.expanded = !root.expanded
+        implicitWidth: col.implicitWidth + Kirigami.Units.largeSpacing * 2
         implicitHeight: Kirigami.Units.iconSizes.medium
 
-        Rectangle {
-            id: pill
+        // The system tray / panel reserves space from these Layout hints, not
+        // implicitWidth alone — without them a wide compact rep overlaps neighbors.
+        Layout.minimumWidth: implicitWidth
+        Layout.preferredWidth: implicitWidth
+        Layout.maximumWidth: implicitWidth
+
+        readonly property real rowH: height / 2
+        readonly property real fs: Math.max(9, rowH * 0.62)
+
+        ColumnLayout {
+            id: col
             anchors.centerIn: parent
-            width: Math.max(parent.height, pillText.implicitWidth + Kirigami.Units.smallSpacing * 2)
-            height: parent.height
-            radius: height / 2
-            color: root.statusColor
-            border.color: Qt.darker(color, 1.3)
-            border.width: 1
-        }
+            spacing: Math.max(1, compactRoot.rowH * 0.1)
 
-        PC3.Label {
-            id: pillText
-            anchors.centerIn: pill
-            text: root.compactText
-            color: "white"
-            font.pixelSize: Math.max(9, pill.height * 0.55)
-            font.bold: true
-        }
-
-        MouseArea {
-            anchors.fill: parent
-            hoverEnabled: true
-            onClicked: root.expanded = !root.expanded
+            CompactRow {
+                label: "5h"
+                pct: root.fivePct
+                resetIso: root.snapshot && root.snapshot.five_hour ? root.snapshot.five_hour.resets_at : ""
+                fontPx: compactRoot.fs
+            }
+            CompactRow {
+                label: "7d"
+                pct: root.weekPct
+                resetIso: root.snapshot && root.snapshot.weekly ? root.snapshot.weekly.resets_at : ""
+                fontPx: compactRoot.fs
+            }
         }
     }
 
-    // ---------- Full representation (click-to-expand popup) ----------
+    // One row of the panel indicator: label · mini bar · % · reset (FelixDes-style).
+    component CompactRow: RowLayout {
+        property string label: ""
+        property real pct: -1
+        property string resetIso: ""
+        property real fontPx: 11
+        spacing: Kirigami.Units.smallSpacing
+
+        PC3.Label { text: label; opacity: 0.7; font.pixelSize: fontPx }
+
+        // mini rounded bar
+        Rectangle {
+            Layout.minimumWidth: fontPx * 3
+            Layout.preferredWidth: fontPx * 4
+            Layout.alignment: Qt.AlignVCenter
+            height: Math.max(3, fontPx * 0.42)
+            radius: height / 2
+            visible: pct >= 0
+            color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.15)
+            Rectangle {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                height: parent.height
+                radius: parent.radius
+                width: parent.width * Math.max(0, Math.min(1, pct / 100))
+                color: root.pctColor(pct)
+            }
+        }
+
+        PC3.Label {
+            text: pct >= 0 ? Math.round(pct) + "%" : (root.snapshotError ? "!" : "…")
+            color: root.pctColor(pct)
+            font.bold: true
+            font.pixelSize: fontPx
+            Layout.minimumWidth: fontPx * 2.4
+            horizontalAlignment: Text.AlignRight
+        }
+
+        PC3.Label {
+            visible: resetIso !== ""
+            text: resetIso !== "" ? "⟳" + root.compactReset(resetIso) : ""
+            opacity: 0.55
+            font.pixelSize: fontPx * 0.9
+        }
+    }
+
+    // ---------- Full representation (popup card) ----------
     fullRepresentation: ColumnLayout {
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 20
-        Layout.preferredHeight: Kirigami.Units.gridUnit * 14
+        Layout.preferredWidth: Kirigami.Units.gridUnit * 19
+        Layout.preferredHeight: Kirigami.Units.gridUnit * 13
         spacing: Kirigami.Units.largeSpacing
 
-        Kirigami.Heading {
-            level: 3
-            text: "Claude Code quota"
+        // Header: title + refresh
+        RowLayout {
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.largeSpacing
             Layout.rightMargin: Kirigami.Units.largeSpacing
             Layout.topMargin: Kirigami.Units.largeSpacing
-        }
-
-        // 5-hour block
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.leftMargin: Kirigami.Units.largeSpacing
-            Layout.rightMargin: Kirigami.Units.largeSpacing
-            spacing: 2
-            RowLayout {
+            Kirigami.Heading {
+                level: 3
+                text: "Claude Limits"
                 Layout.fillWidth: true
-                PC3.Label {
-                    text: "5-hour block"
-                    Layout.fillWidth: true
-                    font.bold: true
-                }
-                PC3.Label {
-                    text: root.snapshot && root.snapshot.five_hour
-                          ? root.snapshot.five_hour.percent.toFixed(1) + "%"
-                          : "—"
-                }
             }
-            PC3.ProgressBar {
-                Layout.fillWidth: true
-                from: 0; to: 100
-                value: root.snapshot && root.snapshot.five_hour ? root.snapshot.five_hour.percent : 0
-            }
-            PC3.Label {
-                Layout.fillWidth: true
-                opacity: 0.7
-                text: {
-                    if (!root.snapshot || !root.snapshot.five_hour) return ""
-                    const f = root.snapshot.five_hour
-                    let s = "resets " + relativeTime(f.resets_at)
-                    if (f.cost_usd !== null && f.cost_usd !== undefined)
-                        s += " · ≈ $" + f.cost_usd.toFixed(2) + " API equiv."
-                    return s
-                }
+            PC3.ToolButton {
+                icon.name: "view-refresh"
+                flat: true
+                onClicked: root.forceRefresh()
+                PC3.ToolTip.text: "Actualizar ahora"
+                PC3.ToolTip.visible: hovered
+                PC3.ToolTip.delay: 500
             }
         }
 
-        // Weekly
-        ColumnLayout {
+        // 5-hour section
+        UsageSection {
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.largeSpacing
             Layout.rightMargin: Kirigami.Units.largeSpacing
-            spacing: 2
-            RowLayout {
-                Layout.fillWidth: true
-                PC3.Label {
-                    text: "Weekly"
-                    Layout.fillWidth: true
-                    font.bold: true
-                }
-                PC3.Label {
-                    text: root.snapshot && root.snapshot.weekly
-                          ? root.snapshot.weekly.percent.toFixed(1) + "%"
-                          : "—"
-                }
-            }
-            PC3.ProgressBar {
-                Layout.fillWidth: true
-                from: 0; to: 100
-                value: root.snapshot && root.snapshot.weekly ? root.snapshot.weekly.percent : 0
-            }
-            PC3.Label {
-                Layout.fillWidth: true
-                opacity: 0.7
-                text: {
-                    if (!root.snapshot || !root.snapshot.weekly) return ""
-                    const w = root.snapshot.weekly
-                    let s = "resets " + relativeTime(w.resets_at)
-                    if (w.cost_usd !== null && w.cost_usd !== undefined)
-                        s += " · ≈ $" + w.cost_usd.toFixed(2) + " API equiv."
-                    return s
-                }
-            }
+            title: "Sesión (5 h)"
+            block: root.snapshot ? root.snapshot.five_hour : null
+        }
+
+        // weekly section
+        UsageSection {
+            Layout.fillWidth: true
+            Layout.leftMargin: Kirigami.Units.largeSpacing
+            Layout.rightMargin: Kirigami.Units.largeSpacing
+            title: "Semanal (7 d)"
+            block: root.snapshot ? root.snapshot.weekly : null
         }
 
         Item { Layout.fillHeight: true }
 
+        // footer
         PC3.Label {
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.largeSpacing
             Layout.rightMargin: Kirigami.Units.largeSpacing
             Layout.bottomMargin: Kirigami.Units.largeSpacing
+            horizontalAlignment: Text.AlignHCenter
             opacity: 0.5
             font.pointSize: Kirigami.Theme.smallFont.pointSize
             text: {
                 if (root.snapshotError) return "error: " + root.snapshotError
-                if (!root.snapshot) return "loading…"
-                return "updated " + relativeTime(root.snapshot.updated_at)
+                if (!root.snapshot) return "cargando…"
+                const basis = root.snapshot.basis === "oauth" ? "datos reales" : "estimado local"
+                return basis + " · ⟳ 5 min · act. " + root.relativeTime(root.snapshot.updated_at)
+            }
+        }
+    }
+
+    // A titled usage row: label + %, rounded bar, reset + API-equiv cost.
+    component UsageSection: ColumnLayout {
+        property string title: ""
+        property var block: null
+        readonly property real pct: block && block.percent !== undefined ? block.percent : -1
+        spacing: Kirigami.Units.smallSpacing
+
+        RowLayout {
+            Layout.fillWidth: true
+            PC3.Label { text: title; Layout.fillWidth: true; font.bold: true }
+            PC3.Label {
+                text: pct >= 0 ? pct.toFixed(1) + "%" : "—"
+                color: root.pctColor(pct)
+                font.bold: true
+            }
+        }
+        // rounded progress bar
+        Rectangle {
+            Layout.fillWidth: true
+            height: Kirigami.Units.gridUnit * 0.5
+            radius: height / 2
+            color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.12)
+            Rectangle {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                height: parent.height
+                radius: parent.radius
+                width: parent.width * Math.max(0, Math.min(1, pct / 100))
+                color: root.pctColor(pct)
+                Behavior on width { NumberAnimation { duration: 250 } }
+            }
+        }
+        PC3.Label {
+            Layout.fillWidth: true
+            opacity: 0.65
+            font.pointSize: Kirigami.Theme.smallFont.pointSize
+            text: {
+                if (!block) return ""
+                let s = "Se restablece " + root.relativeTime(block.resets_at)
+                if (block.cost_usd !== null && block.cost_usd !== undefined)
+                    s += " · ≈ $" + block.cost_usd.toFixed(2) + " (API equiv local)"
+                return s
             }
         }
     }
 
     // ---------- Hover tooltip ----------
     toolTipMainText: {
-        if (statusKey === "error") return "Claude Code quota — no data"
-        const five = snapshot && snapshot.five_hour ? snapshot.five_hour.percent.toFixed(0) + "%" : "—"
-        const wk   = snapshot && snapshot.weekly    ? snapshot.weekly.percent.toFixed(0)    + "%" : "—"
-        return "Claude Code: 5h " + five + " · wk " + wk
+        if (statusKey === "error") return "Claude Limits — sin datos"
+        const five = fivePct >= 0 ? Math.round(fivePct) + "%" : "—"
+        const wk   = weekPct >= 0 ? Math.round(weekPct) + "%" : "—"
+        return "Claude: 5h " + five + " · 7d " + wk
     }
     toolTipSubText: snapshot && snapshot.five_hour
-                    ? "resets in " + relativeTime(snapshot.five_hour.resets_at).replace("in ", "")
+                    ? "sesión se restablece " + relativeTime(snapshot.five_hour.resets_at)
                     : ""
 
     function relativeTime(iso) {
@@ -240,9 +299,21 @@ PlasmoidItem {
         const abs = Math.abs(diff)
         let val, unit
         if      (abs < 60)    { val = abs;                  unit = "s" }
-        else if (abs < 3600)  { val = Math.round(abs/60);   unit = "m" }
+        else if (abs < 3600)  { val = Math.round(abs/60);   unit = "min" }
         else if (abs < 86400) { val = Math.round(abs/3600); unit = "h" }
         else                  { val = Math.round(abs/86400);unit = "d" }
-        return diff < 0 ? (val + unit + " ago") : ("in " + val + unit)
+        return diff < 0 ? ("hace " + val + unit) : ("en " + val + unit)
+    }
+
+    // Short reset for the compact pill: "3h", "2d", "12min".
+    function compactReset(iso) {
+        if (!iso) return ""
+        const t = Date.parse(iso)
+        if (isNaN(t)) return ""
+        const diff = Math.round((t - Date.now()) / 1000)
+        const abs = Math.abs(diff)
+        if (abs < 3600)  return Math.round(abs/60) + "min"
+        if (abs < 86400) return Math.round(abs/3600) + "h"
+        return Math.round(abs/86400) + "d"
     }
 }
