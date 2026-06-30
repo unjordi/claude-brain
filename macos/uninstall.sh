@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-LABEL="io.github.fuziontech.claude-quota"
+LABEL="io.github.unjordi.claude-quota"
 FETCH_DEST="$HOME/.local/bin/claude-quota-fetch"
 PLIST_DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
 APP_DEST="$HOME/Applications/Claude Quota.app"

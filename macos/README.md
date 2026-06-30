@@ -128,7 +128,7 @@ reload the agent:
 # e.g. popover shows "$16" on the 5-hour bar and /usage says 36% →
 #   FIVE_HOUR_CAP_USD = 16 / 0.36 ≈ 45
 $EDITOR ~/.config/claude-quota/limits.env
-launchctl kickstart -k gui/$(id -u)/io.github.fuziontech.claude-quota
+launchctl kickstart -k gui/$(id -u)/io.github.unjordi.claude-quota
 ```
 
 Rough starting points (eyeballed against `/usage` on Max 20x — your mileage will

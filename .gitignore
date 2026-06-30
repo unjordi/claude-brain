@@ -3,3 +3,12 @@
 .DS_Store
 /build/
 /dist/
+
+# --- Cerebro de Claude Code (convención proyecto-autocontenido) ---
+# transcripts de sesión: pesados y pueden traer datos sensibles
+.claude/transcripts/
+.claude/*.jsonl
+# config específica de la máquina
+.claude/settings.local.json
+# memorias personales/sensibles que NO viajan al equipo
+.claude/memory/*.local.md

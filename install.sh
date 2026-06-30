@@ -13,7 +13,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 BIN_SRC="$ROOT/src/bin/claude-quota-fetch"
 UNIT_SRC="$ROOT/src/systemd"
 PLASMOID_SRC="$ROOT/src/plasmoid"
-PLASMOID_ID="io.github.fuziontech.claude-quota-widget"
+PLASMOID_ID="io.github.unjordi.claude-quota-widget"
 
 BIN_DEST="$HOME/.local/bin/claude-quota-fetch"
 UNIT_DEST="$HOME/.config/systemd/user"

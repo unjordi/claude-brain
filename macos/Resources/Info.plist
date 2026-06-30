@@ -7,7 +7,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>Claude Quota</string>
 	<key>CFBundleIdentifier</key>
-	<string>io.github.fuziontech.claude-quota</string>
+	<string>io.github.unjordi.claude-quota</string>
 	<key>CFBundleExecutable</key>
 	<string>ClaudeQuota</string>
 	<key>CFBundlePackageType</key>

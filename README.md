@@ -13,7 +13,7 @@ A native Swift status-bar app: a color-coded **% pill in the menu bar**, click f
 ![macOS menu-bar pill + popover](screenshots/macos-popup.png)
 
 ```sh
-git clone https://github.com/fuziontech/claude-quota-widget
+git clone https://github.com/unjordi/claude-quota-widget
 cd claude-quota-widget/macos
 ./install.sh          # or: just install
 ```
@@ -87,7 +87,7 @@ The dollar values shown in the popup are **API-equivalent** cost (what you'd hav
 ## Install
 
 ```sh
-git clone https://github.com/fuziontech/claude-quota-widget
+git clone https://github.com/unjordi/claude-quota-widget
 cd claude-quota-widget
 ./install.sh
 ```

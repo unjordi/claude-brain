@@ -11,8 +11,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 FETCH_SRC="$ROOT/bin/claude-quota-fetch"
-PLIST_SRC="$ROOT/launchd/io.github.fuziontech.claude-quota.plist"
-LABEL="io.github.fuziontech.claude-quota"
+PLIST_SRC="$ROOT/launchd/io.github.unjordi.claude-quota.plist"
+LABEL="io.github.unjordi.claude-quota"
 
 FETCH_DEST="$HOME/.local/bin/claude-quota-fetch"
 PLIST_DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -68,7 +68,7 @@ if [[ ! -f "$LIMITS_DEFAULT" ]]; then
 # the OAuth token is available the widget reads the exact /usage percentages
 # and these caps are ignored.
 # After editing, reload the agent:
-#   launchctl kickstart -k gui/$(id -u)/io.github.fuziontech.claude-quota
+#   launchctl kickstart -k gui/$(id -u)/io.github.unjordi.claude-quota
 #
 # Basis is API-EQUIVALENT COST (in USD), not raw tokens — cache-read tokens
 # dominate raw counts and Anthropic weights them ~0.1x. Calibrate:

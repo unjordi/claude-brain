@@ -2,7 +2,7 @@
 #
 # Run `just --list` to see all targets.
 
-PLASMOID_ID := "io.github.fuziontech.claude-quota-widget"
+PLASMOID_ID := "io.github.unjordi.claude-quota-widget"
 PLASMOID_SRC := justfile_directory() + "/src/plasmoid"
 VERSION := `jq -r '.KPlugin.Version' src/plasmoid/metadata.json`
 

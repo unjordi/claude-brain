@@ -7,12 +7,12 @@
 
   __FETCH__ is substituted with the absolute path to claude-quota-fetch by
   install.sh; the installed copy lives at
-  ~/Library/LaunchAgents/io.github.fuziontech.claude-quota.plist.
+  ~/Library/LaunchAgents/io.github.unjordi.claude-quota.plist.
 -->
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>io.github.fuziontech.claude-quota</string>
+	<string>io.github.unjordi.claude-quota</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>__FETCH__</string>

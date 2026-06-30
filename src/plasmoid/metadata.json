@@ -3,18 +3,21 @@
     "KPlugin": {
         "Authors": [
             {
+                "Name": "unjordi"
+            },
+            {
                 "Email": "fuziontech@gmail.com",
-                "Name": "fuziontech"
+                "Name": "fuziontech (autor original)"
             }
         ],
         "Category": "System Information",
-        "Description": "Shows Claude Code 5-hour block and weekly usage on hover",
-        "Icon": "applications-development",
-        "Id": "io.github.fuziontech.claude-quota-widget",
+        "Description": "Muestra el uso de tu sesión (5 h) y el límite semanal de Claude",
+        "Icon": "speedometer",
+        "Id": "io.github.unjordi.claude-quota-widget",
         "License": "MIT",
         "Name": "Claude Code Quota",
         "Version": "0.1.0",
-        "Website": "https://github.com/fuziontech/claude-quota-widget"
+        "Website": "https://github.com/unjordi/claude-quota-widget"
     },
     "X-Plasma-API-Minimum-Version": "6.0",
     "X-Plasma-API": "declarativeappletscript",

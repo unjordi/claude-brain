@@ -2,7 +2,7 @@
 #
 # Run `just --list` to see all targets.
 
-LABEL := "io.github.fuziontech.claude-quota"
+LABEL := "io.github.unjordi.claude-quota"
 STATE := "$HOME/Library/Caches/claude-quota/state.json"
 
 default: help
