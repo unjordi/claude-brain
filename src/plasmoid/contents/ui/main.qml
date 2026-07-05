@@ -96,14 +96,26 @@ PlasmoidItem {
         if (!id) return "—"
         var parts = id.replace(/^claude-/, "").split("-")
         var fam = parts[0].charAt(0).toUpperCase() + parts[0].slice(1)
-        var ver = []
+        // "claude-opus-4-8"->"Opus 4.8"; "gemini-3.1-pro-preview"->"Gemini 3.1 Pro".
+        // Enteros consecutivos se unen con "." (estilo Claude); un segmento ya
+        // punteado ("3.1") se toma tal cual; palabras (pro/flash) se capitalizan;
+        // se descarta ruido (preview/exp/latest) y sellos de fecha (>=6 dígitos).
+        var noise = { "preview": 1, "exp": 1, "latest": 1 }
+        var tokens = [], nums = []
+        function flush() { if (nums.length) { tokens.push(nums.join(".")); nums = [] } }
         for (var i = 1; i < parts.length; i++) {
-            if (/^\d+$/.test(parts[i])) {
-                if (parts[i].length >= 6) break   // sello de fecha tipo 20251001
-                ver.push(parts[i])
+            var p = parts[i]
+            if (/^\d+$/.test(p)) {
+                if (p.length >= 6) break   // sello de fecha tipo 20251001
+                nums.push(p)
+            } else if (/^\d+\.\d+$/.test(p)) {
+                flush(); tokens.push(p)                 // versión ya punteada, p.ej. 3.1
+            } else if (p && !noise[p.toLowerCase()]) {
+                flush(); tokens.push(p.charAt(0).toUpperCase() + p.slice(1))
             }
         }
-        return fam + (ver.length ? " " + ver.join(".") : "")
+        flush()
+        return tokens.length ? fam + " " + tokens.join(" ") : fam
     }
     function fmtTok(n) {
         if (n === undefined || n === null) return "—"

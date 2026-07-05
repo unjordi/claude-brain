@@ -288,15 +288,27 @@ enum Fmt {
             .map(String.init)
         guard let first = parts.first, !first.isEmpty else { return "—" }
         let fam = first.prefix(1).uppercased() + first.dropFirst()
-        var ver: [String] = []
-        for i in 1..<parts.count {
+        // "claude-opus-4-8"->"Opus 4.8"; "gemini-3.1-pro-preview"->"Gemini 3.1 Pro".
+        // Enteros consecutivos se unen con "." (estilo Claude); un segmento ya
+        // punteado ("3.1") se toma tal cual; palabras (pro/flash) se capitalizan;
+        // se descarta ruido (preview/exp/latest) y sellos de fecha (>=6 dígitos).
+        let noise: Set<String> = ["preview", "exp", "latest"]
+        var tokens: [String] = []
+        var nums: [String] = []
+        func flush() { if !nums.isEmpty { tokens.append(nums.joined(separator: ".")); nums = [] } }
+        loop: for i in 1..<parts.count {
             let p = parts[i]
             if !p.isEmpty && p.allSatisfy({ $0.isNumber }) {
-                if p.count >= 6 { break }   // sello de fecha tipo 20251001
-                ver.append(p)
+                if p.count >= 6 { break loop }   // sello de fecha tipo 20251001
+                nums.append(p)
+            } else if p.range(of: "^[0-9]+\\.[0-9]+$", options: .regularExpression) != nil {
+                flush(); tokens.append(p)         // versión ya punteada, p.ej. 3.1
+            } else if !p.isEmpty && !noise.contains(p.lowercased()) {
+                flush(); tokens.append(p.prefix(1).uppercased() + p.dropFirst())
             }
         }
-        return ver.isEmpty ? fam : "\(fam) \(ver.joined(separator: "."))"
+        flush()
+        return tokens.isEmpty ? fam : "\(fam) \(tokens.joined(separator: " "))"
     }
 }
 
