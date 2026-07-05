@@ -115,8 +115,19 @@ la KDE Store (`github.com/FelixDes/claude-kde-usage-widget`), conservando el cos
   los íconos vecinos.
 
 ## Git (repo propio github.com/unjordi/claude-quota-widget)
-Aplica la NORMA de unjordi: nunca push directo a `main`; ramita `feat/fix/chore/…` desde
-`main` → PR (`gh pr create --repo unjordi/claude-quota-widget --base main`) → merge
-server-side (con 1–3 devs, merge al instante; `gh pr merge --merge`). Si la rama activa tiene
-WIP sin commitear, usa **git worktree**. `upstream` (fuziontech) solo para jalar mejoras o
-PR de vuelta al original.
+Aplica la NORMA de unjordi: **flujo `ramita → develop → main`** (corregido 2026-07-04; antes,
+PRs #1–#3, se usaba `main` como base directa — ya NO). Nunca push directo a `develop` ni `main`.
+- Ramita `feat/fix/chore/…` desde `develop` → `gh pr create --repo unjordi/claude-quota-widget
+  --base develop` → merge server-side **con `--squash`** (`gh pr merge <n> --squash`; 1–3 devs =
+  al instante). Tras el merge, **limpia la ramita a mano** (`git push origin --delete <rama>`):
+  el auto-delete del repo está APAGADO (para que `develop` no se borre en releases), así que las
+  ramitas ya no se autoborran.
+- `develop` **existe** (se creó 2026-07-04). Si algún día falta, recréalo desde `main` server-side:
+  `MAIN_SHA=$(gh api repos/unjordi/claude-quota-widget/git/refs/heads/main -q .object.sha) && gh
+  api repos/unjordi/claude-quota-widget/git/refs -f ref=refs/heads/develop -f sha="$MAIN_SHA"`
+  (NO pushear a develop localmente — la norma lo prohíbe).
+- **Release `develop → main`:** decisión DELIBERADA que unjordi pide explícito; va **SIN squash**
+  y **lo mergea unjordi** (PR con `--base main`; el hook `merge-squash-guard` bloquea el merge si
+  lo intenta Claude por CLI, pero NO cuando lo corre unjordi directo). No lo hagas tú por chore/docs.
+- Si la rama activa tiene WIP sin commitear, usa **git worktree**. `upstream` (fuziontech) solo
+  para jalar mejoras o PR de vuelta al original.
