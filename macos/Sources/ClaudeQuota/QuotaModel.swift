@@ -16,6 +16,7 @@ struct Snapshot: Codable {
     let updated_at: String?
     let status: String?
     let basis: String?          // "oauth" (datos reales) | "cost" (estimado local)
+    let account_email: String?
     let error: String?
     let five_hour: Bucket?
     let weekly: Bucket?
@@ -27,6 +28,7 @@ struct Stats: Codable {
     let updated_at: String?
     let days: [StatsDay]?
     let models: [StatsModel]?
+    let projects: [StatsProject]?
     let summary: StatsSummary?
 }
 
@@ -37,10 +39,16 @@ struct StatsDay: Codable {
     let tokens: Double?
     let cost: Double?
     let models: [DayModel]?
+    let projects: [DayProject]?
 }
 
 struct DayModel: Codable {
     let model: String?
+    let tokens: Double?
+}
+
+struct DayProject: Codable {
+    let project: String?
     let tokens: Double?
 }
 
@@ -49,6 +57,17 @@ struct StatsModel: Codable {
     let in_tok: Double?
     let out_tok: Double?
     let cost: Double?
+    let tot: Double?
+    let pct: Double?
+}
+
+/// Claude-only usage by project folder (~/.claude/projects/<slug>) — a subset
+/// of the Modelos tab's totals, which also count other locally-detected agent
+/// CLIs (e.g. Gemini) that ccusage aggregates alongside Claude Code.
+struct StatsProject: Codable {
+    let project: String?
+    let in_tok: Double?
+    let out_tok: Double?
     let tot: Double?
     let pct: Double?
 }
@@ -134,13 +153,13 @@ final class QuotaModel: ObservableObject {
         return -date.timeIntervalSinceNow
     }
 
-    /// Footer of the Límites tab (basis · ⟳ 5 min · act. …).
+    /// Footer of the Límites tab (correo · ⟳ 5 min · últ. act. hace: …).
     var footerText: String {
         if let err = loadError, snapshot == nil { return "error: \(err)" }
         guard let snap = snapshot else { return "cargando…" }
         if let err = snap.error { return "error: \(err)" }
-        let basis = snap.basis == "oauth" ? "datos reales" : "estimado local"
-        return "\(basis) · ⟳ 5 min · act. \(RelativeTime.relative(snap.updated_at))"
+        let account = snap.account_email ?? (snap.basis == "oauth" ? "datos reales" : "estimado local")
+        return "\(account) · ⟳ 5 min · últ. act. hace: \(RelativeTime.compactReset(snap.updated_at))"
     }
 
     // MARK: - stats-derived helpers
@@ -154,6 +173,17 @@ final class QuotaModel: ObservableObject {
     func modelHex(_ name: String?) -> String {
         guard let models = stats?.models, let name else { return Self.modelPalette[0] }
         for (i, m) in models.enumerated() where m.model == name {
+            return Self.modelPalette[i % Self.modelPalette.count]
+        }
+        return Self.modelPalette[0]
+    }
+
+    func projectColor(_ name: String?) -> Color {
+        Color(hex: projectHex(name))
+    }
+    func projectHex(_ name: String?) -> String {
+        guard let projects = stats?.projects, let name else { return Self.modelPalette[0] }
+        for (i, p) in projects.enumerated() where p.project == name {
             return Self.modelPalette[i % Self.modelPalette.count]
         }
         return Self.modelPalette[0]

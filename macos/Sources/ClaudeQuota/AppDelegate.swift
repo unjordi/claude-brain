@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 520, height: 340)
+        popover.contentSize = NSSize(width: 520, height: 420)
         popover.contentViewController = NSHostingController(
             rootView: PopoverView(model: model, onRefresh: { [weak self] in self?.forceFetch() })
         )

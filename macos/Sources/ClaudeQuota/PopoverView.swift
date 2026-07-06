@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The click-to-open breakdown, hosted in an NSPopover. Mirrors the plasmoid's
 /// fullRepresentation: a vertical tab rail on the left (Límites / Resumen /
-/// Modelos), a 1px separator, and the tab content on the right.
+/// Modelos / Proyectos), a 1px separator, and the tab content on the right.
 struct PopoverView: View {
     @ObservedObject var model: QuotaModel
     /// Real fetch trigger (launches claude-quota-fetch, then reloads).
@@ -21,7 +21,7 @@ struct PopoverView: View {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(width: 520, height: 340)
+        .frame(width: 520, height: 420)
     }
 
     // MARK: - Rail
@@ -31,6 +31,7 @@ struct PopoverView: View {
             railButton(0, "gauge", "Límites")
             railButton(1, "chart.bar.doc.horizontal", "Resumen")
             railButton(2, "chart.bar", "Modelos")
+            railButton(3, "folder", "Proyectos")
             Spacer()
             HStack(spacing: 6) {
                 Button(action: onRefresh) {
@@ -63,9 +64,14 @@ struct PopoverView: View {
     @ViewBuilder
     private var content: some View {
         switch tab {
-        case 0: limitsTab
-        case 1: resumenTab
-        default: modelosTab
+        case 0:
+            limitsTab
+        case 1:
+            ScrollView(.vertical, showsIndicators: false) { resumenTab }
+        case 2:
+            ScrollView(.vertical, showsIndicators: false) { modelosTab }
+        default:
+            ScrollView(.vertical, showsIndicators: false) { proyectosTab }
         }
     }
 
@@ -210,6 +216,59 @@ struct PopoverView: View {
                             let seg = day.models![j]
                             Rectangle()
                                 .fill(model.modelColor(seg.model))
+                                .frame(height: h * CGFloat((seg.tokens ?? 0) / maxTok))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                }
+            }
+        }
+    }
+
+    // ===== Tab 3: Proyectos =====
+
+    /// Uso de Claude Code por carpeta de proyecto — un subconjunto de Modelos
+    /// (ese tab también cuenta otros CLIs de IA locales que ccusage detecta).
+    private var proyectosTab: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Uso por proyecto").font(.headline)
+            stackedProjectChart.frame(height: 126)
+            VStack(spacing: 6) {
+                ForEach(model.stats?.projects ?? [], id: \.project) { p in
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(model.projectColor(p.project))
+                            .frame(width: 10, height: 10)
+                        Text(p.project ?? "—").fontWeight(.bold).lineLimit(1)
+                        Spacer()
+                        Text("\(Fmt.tok(p.in_tok)) in · \(Fmt.tok(p.out_tok)) out")
+                            .foregroundStyle(label.opacity(0.7))
+                        Text(String(format: "%.1f%%", p.pct ?? 0))
+                            .fontWeight(.bold)
+                            .foregroundStyle(model.projectColor(p.project))
+                            .frame(minWidth: 44, alignment: .trailing)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+    }
+
+    private var stackedProjectChart: some View {
+        let days = model.stats?.days ?? []
+        let maxTok = model.maxDayTokens
+        return GeometryReader { geo in
+            let h = geo.size.height
+            HStack(alignment: .bottom, spacing: 2) {
+                ForEach(days.indices, id: \.self) { i in
+                    let day = days[i]
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        ForEach((day.projects ?? []).indices, id: \.self) { j in
+                            let seg = day.projects![j]
+                            Rectangle()
+                                .fill(model.projectColor(seg.project))
                                 .frame(height: h * CGFloat((seg.tokens ?? 0) / maxTok))
                         }
                     }
