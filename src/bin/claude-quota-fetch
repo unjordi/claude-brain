@@ -67,6 +67,19 @@ account_email() {
   jq -er '.oauthAccount.emailAddress // empty' "$HOME/.claude.json"
 }
 ACCOUNT_EMAIL="$(account_email 2>/dev/null || true)"
+ACCOUNT_UUID="$(jq -er '.oauthAccount.accountUuid // empty' "$HOME/.claude.json" 2>/dev/null || true)"
+
+# Account guard (opt-in): if a pinned account (uuid OR email) is configured in
+# $CLAUDE_QUOTA_ACCOUNT (default ~/.config/claude-quota/account) and the active
+# account differs, flag a mismatch so the UI warns — the CLI + Claude.app share
+# one credential slot and a re-login can silently switch identities.
+ACCOUNT_PIN_FILE="${CLAUDE_QUOTA_ACCOUNT:-$HOME/.config/claude-quota/account}"
+ACCOUNT_PIN=""
+[[ -r "$ACCOUNT_PIN_FILE" ]] && ACCOUNT_PIN="$(head -n1 "$ACCOUNT_PIN_FILE" | tr -d '[:space:]')"
+ACCOUNT_MISMATCH=false
+if [[ -n "$ACCOUNT_PIN" && "$ACCOUNT_PIN" != "$ACCOUNT_UUID" && "$ACCOUNT_PIN" != "$ACCOUNT_EMAIL" ]]; then
+  ACCOUNT_MISMATCH=true
+fi
 
 USAGE_JSON=""
 if TOKEN="$(oauth_token 2>/dev/null)" && [[ -n "$TOKEN" ]]; then
@@ -143,6 +156,8 @@ jq -n \
   --arg prev_week_reset "$PREV_WEEK_RESET" \
   --arg prev_five_reset "$PREV_FIVE_RESET" \
   --arg email "$ACCOUNT_EMAIL" \
+  --arg account_uuid "$ACCOUNT_UUID" \
+  --argjson account_mismatch "$ACCOUNT_MISMATCH" \
   --argjson five_cap "$FIVE_HOUR_CAP_USD" \
   --argjson week_cap "$WEEKLY_CAP_USD" \
   --argjson warn "$WARN_PCT" \
@@ -177,6 +192,8 @@ jq -n \
       status: $status,
       basis: (if $usage != null then "oauth" else "cost" end),
       account_email: (if $email != "" then $email else null end),
+      account_uuid: (if $account_uuid != "" then $account_uuid else null end),
+      account_mismatch: $account_mismatch,
       error: null,
       five_hour: (if ($usage != null or $blocks != null) then {
         percent: round1($five_pct),

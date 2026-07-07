@@ -85,7 +85,8 @@ struct PopoverView: View {
             Spacer(minLength: 0)
             Text(model.footerText)
                 .font(.caption)
-                .foregroundStyle(label.opacity(0.5))
+                .fontWeight(model.accountMismatch ? .bold : .regular)
+                .foregroundStyle(model.accountMismatch ? Color(hex: "#dc3545") : label.opacity(0.5))
         }
         .padding(16)
     }

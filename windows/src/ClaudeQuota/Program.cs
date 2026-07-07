@@ -195,6 +195,25 @@ internal static class Program
             menu.Items.Add(auto);
 
             menu.Items.Add(new ToolStripSeparator());
+
+            // Account guard: pin the active account so a silent flip (the shared
+            // credential slot switching identities) shows a ⚠ instead of wrong data.
+            var pin = new ToolStripMenuItem("Fijar esta cuenta");
+            pin.Click += (_, _) => { PinCurrentAccount(); RunFetch(force: true); };
+            menu.Items.Add(pin);
+            var unpin = new ToolStripMenuItem("Quitar cuenta fijada");
+            unpin.Click += (_, _) => { UnpinAccount(); RunFetch(force: true); };
+            menu.Items.Add(unpin);
+            menu.Opening += (_, _) =>
+            {
+                bool pinned = QuotaService.ReadAccountPin() != null;
+                pin.Enabled = !pinned;
+                unpin.Enabled = pinned;
+                pin.Text = _svc.Snapshot?.AccountEmail is string e && !pinned
+                    ? $"Fijar esta cuenta ({e})" : "Fijar esta cuenta";
+            };
+
+            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Salir", null, (_, _) => ExitApp());
             return menu;
         }
@@ -207,6 +226,27 @@ internal static class Program
             TrayIconRenderer.Release(_iconHandle);
             _tray.Dispose();
             ExitThread();
+        }
+
+        // ---- account guard (pin file) ----
+
+        private void PinCurrentAccount()
+        {
+            // Prefer the stable uuid; fall back to email; last resort no-op.
+            string? id = _svc.Snapshot?.AccountUuid ?? _svc.Snapshot?.AccountEmail;
+            if (string.IsNullOrEmpty(id)) return;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(QuotaService.AccountPinFile)!);
+                File.WriteAllText(QuotaService.AccountPinFile, id);
+            }
+            catch { }
+        }
+
+        private static void UnpinAccount()
+        {
+            try { if (File.Exists(QuotaService.AccountPinFile)) File.Delete(QuotaService.AccountPinFile); }
+            catch { }
         }
 
         // ---- autostart (registry Run key) ----

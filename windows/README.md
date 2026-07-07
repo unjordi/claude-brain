@@ -78,6 +78,19 @@ autostart entry, and launches it. Re-run any time to update in place.
 
 **Build prerequisite:** [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
+## Account guard (opt-in)
+
+Claude Code and the Claude desktop app can share a single OS credential slot, so a
+re-login on either can silently switch which account the widget reads. To catch
+that, **pin the expected account**: right-click the tray icon → **Fijar esta
+cuenta** (writes the active account's UUID to `%LOCALAPPDATA%\claude-quota\account`).
+If the active account ever differs from the pinned one, the footer turns red with a
+`⚠ … no es la cuenta fijada` warning and the tooltip shows `⚠ otra cuenta`.
+**Quitar cuenta fijada** removes the pin. The file may hold a UUID or an email.
+
+All three platforms share this guard (Linux/macOS read the same pin from
+`~/.config/claude-quota/account`, overridable via `$CLAUDE_QUOTA_ACCOUNT`).
+
 ## Uninstall
 
 ```powershell

@@ -206,9 +206,10 @@ public sealed class PopupForm : Form
         y += Sc(14);
         y = UsageSection(g, pad, y, "Semanal (7 d)", _svc.Snapshot?.Weekly);
 
-        // footer at the bottom
-        using var fFont = Px(10f, FontStyle.Regular);
-        using var fBrush = new SolidBrush(Blend(_bg, _fg, 0.5));
+        // footer at the bottom (red when the pinned account doesn't match)
+        bool mismatch = _svc.Snapshot?.AccountMismatch == true;
+        using var fFont = Px(10f, mismatch ? FontStyle.Bold : FontStyle.Regular);
+        using var fBrush = new SolidBrush(mismatch ? Fmt.Hex(Fmt.Danger) : Blend(_bg, _fg, 0.5));
         var fr = new RectangleF(pad, _content.Height - Sc(24), _content.Width - pad * 2, Sc(20));
         g.DrawString(_svc.FooterText, fFont, fBrush, fr);
     }

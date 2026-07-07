@@ -17,6 +17,8 @@ struct Snapshot: Codable {
     let status: String?
     let basis: String?          // "oauth" (datos reales) | "cost" (estimado local)
     let account_email: String?
+    let account_uuid: String?
+    let account_mismatch: Bool?   // cuenta fijada ≠ cuenta activa (guardia de identidad)
     let error: String?
     let five_hour: Bucket?
     let weekly: Bucket?
@@ -143,8 +145,12 @@ final class QuotaModel: ObservableObject {
         if statusKey == "error" { return "Claude Limits — sin datos" }
         let five = fivePct.map { "\(Int($0.rounded()))%" } ?? "—"
         let wk   = weekPct.map { "\(Int($0.rounded()))%" } ?? "—"
-        return "Claude: 5h \(five) · 7d \(wk)"
+        let warn = accountMismatch ? " ⚠ otra cuenta" : ""
+        return "Claude: 5h \(five) · 7d \(wk)\(warn)"
     }
+
+    /// Whether the active account differs from the pinned one (account guard).
+    var accountMismatch: Bool { snapshot?.account_mismatch ?? false }
 
     /// Age of the snapshot in seconds, or nil if unknown/unparseable.
     var ageSeconds: Double? {
@@ -159,6 +165,9 @@ final class QuotaModel: ObservableObject {
         guard let snap = snapshot else { return "cargando…" }
         if let err = snap.error { return "error: \(err)" }
         let account = snap.account_email ?? (snap.basis == "oauth" ? "datos reales" : "estimado local")
+        if snap.account_mismatch == true {
+            return "⚠ \(account) no es la cuenta fijada · ⟳ 5 min · act. hace: \(RelativeTime.compactReset(snap.updated_at))"
+        }
         return "\(account) · ⟳ 5 min · últ. act. hace: \(RelativeTime.compactReset(snap.updated_at))"
     }
 

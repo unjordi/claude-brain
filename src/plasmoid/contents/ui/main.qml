@@ -250,12 +250,20 @@ PlasmoidItem {
                 UsageSection { Layout.fillWidth: true; title: "Semanal (7 d)"; block: root.snapshot ? root.snapshot.weekly : null }
                 Item { Layout.fillHeight: true }
                 PC3.Label {
-                    Layout.fillWidth: true; opacity: 0.5; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                    Layout.fillWidth: true; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                    readonly property bool mismatch: root.snapshot && root.snapshot.account_mismatch === true
+                    opacity: mismatch ? 1.0 : 0.5
+                    font.bold: mismatch
+                    color: mismatch ? "#dc3545" : Kirigami.Theme.textColor
                     text: {
                         if (root.snapshotError) return "error: " + root.snapshotError
                         if (!root.snapshot) return "cargando…"
-                        const basis = root.snapshot.basis === "oauth" ? "datos reales" : "estimado local"
-                        return basis + " · ⟳ 5 min · act. " + root.relativeTime(root.snapshot.updated_at)
+                        const account = root.snapshot.account_email
+                            ? root.snapshot.account_email
+                            : (root.snapshot.basis === "oauth" ? "datos reales" : "estimado local")
+                        if (root.snapshot.account_mismatch === true)
+                            return "⚠ " + account + " no es la cuenta fijada · ⟳ 5 min · act. " + root.relativeTime(root.snapshot.updated_at)
+                        return account + " · ⟳ 5 min · act. " + root.relativeTime(root.snapshot.updated_at)
                     }
                 }
             }
@@ -435,7 +443,8 @@ PlasmoidItem {
         if (statusKey === "error") return "Claude Limits — sin datos"
         const five = fivePct >= 0 ? Math.round(fivePct) + "%" : "—"
         const wk   = weekPct >= 0 ? Math.round(weekPct) + "%" : "—"
-        return "Claude: 5h " + five + " · 7d " + wk
+        const warn = (snapshot && snapshot.account_mismatch === true) ? " ⚠ otra cuenta" : ""
+        return "Claude: 5h " + five + " · 7d " + wk + warn
     }
     toolTipSubText: snapshot && snapshot.five_hour
                     ? "sesión se restablece " + relativeTime(snapshot.five_hour.resets_at) : ""

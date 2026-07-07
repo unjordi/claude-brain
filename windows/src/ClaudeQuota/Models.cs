@@ -24,6 +24,9 @@ public sealed class Snapshot
     [JsonPropertyName("status")]        public string? Status { get; set; }
     [JsonPropertyName("basis")]         public string? Basis { get; set; }   // "oauth" | "cost"
     [JsonPropertyName("account_email")] public string? AccountEmail { get; set; }
+    [JsonPropertyName("account_uuid")]  public string? AccountUuid { get; set; }
+    // True when an account is pinned (config file) and the active one differs.
+    [JsonPropertyName("account_mismatch")] public bool AccountMismatch { get; set; }
     [JsonPropertyName("error")]         public string? Error { get; set; }
     [JsonPropertyName("five_hour")]     public Bucket? FiveHour { get; set; }
     [JsonPropertyName("weekly")]        public Bucket? Weekly { get; set; }

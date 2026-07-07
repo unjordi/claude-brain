@@ -11,6 +11,7 @@
 [CmdletBinding()]
 param(
     [switch]$NoAutostart,
+    [switch]$NoLaunch,          # build + install but don't launch (e.g. from an elevated installer)
     [string]$Configuration = 'Release'
 )
 
@@ -46,8 +47,12 @@ if ($NoAutostart) {
     Write-Host "==> Autoarranque: activado (inicia con Windows)" -ForegroundColor Green
 }
 
-Write-Host "==> Lanzando..." -ForegroundColor Cyan
-Start-Process $exe
+if ($NoLaunch) {
+    Write-Host "==> Instalado (sin lanzar; arranca en el proximo inicio de sesion)." -ForegroundColor Cyan
+} else {
+    Write-Host "==> Lanzando..." -ForegroundColor Cyan
+    Start-Process $exe
+}
 
 Write-Host ""
 Write-Host "Listo. El icono de 2 barras (5h / 7d) aparece en la bandeja." -ForegroundColor Green

@@ -34,6 +34,9 @@ public sealed class QuotaService
                      "claude-quota");
     public static string StateFile => Path.Combine(CacheDir, "state.json");
     public static string StatsFile => Path.Combine(CacheDir, "stats.json");
+    /// Optional pinned account (uuid or email) — the account-guard config.
+    /// If present and the active account differs, the UI warns of a mismatch.
+    public static string AccountPinFile => Path.Combine(CacheDir, "account");
     private static string CredentialsFile => Path.Combine(Home, ".claude", ".credentials.json");
     private static string ProjectsDir => Path.Combine(Home, ".claude", "projects");
 
@@ -66,7 +69,8 @@ public sealed class QuotaService
             if (StatusKey == "error") return "Claude Limits — sin datos";
             string five = FivePct is double f ? $"{(int)Math.Round(f)}%" : "—";
             string wk = WeekPct is double w ? $"{(int)Math.Round(w)}%" : "—";
-            return $"Claude: 5h {five} · 7d {wk}";
+            string warn = Snapshot?.AccountMismatch == true ? " ⚠ otra cuenta" : "";
+            return $"Claude: 5h {five} · 7d {wk}{warn}";
         }
     }
 
@@ -88,6 +92,8 @@ public sealed class QuotaService
             if (Snapshot.Error is string e) return $"error: {e}";
             string account = Snapshot.AccountEmail
                 ?? (Snapshot.Basis == "oauth" ? "datos reales" : "estimado local");
+            if (Snapshot.AccountMismatch)
+                return $"⚠ {account} no es la cuenta fijada · ⟳ 5 min · act. hace: {Rel.CompactReset(Snapshot.UpdatedAt)}";
             return $"{account} · ⟳ 5 min · últ. act. hace: {Rel.CompactReset(Snapshot.UpdatedAt)}";
         }
     }
@@ -122,7 +128,8 @@ public sealed class QuotaService
         Directory.CreateDirectory(CacheDir);
 
         OAuthUsage? usage = await TryOAuthAsync();
-        string? email = ReadAccountEmail();
+        var (uuid, email) = ReadAccount();
+        bool mismatch = ComputeMismatch(uuid, email);
         Stats stats = BuildLocalStats();      // transcripts → tokens/models/projects
         await EnrichCostAsync(stats);         // ccusage (best-effort) → $
 
@@ -142,6 +149,8 @@ public sealed class QuotaService
                 Status = StatusFor(Math.Max(five, week)),
                 Basis = "oauth",
                 AccountEmail = email,
+                AccountUuid = uuid,
+                AccountMismatch = mismatch,
                 Error = null,
                 FiveHour = new Bucket
                 {
@@ -163,9 +172,17 @@ public sealed class QuotaService
         else if (File.Exists(StateFile))
         {
             // OAuth unreachable this run — keep the last good state.json (its
-            // real %/resets, now aging) rather than blanking the UI. Without
-            // ccusage there's no cost-basis fallback to recompute from.
+            // real %/resets, now aging) rather than blanking the UI. Still
+            // refresh the account fields (read locally, so the mismatch guard
+            // stays live even while the % ages).
             Reload();
+            if (Snapshot != null)
+            {
+                Snapshot.AccountEmail = email;
+                Snapshot.AccountUuid = uuid;
+                Snapshot.AccountMismatch = mismatch;
+                WriteAtomic(StateFile, JsonSerializer.Serialize(Snapshot, JsonOpts));
+            }
         }
         else
         {
@@ -175,6 +192,8 @@ public sealed class QuotaService
                 Status = "error",
                 Basis = "cost",
                 AccountEmail = email,
+                AccountUuid = uuid,
+                AccountMismatch = mismatch,
                 Error = "sin credenciales OAuth o endpoint /usage inalcanzable",
                 FiveHour = null,
                 Weekly = null,
@@ -246,26 +265,53 @@ public sealed class QuotaService
         return null;
     }
 
-    /// Account email (display only) from Claude Code's own config — not in the
-    /// OAuth token, so read separately and best-effort. Shown in the footer.
-    private static string? ReadAccountEmail()
+    /// Active account (uuid + email) from Claude Code's own config — not in the
+    /// OAuth token, so read separately and best-effort. Shown in the footer and
+    /// used by the account-mismatch guard.
+    private static (string? uuid, string? email) ReadAccount()
     {
         try
         {
             string path = Path.Combine(Home, ".claude.json");
-            if (!File.Exists(path)) return null;
+            if (!File.Exists(path)) return (null, null);
             using var doc = JsonDocument.Parse(File.ReadAllText(path));
             if (doc.RootElement.TryGetProperty("oauthAccount", out var acc) &&
-                acc.ValueKind == JsonValueKind.Object &&
-                acc.TryGetProperty("emailAddress", out var em) &&
-                em.ValueKind == JsonValueKind.String)
+                acc.ValueKind == JsonValueKind.Object)
             {
-                var s = em.GetString();
-                return string.IsNullOrEmpty(s) ? null : s;
+                string? uuid = Str(acc, "accountUuid");
+                string? email = Str(acc, "emailAddress");
+                return (uuid, email);
             }
         }
         catch { }
-        return null;
+        return (null, null);
+
+        static string? Str(JsonElement o, string k) =>
+            o.TryGetProperty(k, out var e) && e.ValueKind == JsonValueKind.String &&
+            !string.IsNullOrEmpty(e.GetString()) ? e.GetString() : null;
+    }
+
+    /// The pinned account (uuid or email) the user expects, or null if unset.
+    public static string? ReadAccountPin()
+    {
+        try
+        {
+            if (!File.Exists(AccountPinFile)) return null;
+            var s = File.ReadAllText(AccountPinFile).Trim();
+            return string.IsNullOrEmpty(s) ? null : s;
+        }
+        catch { return null; }
+    }
+
+    /// True iff an account is pinned and neither the active uuid nor email matches.
+    private static bool ComputeMismatch(string? uuid, string? email)
+    {
+        string? pin = ReadAccountPin();
+        if (string.IsNullOrEmpty(pin)) return false;
+        bool matches =
+            (uuid != null && string.Equals(uuid, pin, StringComparison.OrdinalIgnoreCase)) ||
+            (email != null && string.Equals(email, pin, StringComparison.OrdinalIgnoreCase));
+        return !matches;
     }
 
     // ---- 2. transcripts → local stats -------------------------------------
