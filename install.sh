@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Install the Claude Code quota widget for the current user.
 #
-#   ./install.sh              # full install (script + systemd + plasmoid)
+#   ./install.sh              # full install (brain + fetch script + systemd + plasmoid)
 #   ./install.sh --reinstall  # uninstall plasmoid first, then reinstall
-#   ./install.sh --no-plasmoid # only install the script + systemd timer
+#   ./install.sh --no-plasmoid # only the brain + fetch script + systemd timer (no GUI)
+#   ./install.sh --no-gui      # alias of --no-plasmoid (skip the desktop widget)
+#   ./install.sh --no-brain    # skip the Claude-Code brain (hooks/norms); only daemon + GUI
 #
+# This is the MASTER installer for claude-brain: it lays down the shared Claude-Code brain
+# (global hooks, delegation-cost governance, skill, norms) AND the quota daemon + optional GUI.
 # Idempotent.
 
 set -euo pipefail
@@ -14,6 +18,7 @@ BIN_SRC="$ROOT/src/bin/claude-quota-fetch"
 UNIT_SRC="$ROOT/src/systemd"
 PLASMOID_SRC="$ROOT/src/plasmoid"
 PLASMOID_ID="io.github.unjordi.claude-quota-widget"
+BRAIN_INSTALLER="$ROOT/brain/install-brain.sh"
 
 BIN_DEST="$HOME/.local/bin/claude-quota-fetch"
 UNIT_DEST="$HOME/.config/systemd/user"
@@ -22,14 +27,26 @@ LIMITS_DEFAULT="$HOME/.config/claude-quota/limits.env"
 REINSTALL=0
 SKIP_PLASMOID=0
 SKIP_CCUSAGE=0
+SKIP_BRAIN=0
 for arg in "$@"; do
   case "$arg" in
     --reinstall)    REINSTALL=1 ;;
     --no-plasmoid)  SKIP_PLASMOID=1 ;;
+    --no-gui)       SKIP_PLASMOID=1 ;;
+    --no-brain)     SKIP_BRAIN=1 ;;
     --no-ccusage)   SKIP_CCUSAGE=1 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
+
+if [[ "$SKIP_BRAIN" -eq 0 ]]; then
+  if [[ -f "$BRAIN_INSTALLER" ]]; then
+    echo "==> Installing the Claude-Code brain (global hooks, delegation-cost governance, norms)"
+    bash "$BRAIN_INSTALLER"
+  else
+    echo "==> (brain installer not found at $BRAIN_INSTALLER — skipping)"
+  fi
+fi
 
 echo "==> Checking prerequisites"
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing: $1" >&2; exit 1; }; }
@@ -121,6 +138,9 @@ fi
 cat <<EOF
 
 Done.
+
+The Claude-Code brain is installed globally (hooks + delegation-cost governance + norms in
+  ~/.claude). See README.md; re-run any time (idempotent). Skip it with --no-brain.
 
 Next steps:
   - Right-click your Plasma panel -> Add or Manage Widgets -> search "Claude Code Quota"

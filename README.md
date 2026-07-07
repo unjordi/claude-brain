@@ -1,6 +1,56 @@
-# Claude Code Quota Widget
+# claude-brain
 
-A KDE Plasma 6 widget for Linux that puts your Claude Code subscription usage in your panel. Color-coded pill that turns green → amber → red as you approach the cap; click for the full breakdown.
+**The master installer and canonical home of the shared, GLOBAL Claude Code brain** — generic
+guardrail hooks, delegation-cost governance, a definition of "done", team git norms, *and* a quota
+daemon with an optional desktop GUI. One `./install.sh` and your machine gets the guardrails, the
+usage daemon, and (optionally) the widget.
+
+> **Naming:** this repo is still published as `claude-quota-widget`; it will be **renamed to
+> `claude-brain`** as the final publish step. The quota widget lives on as one (optional) face of the
+> brain — the color-coded panel/menu-bar pill you see below.
+
+The brain is **not proprietary**: it ships no project-specific skills (no .NET, no company repos) —
+only stack-agnostic hooks, norms, and one generic `cerrar-slice` skill that any project can adopt.
+
+## What the brain installs (globally, in `~/.claude`)
+
+`./install.sh` runs [`brain/install-brain.sh`](brain/install-brain.sh) (skip with `--no-brain`), which
+is idempotent and OS-agnostic (all hooks run under bash — macOS, Linux, Windows/Git Bash). It lays down:
+
+- **Git guardrails** — `git-branch-guard` (blocks `git push`/merge to `develop`/`main`, redirects to
+  the branch→MR→develop flow), `merge-squash-guard` (forces `--squash` when integrating a branch into
+  develop), `confirmar-merge-develop` (demands explicit user confirmation before integrating to
+  develop, super-explicit authorization for a release to `main`).
+- **Delegation-cost governance** — when Claude recruits a sub-agent (`Task`), `delegacion-gate` asks
+  for consent by cost tier: **free** (local model), **included** (Claude *inside* your 5-hour window —
+  no marginal cost), or **metered** (Claude in overage, paid external API, or unknown). Free/included
+  ask **once per machine**; metered asks **once per workflow**. The prompt reads the quota daemon's
+  snapshot and shows your real window state, e.g. `Ventana 5h: 19% ($2.48 de $45; 3.7M tokens)`. Tiers
+  are configured in [`brain/hooks/agentes-costo.json`](brain/hooks/agentes-costo.json) (window
+  threshold default 95%); unknown agents default to metered (conservative).
+- **Session hygiene** (repo-scoped source, copy into each repo's `.claude/`) — `sesion-inicio`
+  (rehydrates branch + norms + memory at session start), `precompact-volcar-estado` (dumps state to
+  memory before context compaction), `dod-verificar` (Stop hook enforcing the definition of "done").
+- **The definition of "LISTO" (done)** — a hard, mutual norm: nothing is "done/working/in production"
+  unless (1) the user confirmed the functionality, or (2) the user expressly authorized closing it.
+  *Green build ≠ done.* Injected into `~/.claude/CLAUDE.md` (idempotent, marker-guarded) alongside the
+  git flow, the mini-develop model, and the delegation-consent norm.
+- **`cerrar-slice` skill** + a **brain dashboard** seed for the machine's global memory.
+
+Repo-scoped hooks (`sesion-inicio`, `precompact-volcar-estado`, `dod-verificar`,
+`confirmar-merge-develop`) are **not** installed globally — they live in
+[`brain/hooks/`](brain/hooks/) as the source each repo copies into its own `.claude/` and wires in its
+own `settings.json` (a repo's hooks load only when a session *starts* in that repo).
+
+> **Prerequisite for the guards:** `jq`. Without it the hooks **fail open** (they don't block) and the
+> installer can't wire `settings.json`. On Windows you also need Git for Windows (bash + coreutils).
+
+---
+
+## The quota daemon + widget (the optional GUI)
+
+A background daemon polls Anthropic's OAuth `/usage` and a small GUI shows a color-coded pill that
+turns green → amber → red as you approach the cap; click for the full breakdown.
 
 ![Panel pill + popup](screenshots/panel-and-popup.png)
 
@@ -105,7 +155,9 @@ The dollar values shown in the popup are **API-equivalent** cost (what you'd hav
 ```sh
 git clone https://github.com/unjordi/claude-quota-widget
 cd claude-quota-widget
-./install.sh
+./install.sh                 # brain + quota daemon + KDE widget (the full master install)
+./install.sh --no-gui        # brain + daemon only (skip the desktop widget)
+./install.sh --no-brain      # daemon + widget only (skip the Claude-Code brain)
 ```
 
 Or with [just](https://github.com/casey/just):
@@ -114,7 +166,7 @@ Or with [just](https://github.com/casey/just):
 just install
 ```
 
-Then in Plasma: right-click your panel → **Add or Manage Widgets…** → search **"Claude Code Quota"** → drag it onto the panel.
+Then in Plasma: right-click your panel → **Add or Manage Widgets…** → search **"Claude Code Quota"** → drag it onto the panel. (On macOS the equivalent flags live in [`macos/install.sh`](macos/install.sh): `--no-gui` / `--no-brain`.)
 
 ## Tuning the fallback caps
 

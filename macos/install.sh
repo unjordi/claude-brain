@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Install the macOS Claude Code quota menu-bar app for the current user.
 #
-#   ./install.sh              # full install (fetch script + launchd agent + app)
-#   ./install.sh --no-app     # only the fetch script + launchd agent (headless)
+#   ./install.sh              # full install (brain + fetch script + launchd agent + app)
+#   ./install.sh --no-app     # only the brain + fetch script + launchd agent (headless)
+#   ./install.sh --no-gui     # alias of --no-app (skip the menu-bar app)
+#   ./install.sh --no-brain   # skip the Claude-Code brain (hooks/norms); only daemon + app
 #   ./install.sh --no-ccusage # don't npm-install ccusage; fall back to npx at runtime
 #
+# This is the macOS MASTER installer for claude-brain: it lays down the shared Claude-Code brain
+# (global hooks, delegation-cost governance, skill, norms) AND the quota daemon + optional app.
 # Idempotent.
 
 set -euo pipefail
@@ -13,6 +17,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 FETCH_SRC="$ROOT/bin/claude-quota-fetch"
 PLIST_SRC="$ROOT/launchd/io.github.unjordi.claude-quota.plist"
 LABEL="io.github.unjordi.claude-quota"
+BRAIN_INSTALLER="$ROOT/../brain/install-brain.sh"
 
 FETCH_DEST="$HOME/.local/bin/claude-quota-fetch"
 PLIST_DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -22,13 +27,25 @@ STATE_FILE="$HOME/Library/Caches/claude-quota/state.json"
 
 SKIP_APP=0
 SKIP_CCUSAGE=0
+SKIP_BRAIN=0
 for arg in "$@"; do
   case "$arg" in
     --no-app)      SKIP_APP=1 ;;
+    --no-gui)      SKIP_APP=1 ;;
+    --no-brain)    SKIP_BRAIN=1 ;;
     --no-ccusage)  SKIP_CCUSAGE=1 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
+
+if [[ "$SKIP_BRAIN" -eq 0 ]]; then
+  if [[ -f "$BRAIN_INSTALLER" ]]; then
+    echo "==> Installing the Claude-Code brain (global hooks, delegation-cost governance, norms)"
+    bash "$BRAIN_INSTALLER"
+  else
+    echo "==> (brain installer not found at $BRAIN_INSTALLER — skipping)"
+  fi
+fi
 
 echo "==> Checking prerequisites"
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing: $1" >&2; exit 1; }; }
@@ -117,6 +134,9 @@ fi
 cat <<EOF
 
 Done.
+
+The Claude-Code brain is installed globally (hooks + delegation-cost governance + norms in
+  ~/.claude). See ../README.md; re-run any time (idempotent). Skip it with --no-brain.
 
 Next steps:
   - Look for the colored % pill in your menu bar (top-right). Click it for the breakdown.

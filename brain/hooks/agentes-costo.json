@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "umbral_ventana_pct": 95,
+  "default": "token",
+  "_comentario": "Clasifica agentes por COSTO en 3 niveles resueltos por el hook: 'local'=gratis; 'claude'=incluido si el uso de la ventana 5h < umbral_ventana_pct (si no, overage=con costo); 'externo'/'token'/desconocido=con costo. 'umbral_ventana_pct' es configurable por compu (el bootstrap puede setearlo; default 95). El regex 'match' se evalúa case-insensitive contra 'subagent_type model'. Marca un agente local agregando una regla clase:'local' con una 'firma' estable (si un agente pasa de gratis a con costo, cambia su firma o su clase → se vuelve a preguntar). NO hace falta tocar los hooks al salir/entrar modelos: lo nuevo cae en 'default' (con costo → pregunta) hasta que lo clasifiques aquí.",
+  "reglas": [
+    { "match": "\\b(opus|sonnet|haiku|fable|claude[-_])", "clase": "claude", "firma": "anthropic-suscripcion", "_nota": "Claude vía suscripción: incluido dentro de la ventana 5h; overage = con costo" },
+    { "match": "\\b(gpt|o[0-9]|openai|gemini|grok|mistral-api|deepseek-api)\\b", "clase": "externo", "firma": "api-externa", "_nota": "APIs externas de pago por token" },
+    { "match": "ollama|lm[-_ ]?studio|llama[._ ]?cpp|localhost|127\\.0\\.0\\.1|:local\\b|-local\\b", "clase": "local", "firma": "local-gratis-v1", "_nota": "modelos que corren en la máquina, sin costo por token" }
+  ]
+}
