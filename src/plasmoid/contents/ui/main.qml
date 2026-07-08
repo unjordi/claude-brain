@@ -378,29 +378,36 @@ PlasmoidItem {
                         }
                     }
                 }
-                // tabla de modelos
-                ColumnLayout {
-                    Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
-                    Repeater {
-                        model: root.stats ? root.stats.models : []
-                        delegate: RowLayout {
-                            Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
-                            Rectangle { width: 10; height: 10; radius: 2; color: root.modelColorFor(modelData.model) }
-                            PC3.Label { text: root.prettyModel(modelData.model); font.bold: true }
-                            Item { Layout.fillWidth: true }
-                            PC3.Label {
-                                opacity: 0.7
-                                text: root.fmtTok(modelData.in_tok) + " in · " + root.fmtTok(modelData.out_tok) + " out"
-                            }
-                            PC3.Label {
-                                text: modelData.pct.toFixed(1) + "%"; font.bold: true
-                                color: root.modelColorFor(modelData.model)
-                                Layout.minimumWidth: Kirigami.Units.gridUnit * 2.5; horizontalAlignment: Text.AlignRight
+                // tabla de modelos — scrolleable: muchos modelos → scroll interno,
+                // popup de tamaño estable (no crece ni se corta la lista).
+                PC3.ScrollView {
+                    id: modelsScroll
+                    Layout.fillWidth: true; Layout.fillHeight: true
+                    contentWidth: availableWidth   // sin scroll horizontal
+                    clip: true
+                    ColumnLayout {
+                        width: modelsScroll.availableWidth
+                        spacing: Kirigami.Units.smallSpacing
+                        Repeater {
+                            model: root.stats ? root.stats.models : []
+                            delegate: RowLayout {
+                                Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                                Rectangle { width: 10; height: 10; radius: 2; color: root.modelColorFor(modelData.model) }
+                                PC3.Label { text: root.prettyModel(modelData.model); font.bold: true }
+                                Item { Layout.fillWidth: true }
+                                PC3.Label {
+                                    opacity: 0.7
+                                    text: root.fmtTok(modelData.in_tok) + " in · " + root.fmtTok(modelData.out_tok) + " out"
+                                }
+                                PC3.Label {
+                                    text: modelData.pct.toFixed(1) + "%"; font.bold: true
+                                    color: root.modelColorFor(modelData.model)
+                                    Layout.minimumWidth: Kirigami.Units.gridUnit * 2.5; horizontalAlignment: Text.AlignRight
+                                }
                             }
                         }
                     }
                 }
-                Item { Layout.fillHeight: true }
             }
         }
     }
