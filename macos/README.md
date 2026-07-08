@@ -126,6 +126,16 @@ this figure ~10×, so a heavy week can read as hundreds of API-equivalent dollar
 
 ## Install
 
+**Self-contained (pulls its own deps — recommended):**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/unjordi/claude-brain/main/bootstrap.sh | bash
+```
+
+`bootstrap.sh` installs any missing `jq`/`node` via Homebrew, clones the repo to `~/claude-brain`,
+and runs the top-level `install.sh`. (It won't auto-install Homebrew itself, and asks you to run
+`xcode-select --install` if `swift` is missing.) **Or by hand** from the repo:
+
 ```sh
 cd macos
 ./install.sh

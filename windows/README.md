@@ -65,6 +65,17 @@ not an invoice. They're local to this machine's transcripts.
 
 ## Install
 
+**Self-contained (pulls its own deps via winget — recommended):**
+
+```powershell
+irm https://raw.githubusercontent.com/unjordi/claude-brain/main/bootstrap.ps1 | iex
+```
+
+`bootstrap.ps1` winget-installs anything missing (Git — brings Git Bash, jq, .NET 10 SDK, Node),
+clones the repo to `%USERPROFILE%\claude-brain`, and runs the brain + widget installers. If winget
+just installed something, open a fresh terminal and re-run so the new `PATH` is visible. **Or by
+hand** from the repo:
+
 ```powershell
 cd windows
 pwsh -File install.ps1              # build, install, autostart, launch

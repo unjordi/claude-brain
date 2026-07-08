@@ -6,6 +6,17 @@ va lo fino de KDE.
 
 ## Instalar
 
+**Autocontenido (jala las deps solo — recomendado):**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/unjordi/claude-brain/main/bootstrap.sh | bash
+# variantes: … | bash -s -- --no-gui   (cerebro+daemon, sin widget)
+#            … | bash -s -- --no-brain (daemon+widget, sin cerebro)
+```
+
+El `bootstrap.sh` instala lo que falte (`git`, `jq`, `node`) con tu gestor de paquetes, clona el
+repo en `~/claude-brain` y corre `install.sh`. **O a mano** (si ya tienes los prereqs):
+
 ```sh
 git clone https://github.com/unjordi/claude-brain
 cd claude-brain
