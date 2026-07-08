@@ -32,9 +32,11 @@ struct PopoverView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(width: 520, height: 420)
-        // Chequea updates al ABRIR el popover (no solo al entrar a Cerebro) → el badge del riel
-        // se entera aunque no abras esa pestaña. Throttle 15 min adentro.
+        // Al ABRIR el popover (no solo al entrar a Cerebro): chequea updates Y lee el estado del
+        // cerebro, para que el riel avise —sin abrir la pestaña— si hay versión nueva (⬆) o si al
+        // cerebro le falta una pieza (🩹). Throttle 15 min en el chequeo de red.
         .task { await updater.checkIfStale() }
+        .onAppear { brainState = BrainInspector.inspect() }
     }
 
     // MARK: - Rail
@@ -45,7 +47,7 @@ struct PopoverView: View {
             railButton(1, "chart.bar.doc.horizontal", "Resumen")
             railButton(2, "chart.bar", "Modelos")
             railButton(3, "folder", "Proyectos")
-            railButton(4, "brain", "Cerebro", badge: updater.updateAvailable)
+            railButton(4, "brain", "Cerebro", badge: updater.updateAvailable, heal: brainIncomplete)
             Spacer()
             HStack(spacing: 6) {
                 Button(action: onRefresh) {
@@ -69,8 +71,17 @@ struct PopoverView: View {
     }
 
     @ViewBuilder
-    private func railButton(_ idx: Int, _ system: String, _ text: String, badge: Bool = false) -> some View {
-        RailButton(idx: idx, system: system, text: text, tab: $tab, badge: badge)
+    private func railButton(_ idx: Int, _ system: String, _ text: String, badge: Bool = false, heal: Bool = false) -> some View {
+        RailButton(idx: idx, system: system, text: text, tab: $tab, badge: badge, heal: heal)
+    }
+
+    /// true si a alguna pieza GLOBAL del cerebro le falta estar instalada (según el ~/.claude real).
+    /// Alimenta el 🩹 del riel — el mismo criterio que el recuadro de salud de la pestaña Cerebro.
+    private var brainIncomplete: Bool {
+        guard let st = brainState else { return false }
+        return brainTiers.flatMap { $0.items.map(\.name) }
+            .map { status($0, st) }
+            .contains { $0 != .installed && $0 != .repoScoped }
     }
 
     // MARK: - Content
@@ -767,18 +778,34 @@ private struct RailButton: View {
     let system: String
     let text: String
     @Binding var tab: Int
-    /// Muestra el ⬆ de "hay actualización" en la etiqueta (mismo ícono del botón de update).
+    /// ⬆ "hay actualización del widget" (mismo ícono del botón de update).
     var badge: Bool = false
+    /// 🩹 "al cerebro le falta una pieza" (mismo ícono/rojo del curita).
+    var heal: Bool = false
     @State private var hover = false
 
     var body: some View {
         let active = tab == idx
         let accent = Color(hex: "#e8884a")
         let label = Color(nsColor: .labelColor)
+        let help: String = {
+            switch (heal, badge) {
+            case (true, true):  return "Al cerebro le falta una pieza y hay una actualización — abre Cerebro"
+            case (true, false): return "Al cerebro le falta una pieza — abre Cerebro para curarlo 🩹"
+            case (false, true): return "Hay una actualización del widget — abre Cerebro para instalarla"
+            default:            return ""
+            }
+        }()
         HStack(spacing: 8) {
             Image(systemName: system).frame(width: 16)
             Text(text).fontWeight(active ? .bold : .regular).lineLimit(1)
             Spacer(minLength: 0)
+            // Primero el 🩹 (rojo, más urgente: un guardrail no está activo); luego el ⬆ (update).
+            if heal {
+                Image(systemName: "bandage.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color(hex: "#dc3545"))
+            }
             if badge {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 11))
@@ -797,7 +824,7 @@ private struct RailButton: View {
         .contentShape(Rectangle())
         .onHover { hover = $0 }
         .onTapGesture { tab = idx }
-        .help(badge ? "Hay una actualización del widget — abre Cerebro para instalarla" : "")
+        .help(help)
     }
 }
 
