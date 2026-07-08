@@ -38,6 +38,10 @@ public sealed class PopupForm : Form
     // cada hoja (clave→rect de su fila) y el botón-curita. El hit-testing suma _cerebroScroll.
     private readonly List<(string key, Rectangle rect)> _leafHits = new();
     private Rectangle _healHit = Rectangle.Empty;
+    // Banner de AUTOUPDATE (winturbo-style): zona clicable (coords lógicas pre-scroll) + timer de
+    // respaldo que resetea el estado si el update no completó (p. ej. ff abortado → app sigue viva).
+    private Rectangle _updateHit = Rectangle.Empty;
+    private System.Windows.Forms.Timer? _updateFallback;
 
     // logical → device scale (PerMonitorV2); all metrics below are in logical px.
     private float S => DeviceDpi / 96f;
@@ -133,8 +137,19 @@ public sealed class PopupForm : Form
     {
         _tab = t;
         _cerebroScroll = 0;
-        // Al mostrar la pestaña Cerebro, re-lee el estado REAL de ~/.claude (doc=realidad).
-        if (t == 4) { _brainState = BrainInspector.Inspect(); _expandedKey = null; _healMsg = null; }
+        // Al mostrar la pestaña Cerebro, re-lee el estado REAL de ~/.claude (doc=realidad) y dispara
+        // el chequeo de autoupdate (throttled 1×/15min, fail-open). Espeja `.task { checkIfStale() }`
+        // de la vista macOS: al resolver (si cambió), re-pinta el popup para mostrar/ocultar el banner.
+        if (t == 4)
+        {
+            _brainState = BrainInspector.Inspect();
+            _expandedKey = null;
+            _healMsg = null;
+            Updater.Shared.CheckIfStale(() =>
+            {
+                try { BeginInvoke(new Action(() => _content.Invalidate())); } catch { }
+            });
+        }
         _rail.Invalidate();
         _content.Invalidate();
     }
@@ -598,6 +613,9 @@ public sealed class PopupForm : Form
             y += (int)Math.Ceiling(sz.Height) + Sc(10);
         }
 
+        // Banner de AUTOUPDATE (solo si el repo avanzó respecto al build actual).
+        y = PaintUpdateBanner(g, pad, right, y);
+
         // Recuadro de salud (auto-reflejo + curita).
         y = PaintBrainHealth(g, pad, right, y);
 
@@ -618,6 +636,99 @@ public sealed class PopupForm : Form
             y += (int)Math.Ceiling(sz.Height) + Sc(4);
         }
         return y + pad;
+    }
+
+    /// Banner de AUTOUPDATE (winturbo-style), espejo de `updateBanner` en PopoverView.swift: solo
+    /// aparece si el repo avanzó respecto al build actual. Pastilla naranja acento ~16% con un ⬆ y
+    /// "Actualizar widget (local → remoto)". Toda la pastilla es CLICABLE (owner-draw, como el
+    /// botón-curita): al pulsarla corre el update detachado. Si no hay clon, invita a hacerlo a mano.
+    private int PaintUpdateBanner(Graphics g, int pad, int right, int y)
+    {
+        var up = Updater.Shared;
+        _updateHit = Rectangle.Empty;
+        if (!up.UpdateAvailable) return y;
+
+        int inner = Sc(9), lineH = Sc(18), iconW = Sc(20);
+        int boxW = right - pad;
+        int boxH = inner + lineH + inner;
+        var box = new Rectangle(pad, y, boxW, boxH);
+
+        // Fondo pastilla acento ~16%.
+        using (var bx = new SolidBrush(Color.FromArgb(41, _accent)))
+            FillRounded(g, bx, box, Sc(8));
+
+        int cx = pad + inner, cy = y + inner;
+
+        // Ícono (⬆ en reposo, ⏳ mientras actualiza) en acento.
+        string icon = up.Updating ? "⏳" : "⬆";
+        using (var icF = PxFont("Segoe UI Emoji", 10.5f, FontStyle.Regular))
+        using (var icB = new SolidBrush(_accent))
+            g.DrawString(icon, icF, icB, cx, cy - Sc(1));
+
+        // Texto: espeja los tres estados del banner macOS.
+        string text = up.Updating
+            ? "Actualizando… (se relanza sola)"
+            : up.CanSelfUpdate
+                ? $"Actualizar widget ({up.LocalShort} → {up.RemoteShort})"
+                : $"Hay versión nueva ({up.RemoteShort}) — actualiza a mano";
+        using (var tf = Px(10f, FontStyle.Bold))
+        using (var tb = new SolidBrush(_accent))
+            g.DrawString(text, tf, tb, cx + iconW, cy);
+
+        // Mensaje transitorio del updater (p. ej. fallback tras un ff abortado), a la derecha.
+        if (!string.IsNullOrEmpty(up.Message))
+            using (var mf = Px(8.5f, FontStyle.Regular))
+            using (var mb = new SolidBrush(Blend(_bg, _fg, 0.6)))
+            {
+                var sf = new StringFormat { Alignment = StringAlignment.Far };
+                g.DrawString(up.Message, mf, mb, new RectangleF(pad, cy + lineH, boxW - inner, Sc(14)), sf);
+            }
+
+        // Zona clicable: toda la pastilla (deshabilitada mientras actualiza).
+        _updateHit = up.Updating ? Rectangle.Empty : box;
+        return y + boxH + Sc(12);
+    }
+
+    /// Arranca el update desde el banner (espeja `runUpdate` del Swift): lanza el script detachado y,
+    /// si logró lanzarlo, marca `Updating` y arma un respaldo a 60 s que resetea el estado si no
+    /// completó (caso ff abortado → la app sigue viva). En éxito, install.ps1 mata esta app y abre la
+    /// nueva, así que el respaldo nunca llega a dispararse.
+    private void StartUpdate()
+    {
+        var up = Updater.Shared;
+        if (up.Updating) return;
+        if (!up.CanSelfUpdate)
+        {
+            up.TryLaunchUpdate();   // solo setea Message ("actualiza a mano") para pintarlo
+            _content.Invalidate();
+            return;
+        }
+        up.Updating = true;
+        up.Message = null;
+        _content.Invalidate();
+
+        bool launched = up.TryLaunchUpdate();
+        if (!launched)
+        {
+            up.Updating = false;    // no arrancó → Message ya trae el motivo
+            _content.Invalidate();
+            return;
+        }
+
+        _updateFallback?.Stop();
+        _updateFallback?.Dispose();
+        _updateFallback = new System.Windows.Forms.Timer { Interval = 60_000 };
+        _updateFallback.Tick += (_, _) =>
+        {
+            _updateFallback!.Stop();
+            if (up.Updating)
+            {
+                up.Updating = false;
+                up.Message = "el update no completó (¿árbol sucio o sin git?)";
+                _content.Invalidate();
+            }
+        };
+        _updateFallback.Start();
     }
 
     /// Recuadro de SALUD leído de la realidad, BINARIO (espejo de `brainHealth` en macOS): un sello
@@ -907,6 +1018,7 @@ public sealed class PopupForm : Form
     {
         if (_tab != 4) return;
         int ly = e.Y + _cerebroScroll;   // el paint aplica TranslateTransform(0, -_cerebroScroll)
+        if (!_updateHit.IsEmpty && _updateHit.Contains(e.X, ly)) { StartUpdate(); return; }
         if (!_healing && !_healHit.IsEmpty && _healHit.Contains(e.X, ly)) { StartHeal(); return; }
         foreach (var (key, rect) in _leafHits)
             if (rect.Contains(e.X, ly))

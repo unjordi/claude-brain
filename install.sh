@@ -131,6 +131,17 @@ if [[ "$SKIP_PLASMOID" -eq 0 ]]; then
   if [[ -d "$ROOT/brain" ]]; then
     cp -R "$ROOT/brain" "$BRAIN_IN_PKG"
   fi
+  # Versión EMBEBIDA para el autoupdate LIGERO (winturbo-style, espeja macos/make-app.sh): el SHA + la
+  # fecha del commit con que se empaqueta el plasmoid, la ruta del clon y la rama, para que la pestaña
+  # Cerebro compare contra GitHub y sepa desde dónde re-jalar. Se escribe justo antes de empaquetar y se
+  # limpia después (como brain/), para no ensuciar el árbol fuente. FAIL-OPEN: si no hay git → "unknown"/"".
+  VERSION_IN_PKG="$PLASMOID_SRC/contents/version.json"
+  _sha="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  _date="$(git -C "$ROOT" show -s --format=%cI HEAD 2>/dev/null || echo "")"
+  _repo="$ROOT"
+  _branch="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+  printf '{"sha":"%s","date":"%s","repo":"%s","branch":"%s"}\n' \
+    "$_sha" "$_date" "$_repo" "$_branch" > "$VERSION_IN_PKG"
   if [[ "$REINSTALL" -eq 1 ]]; then
     echo "==> Removing existing plasmoid (if any)"
     kpackagetool6 -t Plasma/Applet -r "$PLASMOID_ID" 2>/dev/null || true
@@ -142,6 +153,7 @@ if [[ "$SKIP_PLASMOID" -eq 0 ]]; then
     kpackagetool6 -t Plasma/Applet -i "$PLASMOID_SRC"
   fi
   rm -rf "$BRAIN_IN_PKG"   # limpia el árbol fuente tras empaquetar
+  rm -f "$VERSION_IN_PKG"  # idem: version.json es temporal, no se versiona
 fi
 
 cat <<EOF
