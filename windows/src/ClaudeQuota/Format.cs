@@ -132,6 +132,27 @@ public static class Rel
         return date is DateTimeOffset d && d < DateTimeOffset.UtcNow;
     }
 
+    /// Reset específico/útil (espeja RelativeTime.resetDetail de macOS): &lt;24h → "en 4h36m";
+    /// ≥24h → "mié@7:59" (día abreviado en español + hora 12h local, sin am/pm).
+    public static string ResetDetail(string? iso)
+    {
+        var date = Parse(iso);
+        if (date is null) return "";
+        double secs = (date.Value - DateTimeOffset.UtcNow).TotalSeconds;
+        if (secs < 86400)
+        {
+            int total = Math.Max(0, (int)Math.Round(secs));
+            int h = total / 3600, m = (total % 3600) / 60;
+            if (h > 0) return m > 0 ? $"en {h}h{m}m" : $"en {h}h";
+            if (total >= 60) return $"en {m}m";
+            return "en <1m";
+        }
+        var local = date.Value.ToLocalTime();
+        string[] wd = { "dom", "lun", "mar", "mié", "jue", "vie", "sáb" };  // DayOfWeek: 0=domingo
+        int hh = local.Hour % 12; if (hh == 0) hh = 12;
+        return $"{wd[(int)local.DayOfWeek]}@{hh}:{local.Minute:D2}";
+    }
+
     public static string CompactReset(string? iso)
     {
         var date = Parse(iso);

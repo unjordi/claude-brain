@@ -1211,8 +1211,8 @@ PlasmoidItem {
                 // anterior mientras llega el fetch → "Se restableció … · actualizando…". Espeja
                 // resetLine() de PopoverView.swift.
                 let past = root.isPast(block.resets_at)
-                let s = (past ? "Se restableció " : "Se restablece ") + root.relativeTime(block.resets_at)
-                if (past) s += " · actualizando…"
+                let s = past ? ("Se restableció " + root.relativeTime(block.resets_at) + " · actualizando…")
+                             : ("Se restablece " + root.resetDetail(block.resets_at))
                 if (block.cost_usd !== null && block.cost_usd !== undefined)
                     s += " · ≈ $" + block.cost_usd.toFixed(2) + " (API equiv local)"
                 return s
@@ -1285,6 +1285,26 @@ PlasmoidItem {
         const t = Date.parse(iso)
         if (isNaN(t)) return false
         return t <= Date.now()
+    }
+    // Reset específico/útil (espeja RelativeTime.resetDetail de macOS): <24h → "en 4h36m";
+    // ≥24h → "mié@7:59" (día abreviado en español + hora 12h, sin am/pm — weekday manual para no
+    // depender del API de locale de QML).
+    function resetDetail(iso) {
+        if (!iso) return ""
+        const t = Date.parse(iso); if (isNaN(t)) return ""
+        const secs = (t - Date.now()) / 1000
+        if (secs < 86400) {
+            const total = Math.max(0, Math.round(secs))
+            const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60)
+            if (h > 0) return m > 0 ? ("en " + h + "h" + m + "m") : ("en " + h + "h")
+            if (total >= 60) return "en " + m + "m"
+            return "en <1m"
+        }
+        const d = new Date(t)
+        const wd = ["dom","lun","mar","mié","jue","vie","sáb"][d.getDay()]
+        let hh = d.getHours() % 12; if (hh === 0) hh = 12
+        const mm = ("0" + d.getMinutes()).slice(-2)
+        return wd + "@" + hh + ":" + mm
     }
     // Edad del snapshot en segundos (a partir de updated_at); -1 si no hay dato válido.
     function snapshotAgeSec() {

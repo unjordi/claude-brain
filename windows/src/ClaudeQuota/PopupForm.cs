@@ -346,8 +346,10 @@ public sealed class PopupForm : Form
     /// cacheado quedó viejo y el fetch disparado por el reset lo está poniendo al día).
     private static string ResetLine(string? iso)
     {
-        string r = Rel.Relative(iso);
-        return Rel.IsPast(iso) ? $"Se restableció {r} · actualizando…" : $"Se restablece {r}";
+        // Pasado → "Se restableció hace Nmin · actualizando…"; futuro → detalle útil "en 4h36m" / "mié@7:59".
+        return Rel.IsPast(iso)
+            ? $"Se restableció {Rel.Relative(iso)} · actualizando…"
+            : $"Se restablece {Rel.ResetDetail(iso)}";
     }
 
     // ----- Tab 1: Resumen -----
