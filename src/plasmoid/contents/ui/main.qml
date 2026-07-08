@@ -84,6 +84,24 @@ PlasmoidItem {
     readonly property real fivePct: snapshot && snapshot.five_hour ? snapshot.five_hour.percent : -1
     readonly property real weekPct: snapshot && snapshot.weekly    ? snapshot.weekly.percent    : -1
 
+    // Límites semanales acotados a UN modelo (weekly_scoped con scope.model).
+    // Efímeros y cambiantes → se renderizan dinámicamente, sin hardcodear modelos.
+    readonly property var scopedLimits: {
+        if (!snapshot || !snapshot.limits) return []
+        var out = []
+        for (var i = 0; i < snapshot.limits.length; i++) {
+            var l = snapshot.limits[i]
+            if (l.kind === "weekly_scoped" && l.model) out.push(l)
+        }
+        return out
+    }
+    // Formatea dinero (used/cap ya vienen divididos por 10^exponent).
+    function fmtMoney(v, cur) {
+        if (v === undefined || v === null) return "—"
+        var sym = cur === "USD" ? "$" : (cur ? cur + " " : "$")
+        return sym + v.toFixed(2)
+    }
+
     // Paleta para modelos (distinta por modelo, cohesiva con el acento).
     readonly property var modelPalette: ["#e8884a", "#5b9bd5", "#9b6dd6", "#5fb98e", "#d6a15b", "#c96daa"]
     function modelColorFor(name) {
@@ -248,6 +266,29 @@ PlasmoidItem {
                 Kirigami.Heading { level: 3; text: "Límites de uso"; Layout.fillWidth: true }
                 UsageSection { Layout.fillWidth: true; title: "Sesión (5 h)"; block: root.snapshot ? root.snapshot.five_hour : null }
                 UsageSection { Layout.fillWidth: true; title: "Semanal (7 d)"; block: root.snapshot ? root.snapshot.weekly : null }
+
+                // Límites semanales por modelo (dinámicos): una fila por modelo.
+                PC3.Label {
+                    visible: root.scopedLimits.length > 0
+                    text: "Por modelo (semanal)"; opacity: 0.6
+                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                }
+                Repeater {
+                    model: root.scopedLimits
+                    delegate: UsageSection {
+                        Layout.fillWidth: true
+                        title: modelData.model
+                        block: modelData
+                    }
+                }
+
+                // Gasto REAL (dinero de bolsillo) — distinto del "Costo API-equiv".
+                SpendSection {
+                    Layout.fillWidth: true
+                    spend: root.snapshot ? root.snapshot.spend : null
+                    extra: root.snapshot ? root.snapshot.extra_usage : null
+                }
+
                 Item { Layout.fillHeight: true }
                 PC3.Label {
                     Layout.fillWidth: true; font.pointSize: Kirigami.Theme.smallFont.pointSize
@@ -433,6 +474,49 @@ PlasmoidItem {
                 let s = "Se restablece " + root.relativeTime(block.resets_at)
                 if (block.cost_usd !== null && block.cost_usd !== undefined)
                     s += " · ≈ $" + block.cost_usd.toFixed(2) + " (API equiv local)"
+                return s
+            }
+        }
+    }
+
+    // sección de GASTO REAL: dinero de tu bolsillo (spend) + overage (extra_usage).
+    // Distinto del "Costo API-equiv" del Resumen, que es el equivalente incluido.
+    component SpendSection: ColumnLayout {
+        property var spend: null
+        property var extra: null
+        readonly property real pct: spend && spend.percent !== undefined && spend.percent !== null ? spend.percent : -1
+        visible: spend && spend.enabled === true
+        spacing: Kirigami.Units.smallSpacing
+        RowLayout {
+            Layout.fillWidth: true
+            PC3.Label { text: "Gasto real"; Layout.fillWidth: true; font.bold: true }
+            PC3.Label {
+                text: pct >= 0 ? pct.toFixed(1) + "%" : "—"
+                color: root.pctColor(pct); font.bold: true
+            }
+        }
+        Rectangle {
+            Layout.fillWidth: true; height: Kirigami.Units.gridUnit * 0.5; radius: height / 2
+            color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.12)
+            Rectangle {
+                anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                height: parent.height; radius: parent.radius
+                width: parent.width * Math.max(0, Math.min(1, pct / 100))
+                color: root.pctColor(pct)
+                Behavior on width { NumberAnimation { duration: 250 } }
+            }
+        }
+        PC3.Label {
+            Layout.fillWidth: true; opacity: 0.65; wrapMode: Text.WordWrap
+            font.pointSize: Kirigami.Theme.smallFont.pointSize
+            text: {
+                if (!spend) return ""
+                let s = root.fmtMoney(spend.used, spend.currency) + " / " + root.fmtMoney(spend.cap, spend.currency)
+                if (spend.currency) s += " " + spend.currency
+                s += " — gasto real de bolsillo (no el equivalente incluido del plan)"
+                if (extra && extra.enabled === true && extra.used_credits !== null && extra.used_credits !== undefined)
+                    s += "\nSobreuso: " + root.fmtInt(extra.used_credits) + " / " + root.fmtInt(extra.monthly_limit) + " créditos"
+                        + (extra.utilization !== null && extra.utilization !== undefined ? " (" + extra.utilization.toFixed(1) + "%)" : "")
                 return s
             }
         }
