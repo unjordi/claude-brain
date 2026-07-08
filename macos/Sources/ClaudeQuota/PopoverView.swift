@@ -147,7 +147,7 @@ struct PopoverView: View {
                     .foregroundStyle(pctColor(pct))
             }
             ProgressBar(pct: pct)
-            Text("Se restablece \(RelativeTime.relative(resetIso))")
+            Text(resetLine(resetIso))
                 .font(.caption)
                 .foregroundStyle(label.opacity(0.65))
         }
@@ -203,9 +203,16 @@ struct PopoverView: View {
         }
     }
 
+    /// "Se restablece en Nmin" (futuro) o "Se restableció hace Nmin · actualizando…" (ya pasó → el %
+    /// cacheado quedó viejo y el fetch disparado por el reset lo está poniendo al día).
+    private func resetLine(_ iso: String?) -> String {
+        let r = RelativeTime.relative(iso)
+        return RelativeTime.isPast(iso) ? "Se restableció \(r) · actualizando…" : "Se restablece \(r)"
+    }
+
     private func caption(_ bucket: Bucket?) -> String {
         guard let bucket else { return "" }
-        var s = "Se restablece \(RelativeTime.relative(bucket.resets_at))"
+        var s = resetLine(bucket.resets_at)
         if let cost = bucket.cost_usd {
             s += String(format: " · ≈ $%.2f (API equiv local)", cost)
         }
