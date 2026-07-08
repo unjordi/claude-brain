@@ -285,7 +285,7 @@ PlasmoidItem {
                 { emoji: "✋", name: "confirmar-merge-develop", desc: "merge a develop sin tu OK → denegado; a main exige OK súper-explícito",
                   event: "PreToolUse · Bash",
                   detail: "Antes de integrar por MR busca tu OK explícito en el chat reciente; a main exige lenguaje de release ('hasta main', 'libera'). Un 'sigue/avanza' NO cuenta como autorización." },
-                { emoji: "✅", name: "dod-verificar",          desc: "declarar “listo” sin build+tests+memoria → denegado",
+                { emoji: "✅", name: "dod-verificar",          desc: "Def. of Done (ver Norma 🎯 DoD) sin build+tests+memoria → denegado",
                   event: "Stop",
                   detail: "Al cerrar el turno, si dijiste 'listo/en producción' tras tocar código fuente, exige evidencia de build+tests verdes y memoria al día, o bloquea el cierre." },
                 { emoji: "💸", name: "delegacion-gate",        desc: "reclutar agente con costo → pide tu consentimiento (puede negar)",
@@ -321,12 +321,12 @@ PlasmoidItem {
             emoji: "📜", title: "NORMAS", color: "#4a90d9",
             subtitle: "reglas que Claude se autoimpone (CLAUDE.md)",
             items: [
-                { emoji: "🎯", name: "Definición de LISTO",   desc: "verde técnico ≠ listo; exige tu QA o tu OK expreso",
+                { emoji: "🎯", name: "Definition of Done",    desc: "verde técnico ≠ Done/Listo/Ya Quedó; exige QA o un OK explícito",
                   event: "CLAUDE.md · norma",
                   detail: "Algo es LISTO solo si tú lo validaste (QA) o autorizaste el cierre. 'Verde técnico' es necesario pero insuficiente; la autorización es acotada y NO transitiva." },
-                { emoji: "🪞", name: "Doc = realidad",        desc: "cambió algo → actualiza su doc en la misma tanda, sin preguntar",
+                { emoji: "🪞", name: "Doc <= realidad",       desc: "cambió algo → actualiza su doc en la misma tanda, sin preguntar",
                   event: "CLAUDE.md · norma",
-                  detail: "Cuando cambia algo (config, ruta, comportamiento) se actualiza su doc en la misma tanda, sin preguntar. Primero revisar el estado real, luego editar: una doc que miente es peor que nada." },
+                  detail: "Cuando cambia algo (config, ruta, comportamiento) se actualiza su doc en la misma tanda, sin preguntar. Primero revisar el estado real, luego editar: una doc que miente es peor que nada. Y con iniciativa: ¿vive en MÁS de un lugar (un README y su UI, varias plataformas, un ejemplo)? rastréalas (grep del valor viejo) y actualízalas todas — una copia desincronizada ya miente." },
                 { emoji: "🌿", name: "Flujo de git",          desc: "ramita → MR → develop (squash); main es release-only",
                   event: "CLAUDE.md · norma",
                   detail: "Todo push va a ramitas; se integra por MR a develop con squash; main es release-only (decisión humana deliberada). 1–3 devs → auto-merge; ≥4 devs → se revisa." },
@@ -438,7 +438,7 @@ PlasmoidItem {
         }
         if (inArr(root.brainRepoHooks, name)) return "repoScoped"
         if (name === "cerrar-slice") return inArr(st.skills, "cerrar-slice") ? "installed" : "absent"
-        if (name === "Definición de LISTO" || name === "Doc = realidad"
+        if (name === "Definition of Done" || name === "Doc <= realidad"
             || name === "Flujo de git" || name === "Costo de delegación")
             return st.hasNorms ? "installed" : "absent"
         return "absent"

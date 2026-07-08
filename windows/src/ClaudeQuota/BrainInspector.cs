@@ -54,7 +54,7 @@ public sealed class BrainState
         return name switch
         {
             "cerrar-slice" => Skills.Contains("cerrar-slice") ? BrainStatus.Installed : BrainStatus.Absent,
-            "Definición de LISTO" or "Doc = realidad" or "Flujo de git" or "Costo de delegación"
+            "Definition of Done" or "Doc <= realidad" or "Flujo de git" or "Costo de delegación"
                 => HasNorms ? BrainStatus.Installed : BrainStatus.Absent,
             _ => BrainStatus.Absent,
         };

@@ -32,6 +32,11 @@ struct PopoverView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(width: 520, height: 420)
+        // Al ABRIR el popover (no solo al entrar a Cerebro): chequea updates Y lee el estado del
+        // cerebro, para que el riel avise —sin abrir la pestaña— si hay versión nueva (⬆) o si al
+        // cerebro le falta una pieza (🩹). Throttle 15 min en el chequeo de red.
+        .task { await updater.checkIfStale() }
+        .onAppear { brainState = BrainInspector.inspect() }
     }
 
     // MARK: - Rail
@@ -42,7 +47,7 @@ struct PopoverView: View {
             railButton(1, "chart.bar.doc.horizontal", "Resumen")
             railButton(2, "chart.bar", "Modelos")
             railButton(3, "folder", "Proyectos")
-            railButton(4, "brain", "Cerebro")
+            railButton(4, "brain", "Cerebro", badge: updater.updateAvailable, heal: brainIncomplete)
             Spacer()
             HStack(spacing: 6) {
                 Button(action: onRefresh) {
@@ -66,8 +71,17 @@ struct PopoverView: View {
     }
 
     @ViewBuilder
-    private func railButton(_ idx: Int, _ system: String, _ text: String) -> some View {
-        RailButton(idx: idx, system: system, text: text, tab: $tab)
+    private func railButton(_ idx: Int, _ system: String, _ text: String, badge: Bool = false, heal: Bool = false) -> some View {
+        RailButton(idx: idx, system: system, text: text, tab: $tab, badge: badge, heal: heal)
+    }
+
+    /// true si a alguna pieza GLOBAL del cerebro le falta estar instalada (según el ~/.claude real).
+    /// Alimenta el 🩹 del riel — el mismo criterio que el recuadro de salud de la pestaña Cerebro.
+    private var brainIncomplete: Bool {
+        guard let st = brainState else { return false }
+        return brainTiers.flatMap { $0.items.map(\.name) }
+            .map { status($0, st) }
+            .contains { $0 != .installed && $0 != .repoScoped }
     }
 
     // MARK: - Content
@@ -670,7 +684,7 @@ struct PopoverView: View {
         switch name {
         case "cerrar-slice":
             return st.skills.contains("cerrar-slice") ? .installed : .absent
-        case "Definición de LISTO", "Doc = realidad", "Flujo de git", "Costo de delegación":
+        case "Definition of Done", "Doc <= realidad", "Flujo de git", "Costo de delegación":
             return st.hasNorms ? .installed : .absent
         default:
             return .absent
@@ -697,7 +711,7 @@ struct PopoverView: View {
                     BrainItem("✋", "confirmar-merge-develop", "merge a develop sin tu OK → denegado; a main exige OK súper-explícito",
                               "PreToolUse · Bash",
                               "Antes de integrar por MR busca tu OK explícito en el chat reciente; a main exige lenguaje de release ('hasta main', 'libera'). Un 'sigue/avanza' NO cuenta como autorización."),
-                    BrainItem("✅", "dod-verificar", "declarar “listo” sin build+tests+memoria → denegado",
+                    BrainItem("✅", "dod-verificar", "Def. of Done (ver Norma 🎯 DoD) sin build+tests+memoria → denegado",
                               "Stop",
                               "Al cerrar el turno, si dijiste 'listo/en producción' tras tocar código fuente, exige evidencia de build+tests verdes y memoria al día, o bloquea el cierre."),
                     BrainItem("💸", "delegacion-gate", "reclutar agente con costo → pide tu consentimiento (puede negar)",
@@ -731,12 +745,12 @@ struct PopoverView: View {
                 emoji: "📜", title: "NORMAS", color: Color(hex: "#4a90d9"),
                 subtitle: "reglas que Claude se autoimpone (CLAUDE.md)",
                 items: [
-                    BrainItem("🎯", "Definición de LISTO", "verde técnico ≠ listo; exige tu QA o tu OK expreso",
+                    BrainItem("🎯", "Definition of Done", "verde técnico ≠ Done/Listo/Ya Quedó; exige QA o un OK explícito",
                               "CLAUDE.md · norma",
                               "Algo es LISTO solo si tú lo validaste (QA) o autorizaste el cierre. 'Verde técnico' es necesario pero insuficiente; la autorización es acotada y NO transitiva."),
-                    BrainItem("🪞", "Doc = realidad", "cambió algo → actualiza su doc en la misma tanda, sin preguntar",
+                    BrainItem("🪞", "Doc <= realidad", "cambió algo → actualiza su doc en la misma tanda, sin preguntar",
                               "CLAUDE.md · norma",
-                              "Cuando cambia algo (config, ruta, comportamiento) se actualiza su doc en la misma tanda, sin preguntar. Primero revisar el estado real, luego editar: una doc que miente es peor que nada."),
+                              "Cuando cambia algo (config, ruta, comportamiento) se actualiza su doc en la misma tanda, sin preguntar. Primero revisar el estado real, luego editar: una doc que miente es peor que nada. Y con iniciativa: ¿vive en MÁS de un lugar (un README y su UI, varias plataformas, un ejemplo)? rastréalas (grep del valor viejo) y actualízalas todas — una copia desincronizada ya miente."),
                     BrainItem("🌿", "Flujo de git", "ramita → MR → develop (squash); main es release-only",
                               "CLAUDE.md · norma",
                               "Todo push va a ramitas; se integra por MR a develop con squash; main es release-only (decisión humana deliberada). 1–3 devs → auto-merge; ≥4 devs → se revisa."),
@@ -764,16 +778,39 @@ private struct RailButton: View {
     let system: String
     let text: String
     @Binding var tab: Int
+    /// ⬆ "hay actualización del widget" (mismo ícono del botón de update).
+    var badge: Bool = false
+    /// 🩹 "al cerebro le falta una pieza" (mismo ícono/rojo del curita).
+    var heal: Bool = false
     @State private var hover = false
 
     var body: some View {
         let active = tab == idx
         let accent = Color(hex: "#e8884a")
         let label = Color(nsColor: .labelColor)
+        let help: String = {
+            switch (heal, badge) {
+            case (true, true):  return "Al cerebro le falta una pieza y hay una actualización — abre Cerebro"
+            case (true, false): return "Al cerebro le falta una pieza — abre Cerebro para curarlo 🩹"
+            case (false, true): return "Hay una actualización del widget — abre Cerebro para instalarla"
+            default:            return ""
+            }
+        }()
         HStack(spacing: 8) {
             Image(systemName: system).frame(width: 16)
             Text(text).fontWeight(active ? .bold : .regular).lineLimit(1)
             Spacer(minLength: 0)
+            // Primero el 🩹 (rojo, más urgente: un guardrail no está activo); luego el ⬆ (update).
+            if heal {
+                Image(systemName: "bandage.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color(hex: "#dc3545"))
+            }
+            if badge {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(accent)
+            }
         }
         .foregroundStyle(active ? accent : label)
         .padding(.horizontal, 8)
@@ -787,6 +824,7 @@ private struct RailButton: View {
         .contentShape(Rectangle())
         .onHover { hover = $0 }
         .onTapGesture { tab = idx }
+        .help(help)
     }
 }
 

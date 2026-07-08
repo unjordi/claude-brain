@@ -40,15 +40,20 @@ Estilo de la casa (mira `git-branch-guard.sh` / `secret-scan.sh` como plantilla)
   (bloquea el caso malo / deja pasar el bueno / respeta el escape / ignora lo ajeno). Corre
   `bash brain/test-brain.sh` → **0 FAIL**. La CI repite `bash -n` + `jq empty` + shellcheck.
 
-## 4. Catálogo de la pestaña Cerebro (las 3 GUIs — o el auto-reflejo miente)
-Agrega la pieza con los MISMOS `emoji/name/desc/event/detail` en las tres, y súmala a la lista de
-hooks globales conocidos (para que cuente en el "N/M" y se pinte su estado):
+## 4. Catálogo de la pestaña Cerebro — vive en 4 LUGARES, mantenlos en SYNC
+El árbol está duplicado a mano: **README + 3 GUIs**. Toca los CUATRO en la misma tanda con los MISMOS
+`emoji/name/desc` (o el README miente sobre el widget → doc <= realidad; ver memoria [[arbol-cerebro-sync]]):
+- **README** raíz — el bloque de árbol de texto (conectores `├─`/`└─`).
 - **macOS** `macos/Sources/ClaudeQuota/PopoverView.swift` → `brainTiers` (en el tier que toque) +
   `BrainInspector.swift` → `knownGlobalHooks`.
 - **Linux** `src/plasmoid/contents/ui/main.qml` → `brainTiers` + `brainGlobalHooks`.
 - **Windows** `windows/src/ClaudeQuota/PopupForm.cs` → `BrainTiers` + `BrainInspector.cs` → `KnownGlobalHooks`.
 - Tier por dureza: 🔒 INVIOLABLE (bloquea) · 🔔 AUTOMÁTICO (inyecta/recuerda) · 📜 NORMAS · 💡 SKILLS.
-- El estado (activo/faltante) lo lee solo el inspector de cada GUI; tú solo declaras la pieza.
+- El estado (activo/faltante) lo lee el inspector de cada GUI. **HOOKS** se casan por basename
+  (`knownGlobalHooks`) → renombrar su texto no rompe el estado. **NORMAS** se casan por NAME en la
+  lógica de estado de cada GUI (Swift `status()` case · QML `if (name===…)` · C# `StatusOf` switch) →
+  si renombras una norma, renómbrala TAMBIÉN ahí en las 3, o se pinta "ausente" (rojo).
+- Cierra con un `grep` del nombre VIEJO en README + las 3 GUIs: no debe quedar ninguno.
 
 ## 5. Verifica y cierra
 `bash brain/test-brain.sh` (0 FAIL) · `swift build --package-path macos` · `dotnet build windows/... -p:EnableWindowsTargeting=true` (0/0) · QML balanceado. Actualiza `brain/README.md` (tabla) y el

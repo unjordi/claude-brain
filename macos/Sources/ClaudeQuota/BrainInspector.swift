@@ -56,6 +56,17 @@ struct BrainState {
     static let knownRepoHooks: Set<String> = [
         "sesion-inicio", "precompact-volcar-estado", "dod-verificar", "confirmar-merge-develop",
     ]
+
+    /// # de piezas GLOBALES esperadas que FALTAN: hooks no (presentes+cableados) + normas + la skill.
+    /// Espeja el criterio del recuadro de salud; alimenta el 🩹 del riel y de la píldora de la barra.
+    var globalMissing: Int {
+        var n = 0
+        for h in Self.knownGlobalHooks where !(presentHooks.contains(h) && wiredHooks.contains(h)) { n += 1 }
+        if !hasNorms { n += 1 }
+        if !skills.contains("cerrar-slice") { n += 1 }
+        return n
+    }
+    var isComplete: Bool { globalMissing == 0 }
 }
 
 /// Lee `~/.claude` y arma un `BrainState`. Todo el I/O es de LECTURA y fail-safe (si algo falta,

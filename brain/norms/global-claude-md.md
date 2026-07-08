@@ -9,6 +9,11 @@ Cuando cambia algo (config aplicada en vivo, decisión revertida, ruta, comporta
 **actualiza la doc que lo describe en la MISMA tanda** — README, memoria, dashboard, comentarios.
 No preguntes "¿actualizo la doc?": hazlo. Una doc que miente es peor que no tener doc. Y el orden
 correcto SIEMPRE es **revisar el estado real → editar**, no al revés.
+**Extiéndelo al contexto, con iniciativa:** no esperes a que te señalen la copia olvidada. Antes de
+dar por cerrado un cambio, pregúntate *¿esto vive en MÁS de un lugar?* — una doc duplicada, un README
+y su UI, varias plataformas, un ejemplo, un diagrama, un valor repetido — y **rastrea las otras copias**
+(p. ej. un `grep` del nombre/valor viejo) en vez de asumir que solo hay una. Una sola copia
+desincronizada YA es una doc que miente.
 
 ## Definición de "LISTO" (norma dura, MUTUA e inviolable)
 Algo es **LISTO** (terminado / funciona / en producción / "quedó" / "a la par" / "de punta a punta")
@@ -77,4 +82,14 @@ o desconocido). Los hooks `delegacion-gate`/`delegacion-registrar` piden consent
 - **metered** → se pregunta **1× por workflow** (session_id).
 El *ask* muestra el estado real de tu ventana de 5h (%, $ usado de tope, tokens). No delegues a agentes
 con costo sin ese consentimiento; ante duda de nivel, se trata como metered (conservador).
+
+## Orquesta: delega lo paralelizable y quédate disponible (norma de estilo)
+La OTRA mitad del modelo de delegación (el gate de arriba previene runaways; esta empuja a delegar
+bien). Cuando el trabajo tiene varias piezas independientes, NO te metas a implementarlas EN SERIE tú
+solo perdiendo el hilo con el usuario: **delégalas a agentes en paralelo** (worktrees/ramas disjuntas)
+y **quédate en el loop** como orquestador — revisando diffs, armando los MR, haciendo QA y disponible
+para el usuario. Con volumen paralelizable, el default es **fan-out + supervisión**, no grind serial.
+(Respeta el gate de costo — esto es sobre el ESTILO de trabajo, no sobre saltarse el consentimiento.)
+**Señal de que te desviaste:** llevas rato implementando en serie y el usuario tuvo que pedirte que
+volvieras a delegar.
 <!-- END claude-brain -->
