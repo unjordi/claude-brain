@@ -107,14 +107,27 @@ else
   echo "ok: dashboard ya existe ($DASH)"
 fi
 
-# ── (e) Normas globales en ~/.claude/CLAUDE.md (bloque con marcador, idempotente) ──
-if [ -f "$GCLAUDE" ] && grep -q 'BEGIN claude-brain' "$GCLAUDE"; then
-  echo "ok: normas globales del cerebro ya presentes en $GCLAUDE"
-elif [ -f "$SRC_NORMS/global-claude-md.md" ]; then
+# ── (e) Normas globales en ~/.claude/CLAUDE.md (bloque con marcador; REFRESCA, no solo siembra) ──
+# Idempotente Y actualizable: si el bloque BEGIN/END ya existe, se REEMPLAZA EN SU LUGAR con la versión
+# actual (así las normas nuevas SÍ llegan a instalaciones existentes al re-correr); si no existe, se
+# agrega al final. Conserva intacto todo lo que el usuario tenga fuera del bloque.
+if [ ! -f "$SRC_NORMS/global-claude-md.md" ]; then
+  echo "warn: no encuentro $SRC_NORMS/global-claude-md.md; no inyecté normas"
+elif [ -f "$GCLAUDE" ] && grep -q 'BEGIN claude-brain' "$GCLAUDE"; then
+  tmp="$(mktemp)" || tmp=""
+  if [ -n "$tmp" ] && awk -v src="$SRC_NORMS/global-claude-md.md" '
+      /<!-- BEGIN claude-brain/ { skip=1; while ((getline l < src) > 0) print l; close(src) }
+      skip==0 { print }
+      /<!-- END claude-brain -->/ { skip=0 }
+    ' "$GCLAUDE" > "$tmp" && [ -s "$tmp" ]; then
+    mv "$tmp" "$GCLAUDE"
+    echo "ok: normas globales del cerebro REFRESCADAS en $GCLAUDE (bloque reemplazado en su lugar)"
+  else
+    rm -f "$tmp"; echo "warn: no pude refrescar el bloque de normas en $GCLAUDE"
+  fi
+else
   { [ -f "$GCLAUDE" ] && printf '\n'; cat "$SRC_NORMS/global-claude-md.md"; } >> "$GCLAUDE"
   echo "ok: normas globales del cerebro agregadas a $GCLAUDE"
-else
-  echo "warn: no encuentro $SRC_NORMS/global-claude-md.md; no inyecté normas"
 fi
 
 echo "listo: cerebro global instalado (hooks + cableado + skill + dashboard + normas)."

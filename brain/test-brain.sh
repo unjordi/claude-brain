@@ -183,5 +183,21 @@ rm -rf "$FAKEHOME2"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
+echo "== (c2) refresh de normas: un bloque VIEJO se REEMPLAZA en su lugar =="
+FAKEHOME3="$(mktemp -d "${TMPDIR:-/tmp}/brain-refresh.XXXXXX")"
+mkdir -p "$FAKEHOME3/.claude"
+G3="$FAKEHOME3/.claude/CLAUDE.md"
+printf 'mi config a mano (antes)\n\n<!-- BEGIN claude-brain -->\nNORMA VIEJA OBSOLETA\n<!-- END claude-brain -->\n\nmi config a mano (despues)\n' > "$G3"
+HOME="$FAKEHOME3" bash "$INSTALLER" >/dev/null 2>&1
+grep -q 'NORMA VIEJA OBSOLETA' "$G3" && bad "refresh: quedó la norma vieja (no reemplazó)" || ok "refresh: la norma vieja fue reemplazada"
+grep -q 'Definición de' "$G3" && ok "refresh: el bloque nuevo quedó" || bad "refresh: falta el bloque nuevo"
+n3="$(grep -c 'BEGIN claude-brain' "$G3" 2>/dev/null || echo 0)"
+[ "$n3" = "1" ] && ok "refresh: 1 solo bloque tras refrescar" || bad "refresh: $n3 bloques (esperaba 1)"
+{ grep -q 'mi config a mano (antes)' "$G3" && grep -q 'mi config a mano (despues)' "$G3"; } \
+  && ok "refresh: conserva la config del usuario alrededor del bloque" || bad "refresh: se comió config del usuario"
+rm -rf "$FAKEHOME3"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
 echo "==> resultado: $PASS PASS · $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
