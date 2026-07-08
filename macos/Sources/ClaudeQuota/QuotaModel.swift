@@ -102,6 +102,7 @@ struct StatsProject: Codable {
     let project: String?
     let in_tok: Double?
     let out_tok: Double?
+    let cost: Double?     // equivalente API acumulado (tokens×tarifa), no gasto real
     let tot: Double?
     let pct: Double?
 }
