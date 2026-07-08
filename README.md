@@ -171,7 +171,9 @@ depender de en qué te toque trabajar.
 
 ## Contribuir al cerebro
 
-Sumar un guardrail o cortar un release está documentado en las skills del repo:
+Las piezas por dentro (los tres tiers de hooks, cómo probarlas, instalar/desinstalar el cerebro
+suelto) viven en **[`brain/README.md`](brain/README.md)** — la doc para contribuidores. Sumar un
+guardrail o cortar un release está documentado en las skills del repo:
 [`agregar-hook-cerebro`](.claude/skills/agregar-hook-cerebro/SKILL.md) y
 [`publicar-widget`](.claude/skills/publicar-widget/SKILL.md).
 
