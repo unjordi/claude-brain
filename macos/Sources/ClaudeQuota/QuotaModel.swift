@@ -11,6 +11,35 @@ struct Bucket: Codable {
     let resets_at: String?
 }
 
+/// Un límite acotado en el tiempo de `.limits[]` (session/weekly_all/weekly_scoped).
+/// Solo presente en basis=="oauth"; los scoped traen `model` (display_name).
+struct LimitEntry: Codable {
+    let kind: String?
+    let model: String?        // scope.model.display_name, o nil si no es scoped
+    let percent: Double?
+    let resets_at: String?
+    let severity: String?
+    let is_active: Bool?
+}
+
+/// Gasto REAL de bolsillo (dinero), ya normalizado (amount_minor/10^exponent).
+struct Spend: Codable {
+    let used: Double?
+    let cap: Double?
+    let currency: String?
+    let percent: Double?
+    let enabled: Bool?
+}
+
+/// Overage (créditos de sobreuso).
+struct ExtraUsage: Codable {
+    let used_credits: Double?
+    let monthly_limit: Double?
+    let currency: String?
+    let utilization: Double?
+    let enabled: Bool?
+}
+
 /// The full state.json snapshot.
 struct Snapshot: Codable {
     let updated_at: String?
@@ -22,6 +51,9 @@ struct Snapshot: Codable {
     let error: String?
     let five_hour: Bucket?
     let weekly: Bucket?
+    let limits: [LimitEntry]?     // solo en oauth; la GUI filtra los weekly_scoped
+    let spend: Spend?             // solo en oauth: dinero real de bolsillo
+    let extra_usage: ExtraUsage?  // solo en oauth: overage
 }
 
 // MARK: - stats.json (uso local vía ccusage)
@@ -139,6 +171,12 @@ final class QuotaModel: ObservableObject {
 
     var fivePct: Double? { snapshot?.five_hour?.percent }
     var weekPct: Double? { snapshot?.weekly?.percent }
+
+    /// Límites semanales acotados a UN modelo (weekly_scoped con modelo) — se
+    /// renderizan dinámicamente, sin hardcodear modelos. Paralelo a main.qml.
+    var scopedLimits: [LimitEntry] {
+        (snapshot?.limits ?? []).filter { $0.kind == "weekly_scoped" && $0.model != nil }
+    }
 
     /// Tooltip mirroring toolTipMainText: "Claude: 5h N% · 7d M%".
     var tooltip: String {
@@ -307,6 +345,13 @@ enum Fmt {
         f.usesGroupingSeparator = true
         f.maximumFractionDigits = 0
         return f.string(from: NSNumber(value: n.rounded())) ?? "\(Int(n.rounded()))"
+    }
+
+    /// fmtMoney: "$5.35" (used/cap ya vienen divididos por 10^exponent).
+    static func money(_ v: Double?, _ currency: String?) -> String {
+        guard let v else { return "—" }
+        let sym = currency == "USD" ? "$" : (currency.map { "\($0) " } ?? "$")
+        return String(format: "\(sym)%.2f", v)
     }
 
     /// fmtHour: "9 p.m.", 12 → "12 a.m." / "12 p.m." (-1 → "—").

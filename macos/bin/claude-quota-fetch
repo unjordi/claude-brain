@@ -229,6 +229,33 @@ jq -n \
         tokens_used: (if $wk != null then ($wk.totalTokens // 0) else null end),
         resets_at: $week_reset,
         week_start: (if $wk != null then ($wk.week // $wk.period) else null end)
+      } else null end),
+      # --- Solo en modo oauth: la API expone más de lo que la GUI mostraba -----
+      # limites por-modelo acotados en el tiempo (weekly_scoped con scope.model),
+      # gasto REAL (dinero de bolsillo) y overage. En fallback ccusage no existen.
+      limits: (if $usage != null then
+        [ ($usage.limits // [])[] | {
+            kind: .kind,
+            model: (.scope.model.display_name // null),
+            percent: .percent,
+            resets_at: (if .resets_at != null then (.resets_at | isoz) else null end),
+            severity: .severity,
+            is_active: .is_active
+          } ]
+        else null end),
+      spend: (if ($usage != null and $usage.spend != null) then {
+        used: (if $usage.spend.used != null then ($usage.spend.used.amount_minor / pow(10; $usage.spend.used.exponent)) else null end),
+        cap:  (if $usage.spend.limit != null then ($usage.spend.limit.amount_minor / pow(10; $usage.spend.limit.exponent)) else null end),
+        currency: ($usage.spend.used.currency // $usage.spend.limit.currency // null),
+        percent: ($usage.spend.percent // null),
+        enabled: ($usage.spend.enabled // false)
+      } else null end),
+      extra_usage: (if ($usage != null and $usage.extra_usage != null) then {
+        used_credits:  ($usage.extra_usage.used_credits // null),
+        monthly_limit: ($usage.extra_usage.monthly_limit // null),
+        currency:      ($usage.extra_usage.currency // null),
+        utilization:   ($usage.extra_usage.utilization // null),
+        enabled:       ($usage.extra_usage.is_enabled // false)
       } else null end)
     }
 ' > "$TMP_FILE"
