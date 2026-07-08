@@ -514,7 +514,8 @@ PlasmoidItem {
             Layout.fillWidth: true
             PC3.Label { text: "Gasto real"; Layout.fillWidth: true; font.bold: true }
             PC3.Label {
-                text: pct >= 0 ? pct.toFixed(1) + "%" : "—"
+                // Headline = MONTO usado (no %); el color sigue por porcentaje.
+                text: spend ? root.fmtMoney(spend.used, spend.currency) : "—"
                 color: root.pctColor(pct); font.bold: true
             }
         }
@@ -534,7 +535,8 @@ PlasmoidItem {
             font.pointSize: Kirigami.Theme.smallFont.pointSize
             text: {
                 if (!spend) return ""
-                let s = root.fmtMoney(spend.used, spend.currency) + " / " + root.fmtMoney(spend.cap, spend.currency)
+                // El monto usado ya es el headline; aquí solo el tope "/ $10.00 USD …".
+                let s = "/ " + root.fmtMoney(spend.cap, spend.currency)
                 if (spend.currency) s += " " + spend.currency
                 s += " — gasto real de bolsillo (no el equivalente incluido del plan)"
                 if (extra && extra.enabled === true && extra.used_credits !== null && extra.used_credits !== undefined)

@@ -133,7 +133,8 @@ struct PopoverView: View {
             HStack {
                 Text("Gasto real").fontWeight(.bold)
                 Spacer()
-                Text(spend.percent.map { String(format: "%.1f%%", $0) } ?? "—")
+                // Headline = MONTO usado (no %); el color sigue por porcentaje.
+                Text(Fmt.money(spend.used, spend.currency))
                     .fontWeight(.bold)
                     .foregroundStyle(pctColor(spend.percent))
             }
@@ -146,7 +147,8 @@ struct PopoverView: View {
     }
 
     private func spendCaption(_ spend: Spend, _ extra: ExtraUsage?) -> String {
-        var s = "\(Fmt.money(spend.used, spend.currency)) / \(Fmt.money(spend.cap, spend.currency))"
+        // El monto usado ya es el headline; aquí solo el tope "/ $10.00 USD …".
+        var s = "/ \(Fmt.money(spend.cap, spend.currency))"
         if let cur = spend.currency { s += " \(cur)" }
         s += " — gasto real de bolsillo (no el equivalente incluido del plan)"
         if let extra, extra.enabled == true, let used = extra.used_credits {
