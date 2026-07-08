@@ -334,41 +334,19 @@ if [[ -n "$DAILY_JSON" ]]; then
           if (lh < 0)       date = shiftDay(y, mo, da, -1)
           else if (lh >= 24) date = shiftDay(y, mo, da, 1)
           else               date = sprintf("%04d-%02d-%02d", y, mo, da)
-          # modelo de esta línea (mismo formato que ccusage: "claude-opus-4-8")
-          mdl = "unknown"
-          if (match($0, /"model":"[^"]*"/)) { mm = substr($0, RSTART, RLENGTH); sub(/^"model":"/, "", mm); sub(/"$/, "", mm); mdl = mm }
-          key = date SUBSEP mdl
           inv = 0; outv = 0
           if (match($0, /"input_tokens":[0-9]+/))  { s = substr($0, RSTART, RLENGTH); sub(/^"input_tokens":/, "", s);  inv  = s + 0 }
           if (match($0, /"output_tokens":[0-9]+/)) { s = substr($0, RSTART, RLENGTH); sub(/^"output_tokens":/, "", s); outv = s + 0 }
-          I[key] += inv; O[key] += outv
+          I[date] += inv; O[date] += outv
         }
-        # slug<TAB>fecha<TAB>modelo<TAB>in<TAB>out (una fila por proyecto×día×modelo)
-        END { for (k in I) { split(k, a, SUBSEP); printf "%s\t%s\t%s\t%d\t%d\n", slug, a[1], a[2], I[k], O[k] + 0 } }
+        END { for (dt in I) printf "%s\t%s\t%d\t%d\n", slug, dt, I[dt], O[dt] + 0 }
       ')"$'\n'
     done
   fi
-  # Tarifa efectiva por modelo (USD equivalente-API por token in+out), derivada
-  # de ccusage daily: cost_modelo / (in+out)_modelo. Con ella se costea cada
-  # proyecto (Σ tokens_proyecto×modelo × tarifa_modelo). NO es gasto real de
-  # bolsillo: es el equivalente API acumulado (tokens×tarifa). Mapa vacío si no
-  # hay datos de ccusage -> los proyectos quedan con cost:null.
-  MODEL_RATES_JSON="$(jq -c '
-    [ (.daily // [])[].modelBreakdowns[]? ]
-    | group_by(.modelName)
-    | map({ key: .[0].modelName,
-            value: ( ((map(.cost // 0) | add) // 0) as $c
-                     | ((map((.inputTokens // 0) + (.outputTokens // 0)) | add) // 0) as $t
-                     | if $t > 0 then ($c / $t) else 0 end ) })
-    | from_entries
-  ' <<<"$DAILY_JSON" 2>/dev/null || echo '{}')"
-  jq -e . <<<"$MODEL_RATES_JSON" >/dev/null 2>&1 || MODEL_RATES_JSON="{}"
-
   PROJECT_STATS_JSON='{"projects":[],"by_day":{}}'
   if [[ -n "${PROJECT_DAY_TSV// /}" ]]; then
     PROJECT_STATS_JSON="$(printf '%s' "$PROJECT_DAY_TSV" | jq -R -s \
-        --argjson repos "$PROJECT_REPOS_JSON" --argjson aliases "$PROJECT_ALIAS_JSON" \
-        --argjson rates "$MODEL_RATES_JSON" '
+        --argjson repos "$PROJECT_REPOS_JSON" --argjson aliases "$PROJECT_ALIAS_JSON" '
       # Nombre canónico de un slug de proyecto:
       #  1) (o extiende) un repo conocido -> nombre del repo raíz (longest-prefix
       #     con frontera de segmento: slug == repo.slug o empieza con repo.slug+"-");
@@ -383,16 +361,12 @@ if [[ -n "$DAILY_JSON" ]]; then
            else ($slug | split("-") | last)
            end) as $base
         | ($aliases[$base] // $base);
-      # cost por fila = (in+out) × tarifa_efectiva del modelo (equivalente API).
       (split("\n") | map(select(length > 0) | split("\t"))
-        | map({slug: .[0], date: .[1], model: .[2], in_tok: (.[3]|tonumber), out_tok: (.[4]|tonumber)})
-        | map(. + {name: canon(.slug), cost: ((.in_tok + .out_tok) * ($rates[.model] // 0))})
+        | map({slug: .[0], date: .[1], in_tok: (.[2]|tonumber), out_tok: (.[3]|tonumber)})
+        | map(. + {name: canon(.slug)})
       ) as $rows
       | ($rows | group_by(.name)
-          | map({project: .[0].name,
-                 in_tok: (map(.in_tok) | add),
-                 out_tok: (map(.out_tok) | add),
-                 cost: (if ($rates | length) > 0 then ((map(.cost) | add) * 100 | round) / 100 else null end)})
+          | map({project: .[0].name, in_tok: (map(.in_tok) | add), out_tok: (map(.out_tok) | add)})
           | map(. + {tot: (.in_tok + .out_tok)})
           | sort_by(-.tot)) as $projs
       | (($projs | map(.tot) | add) // 0) as $grand
@@ -442,9 +416,6 @@ if [[ -n "$DAILY_JSON" ]]; then
       | (($models | map(.tot) | add) // 0) as $grand
       | {
           updated_at: $ts,
-          # Los importes `cost` de models[]/projects[] son EQUIVALENTE API
-          # (tokens×tarifa acumulados), NO el gasto real de bolsillo.
-          cost_basis: "api_equivalent",
           days: $days,
           models: ($models | map(. + {
             pct: (if $grand > 0 then (.tot * 100 / $grand) else 0 end)
