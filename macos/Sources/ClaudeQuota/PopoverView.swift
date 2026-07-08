@@ -418,21 +418,18 @@ struct PopoverView: View {
             let allGood = active == total
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Image(systemName: allGood ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                        .foregroundStyle(allGood ? Color(hex: "#3aa76d") : Color(hex: "#e8884a"))
-                    Text("\(active)/\(total) piezas globales activas en tu ~/.claude")
+                    Image(systemName: allGood ? "checkmark.seal.fill" : "bandage.fill")
+                        .foregroundStyle(allGood ? Color(hex: "#3aa76d") : Color(hex: "#dc3545"))
+                    Text(allGood ? "Cerebro global completo y activo"
+                                 : "Tu cerebro global está incompleto")
                         .font(.caption).fontWeight(.semibold)
                     Spacer(minLength: 0)
                     Text("leído \(Fmt.clock(st.scannedAt))")
                         .font(.system(size: 9)).foregroundStyle(label.opacity(0.4))
                 }
-                HStack(spacing: 10) {
-                    legendDot(.installed, "activa")
-                    legendDot(.presentNotWired, "sin cablear")
-                    legendDot(.absent, "ausente")
-                    legendDot(.repoScoped, "por-repo")
-                }
-                // El curita SOLO aparece si hay algo que curar; sano (10/10) → sin botón ni mensaje.
+                // Sin leyenda de estados (de cara al usuario: binario). El curita SOLO aparece si
+                // falta algo; sano → sin botón (el sello verde ya lo dice). El matiz fino de cada
+                // pieza vive en el detalle al tocarla y en el inspector (4 estados).
                 if total - active > 0 {
                     healButton(missing: total - active)
                 }
@@ -512,14 +509,6 @@ struct PopoverView: View {
                 healing = false
                 healMsg = ok ? "✓ curado" : "✗ error (¿jq instalado?)"
             }
-        }
-    }
-
-    @ViewBuilder
-    private func legendDot(_ s: BrainStatus, _ text: String) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: s.symbol).font(.system(size: 7)).foregroundStyle(s.color)
-            Text(text).font(.system(size: 9)).foregroundStyle(label.opacity(0.55))
         }
     }
 

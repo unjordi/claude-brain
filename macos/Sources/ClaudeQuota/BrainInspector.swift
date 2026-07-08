@@ -7,20 +7,23 @@ enum BrainStatus {
     case absent           // global: se esperaba y no está
     case repoScoped       // viaja por repo (no verificable desde el ~/.claude global)
 
+    // NOTA: mantenemos los 4 casos para la PRECISIÓN interna (el detalle al tocar los distingue por
+    // `label`), pero de cara al usuario el color/símbolo COLAPSAN a binario: verde=bien, rojo=faltante
+    // (sin cablear y ausente se ven igual → "algo falta, cúralo"), azul discreto=por-repo (no cuenta).
     var symbol: String {
         switch self {
-        case .installed:       return "circle.fill"
-        case .presentNotWired: return "circle.lefthalf.filled"
-        case .absent:          return "circle"
+        case .installed:       return "checkmark.circle.fill"
+        case .presentNotWired: return "exclamationmark.circle.fill"
+        case .absent:          return "exclamationmark.circle.fill"
         case .repoScoped:      return "circle.dashed"
         }
     }
     var color: Color {
         switch self {
         case .installed:       return Color(hex: "#3aa76d")
-        case .presentNotWired: return Color(hex: "#e8884a")
-        case .absent:          return Color(nsColor: .labelColor).opacity(0.3)
-        case .repoScoped:      return Color(hex: "#4a90d9")
+        case .presentNotWired: return Color(hex: "#dc3545")
+        case .absent:          return Color(hex: "#dc3545")
+        case .repoScoped:      return Color(hex: "#4a90d9").opacity(0.6)
         }
     }
     /// Texto de ayuda al expandir la pieza.
