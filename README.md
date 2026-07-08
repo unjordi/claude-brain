@@ -9,9 +9,11 @@
 [![Windows](https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows&logoColor=white)](#un-cerebro-tres-caras)
 [![licencia](https://img.shields.io/badge/licencia-MIT-555?style=flat-square)](LICENSE)
 
-Los guardarraíles, la gobernanza y las normas de Claude Code, empaquetados en un cerebro que
-**viaja por git** y **aplica en toda máquina** — con la cara de un widget que **se refleja, se cura
-y se actualiza solo**.
+A primera vista es **un widget**: una píldora de color en tu barra —de menú, bandeja o panel— que te
+dice de un vistazo cuánto te queda de tu cuota de Claude Code, con su desglose de límites, modelos y
+proyectos. Pero **crees que vienes por el widget y te llevas el tesoro**: un cerebro bien afinado y
+aceitado —los guardarraíles, la gobernanza y las normas de Claude Code— que **viaja por git**,
+**aplica en toda máquina**, se comunica cada vez mejor y **hace siempre el mejor equipo** contigo. 🧠
 
 Un `install-brain.sh` y tu máquina queda con el candado puesto. Idempotente y agnóstico de OS
 (todo corre bajo **bash**: macOS, Linux, Windows/Git Bash).

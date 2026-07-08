@@ -32,6 +32,9 @@ struct PopoverView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(width: 520, height: 420)
+        // Chequea updates al ABRIR el popover (no solo al entrar a Cerebro) → el badge del riel
+        // se entera aunque no abras esa pestaña. Throttle 15 min adentro.
+        .task { await updater.checkIfStale() }
     }
 
     // MARK: - Rail
@@ -42,7 +45,7 @@ struct PopoverView: View {
             railButton(1, "chart.bar.doc.horizontal", "Resumen")
             railButton(2, "chart.bar", "Modelos")
             railButton(3, "folder", "Proyectos")
-            railButton(4, "brain", "Cerebro")
+            railButton(4, "brain", "Cerebro", badge: updater.updateAvailable)
             Spacer()
             HStack(spacing: 6) {
                 Button(action: onRefresh) {
@@ -66,8 +69,8 @@ struct PopoverView: View {
     }
 
     @ViewBuilder
-    private func railButton(_ idx: Int, _ system: String, _ text: String) -> some View {
-        RailButton(idx: idx, system: system, text: text, tab: $tab)
+    private func railButton(_ idx: Int, _ system: String, _ text: String, badge: Bool = false) -> some View {
+        RailButton(idx: idx, system: system, text: text, tab: $tab, badge: badge)
     }
 
     // MARK: - Content
@@ -764,6 +767,8 @@ private struct RailButton: View {
     let system: String
     let text: String
     @Binding var tab: Int
+    /// Muestra el ⬆ de "hay actualización" en la etiqueta (mismo ícono del botón de update).
+    var badge: Bool = false
     @State private var hover = false
 
     var body: some View {
@@ -774,6 +779,11 @@ private struct RailButton: View {
             Image(systemName: system).frame(width: 16)
             Text(text).fontWeight(active ? .bold : .regular).lineLimit(1)
             Spacer(minLength: 0)
+            if badge {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(accent)
+            }
         }
         .foregroundStyle(active ? accent : label)
         .padding(.horizontal, 8)
@@ -787,6 +797,7 @@ private struct RailButton: View {
         .contentShape(Rectangle())
         .onHover { hover = $0 }
         .onTapGesture { tab = idx }
+        .help(badge ? "Hay una actualización del widget — abre Cerebro para instalarla" : "")
     }
 }
 
