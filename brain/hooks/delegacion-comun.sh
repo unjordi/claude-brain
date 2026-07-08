@@ -6,6 +6,7 @@
 # NIVELES:  gratis (local) · incluido (Claude dentro de la ventana 5h) · metered (Claude en overage,
 #           API externa de pago, o desconocido). Ver agentes-costo.json.
 # Requiere jq (el que la use debe verificarlo antes).
+# shellcheck shell=bash
 
 REG_FILE="$HOME/.claude/agentes-costo.json"
 
@@ -65,10 +66,12 @@ fmt_tokens() {
   }'
 }
 
-# linea_cuota → imprime el ESTADO REAL de la ventana de 5h desde el snapshot del daemon de cuota
-# (state.json), p. ej.: " Ventana 5h: 19% ($2.48 de $45; 3.7M tokens)." — contexto honesto para
-# decidir si autorizar una delegación. NO inventa un costo por-agente (no se puede saber pre-ejecución):
-# muestra el ritmo/uso ACTUAL de la ventana. Si no hay snapshot o falta jq → imprime nada (no truena).
+# linea_cuota → imprime el ESTADO REAL de las ventanas desde el snapshot del daemon de cuota
+# (state.json): la ventana de 5h y —si el snapshot la trae— la SEMANAL, p. ej.:
+#   " Ventana 5h: 19% ($2.48 de $45; 3.7M tokens) · Semanal: 57% ($401/$4800)." — contexto honesto
+# para decidir si autorizar una delegación. NO inventa un costo por-agente (no se puede saber
+# pre-ejecución): muestra el ritmo/uso ACTUAL de las ventanas. Si no hay snapshot o falta jq →
+# imprime nada (no truena); si el snapshot no trae la semanal, se omite ese tramo (no truena).
 linea_cuota() {
   command -v jq >/dev/null 2>&1 || return 0
   local snap="" c
@@ -89,6 +92,15 @@ linea_cuota() {
     msg="$msg)"
   elif [ -n "$tok" ]; then
     msg="$msg ($(fmt_tokens "$tok") tokens)"
+  fi
+  # Ventana SEMANAL (opcional): solo si el snapshot la trae. Formato compacto "($cost/$cap)".
+  local wpct wcost wcap
+  wpct=$(jq -r '.weekly.percent // empty'   "$snap" 2>/dev/null)
+  wcost=$(jq -r '.weekly.cost_usd // empty' "$snap" 2>/dev/null)
+  wcap=$(jq -r '.weekly.cost_cap // empty'  "$snap" 2>/dev/null)
+  if [ -n "$wpct" ]; then
+    msg="$msg · Semanal: ${wpct}%"
+    [ -n "$wcost" ] && [ -n "$wcap" ] && msg="$msg (\$${wcost}/\$${wcap})"
   fi
   printf '%s.' "$msg"
 }

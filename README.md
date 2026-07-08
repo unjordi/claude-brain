@@ -25,7 +25,8 @@ is idempotent and OS-agnostic (all hooks run under bash — macOS, Linux, Window
   for consent by cost tier: **free** (local model), **included** (Claude *inside* your 5-hour window —
   no marginal cost), or **metered** (Claude in overage, paid external API, or unknown). Free/included
   ask **once per machine**; metered asks **once per workflow**. The prompt reads the quota daemon's
-  snapshot and shows your real window state, e.g. `Ventana 5h: 19% ($2.48 de $45; 3.7M tokens)`. Tiers
+  snapshot and shows your real window state — both the 5-hour and (when present) the weekly window,
+  e.g. `Ventana 5h: 19% ($2.48 de $45; 3.7M tokens) · Semanal: 57% ($401/$4800)`. Tiers
   are configured in [`brain/hooks/agentes-costo.json`](brain/hooks/agentes-costo.json) (window
   threshold default 95%); unknown agents default to metered (conservative).
 - **Session hygiene** (repo-scoped source, copy into each repo's `.claude/`) — `sesion-inicio`
