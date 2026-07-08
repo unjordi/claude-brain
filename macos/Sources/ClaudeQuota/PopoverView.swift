@@ -78,10 +78,27 @@ struct PopoverView: View {
     // ===== Tab 0: Límites =====
 
     private var limitsTab: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             Text("Límites de uso").font(.headline)
             usageSection("Sesión (5 h)", model.snapshot?.five_hour)
             usageSection("Semanal (7 d)", model.snapshot?.weekly)
+
+            // Límites semanales por modelo (dinámicos): una fila por modelo.
+            if !model.scopedLimits.isEmpty {
+                Text("Por modelo (semanal)")
+                    .font(.caption)
+                    .foregroundStyle(label.opacity(0.6))
+                ForEach(model.scopedLimits.indices, id: \.self) { i in
+                    let lim = model.scopedLimits[i]
+                    limitSection(lim.model ?? "—", lim.percent, lim.resets_at)
+                }
+            }
+
+            // Gasto REAL de bolsillo — distinto del "Costo API-equiv" (Resumen).
+            if let spend = model.snapshot?.spend, spend.enabled == true {
+                spendSection(spend, model.snapshot?.extra_usage)
+            }
+
             Spacer(minLength: 0)
             Text(model.footerText)
                 .font(.caption)
@@ -89,6 +106,54 @@ struct PopoverView: View {
                 .foregroundStyle(model.accountMismatch ? Color(hex: "#dc3545") : label.opacity(0.5))
         }
         .padding(16)
+    }
+
+    /// Una fila de límite por-modelo (título + %, barra, "Se restablece …").
+    @ViewBuilder
+    private func limitSection(_ title: String, _ pct: Double?, _ resetIso: String?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title).fontWeight(.bold)
+                Spacer()
+                Text(pct.map { String(format: "%.1f%%", $0) } ?? "—")
+                    .fontWeight(.bold)
+                    .foregroundStyle(pctColor(pct))
+            }
+            ProgressBar(pct: pct)
+            Text("Se restablece \(RelativeTime.relative(resetIso))")
+                .font(.caption)
+                .foregroundStyle(label.opacity(0.65))
+        }
+    }
+
+    /// Sección de GASTO REAL: dinero de bolsillo (spend) + overage (extra_usage).
+    @ViewBuilder
+    private func spendSection(_ spend: Spend, _ extra: ExtraUsage?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Gasto real").fontWeight(.bold)
+                Spacer()
+                Text(spend.percent.map { String(format: "%.1f%%", $0) } ?? "—")
+                    .fontWeight(.bold)
+                    .foregroundStyle(pctColor(spend.percent))
+            }
+            ProgressBar(pct: spend.percent)
+            Text(spendCaption(spend, extra))
+                .font(.caption)
+                .foregroundStyle(label.opacity(0.65))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func spendCaption(_ spend: Spend, _ extra: ExtraUsage?) -> String {
+        var s = "\(Fmt.money(spend.used, spend.currency)) / \(Fmt.money(spend.cap, spend.currency))"
+        if let cur = spend.currency { s += " \(cur)" }
+        s += " — gasto real de bolsillo (no el equivalente incluido del plan)"
+        if let extra, extra.enabled == true, let used = extra.used_credits {
+            s += "\nSobreuso: \(Fmt.int(used)) / \(Fmt.int(extra.monthly_limit)) créditos"
+            if let u = extra.utilization { s += String(format: " (%.1f%%)", u) }
+        }
+        return s
     }
 
     @ViewBuilder
