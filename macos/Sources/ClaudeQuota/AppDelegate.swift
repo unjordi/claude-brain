@@ -64,7 +64,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if updateAvail { tip += " · ⬆ actualización disponible" }
             button.toolTip = tip
         }
-        if let age = model.ageSeconds, age > staleThreshold { runFetch() }
+        // Refresca si el caché superó el piso de 5.5 min, O si una ventana YA pasó su reset (el %
+        // cacheado quedó viejo) y el caché tiene >60s — así el 100% no se queda pegado tras el reset.
+        if let age = model.ageSeconds, age > staleThreshold || (model.anyResetPassed && age > 60) { runFetch() }
         Task { @MainActor in await Updater.shared.checkIfStale() }
     }
 
@@ -98,7 +100,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.performClose(nil)
         } else {
             model.reload()
-            if let age = model.ageSeconds, age > staleThreshold { runFetch() }
+            // Refresca si el caché superó el piso de 5.5 min, O si una ventana YA pasó su reset (el %
+        // cacheado quedó viejo) y el caché tiene >60s — así el 100% no se queda pegado tras el reset.
+        if let age = model.ageSeconds, age > staleThreshold || (model.anyResetPassed && age > 60) { runFetch() }
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }

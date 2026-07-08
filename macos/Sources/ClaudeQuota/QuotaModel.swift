@@ -197,16 +197,23 @@ final class QuotaModel: ObservableObject {
         return -date.timeIntervalSinceNow
     }
 
-    /// Footer of the Límites tab (correo · ⟳ 5 min · últ. act. hace: …).
+    /// ¿Alguna ventana (5h / semanal) YA pasó su reset? Si sí, el % cacheado es viejo (debería
+    /// haber bajado) → conviene refrescar aunque el caché no haya llegado al piso de 5 min.
+    var anyResetPassed: Bool {
+        RelativeTime.isPast(snapshot?.five_hour?.resets_at)
+            || RelativeTime.isPast(snapshot?.weekly?.resets_at)
+    }
+
+    /// Footer of the Límites tab (correo · ⟳ 5 min + al reset 5h · últ. act. hace: …).
     var footerText: String {
         if let err = loadError, snapshot == nil { return "error: \(err)" }
         guard let snap = snapshot else { return "cargando…" }
         if let err = snap.error { return "error: \(err)" }
         let account = snap.account_email ?? (snap.basis == "oauth" ? "datos reales" : "estimado local")
         if snap.account_mismatch == true {
-            return "⚠ \(account) no es la cuenta fijada · ⟳ 5 min · act. hace: \(RelativeTime.compactReset(snap.updated_at))"
+            return "⚠ \(account) no es la cuenta fijada · ⟳ 5 min + al reset 5h · act. hace: \(RelativeTime.compactReset(snap.updated_at))"
         }
-        return "\(account) · ⟳ 5 min · últ. act. hace: \(RelativeTime.compactReset(snap.updated_at))"
+        return "\(account) · ⟳ 5 min + al reset 5h · últ. act. hace: \(RelativeTime.compactReset(snap.updated_at))"
     }
 
     // MARK: - stats-derived helpers
@@ -440,6 +447,12 @@ enum RelativeTime {
         default:       val = Int((Double(abs) / 86400).rounded()); unit = "d"
         }
         return diff < 0 ? "hace \(val)\(unit)" : "en \(val)\(unit)"
+    }
+
+    /// ¿El instante ya pasó? (resets_at en el pasado → la ventana ya se reinició y el % cacheado es viejo).
+    static func isPast(_ iso: String?) -> Bool {
+        guard let date = parse(iso) else { return false }
+        return date.timeIntervalSinceNow < 0
     }
 
     static func compactReset(_ iso: String?) -> String {
