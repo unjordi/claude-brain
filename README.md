@@ -2,6 +2,13 @@
 
 # 🧠 claude-brain
 
+[![CI](https://github.com/unjordi/claude-brain/actions/workflows/ci.yml/badge.svg)](https://github.com/unjordi/claude-brain/actions/workflows/ci.yml)
+[![test-brain](https://img.shields.io/badge/test--brain-45%20verdes-3aa76d?style=flat-square)](brain/test-brain.sh)
+[![plataformas](https://img.shields.io/badge/plataformas-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-4a90d9?style=flat-square)](#un-cerebro-tres-caras)
+[![hooks](https://img.shields.io/badge/hooks-8%20globales%20%C2%B7%204%20por--repo-e8884a?style=flat-square)](#la-jerarqu%C3%ADa--de-inviolable-a-sugerencia-leve)
+[![autoupdate](https://img.shields.io/badge/autoupdate-winturbo--style-d1702e?style=flat-square)](#lo-que-lo-hace-vivo--se-refleja-se-cura-se-actualiza)
+[![licencia](https://img.shields.io/badge/licencia-MIT-555?style=flat-square)](LICENSE)
+
 Los guardarraíles, la gobernanza y las normas de Claude Code, empaquetados en un cerebro que
 **viaja por git** y **aplica en toda máquina** — con la cara de un widget que **se refleja, se cura
 y se actualiza solo**.
