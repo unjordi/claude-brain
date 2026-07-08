@@ -27,19 +27,31 @@ Un `install-brain.sh` y tu máquina queda con el candado puesto. Idempotente y a
 
 ## Instalar
 
+**Un solo comando, autocontenido** — jala las dependencias solo (con el gestor del sistema) + clona +
+instala. No necesitas nada preinstalado salvo el gestor (`brew`/`apt`/`dnf`/`pacman`/`zypper`, o `winget` en Windows):
+
 ```sh
-git clone https://github.com/unjordi/claude-brain
-cd claude-brain
-./install.sh                 # cerebro + daemon de cuota + widget   (instalación maestra)
-./install.sh --no-gui        # solo cerebro + daemon  (sin widget)
-./install.sh --no-brain      # solo daemon + widget   (sin el cerebro)
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/unjordi/claude-brain/main/bootstrap.sh | bash
+```
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/unjordi/claude-brain/main/bootstrap.ps1 | iex
 ```
 
-Puerta de entrada por OS: **Linux / KDE Plasma 6** → `./install.sh` (raíz) · **macOS** →
-[`macos/`](macos/) (`./install.sh`, mismos flags) · **Windows** → [`windows/`](windows/)
-(`pwsh -File install.ps1`). **Prerrequisito de los guardias: [`jq`](https://jqlang.github.io/jq/)** —
-sin él los hooks **fallan abierto** (no bloquean) y el instalador no cablea `settings.json`; en
-Windows además necesitas Git for Windows (bash + coreutils).
+El bootstrap instala los prereqs que falten (git, `jq`, Node; + **.NET 10 SDK** en Windows), clona el
+repo y corre el instalador maestro (**cerebro + daemon + widget**). Idempotente. Flags:
+`curl -fsSL …/bootstrap.sh | bash -s -- --no-gui` (o `--no-brain`).
+
+**O a mano**, si ya tienes los prereqs:
+
+```sh
+git clone https://github.com/unjordi/claude-brain && cd claude-brain
+./install.sh                 # todo  ·  --no-gui (sin widget)  ·  --no-brain (sin cerebro)
+```
+Puerta por OS: **Linux/KDE** → `./install.sh` · **macOS** → [`macos/`](macos/) · **Windows** →
+[`windows/`](windows/) (`pwsh -File install.ps1`). **Prereq de los guardias: [`jq`](https://jqlang.github.io/jq/)**
+(sin él los hooks **fallan abierto** y no se cablea `settings.json`).
 
 ## La jerarquía — de inviolable a sugerencia leve
 
