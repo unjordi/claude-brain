@@ -187,6 +187,32 @@ Rough starting points (eyeballed against `/usage` on Max 20x):
 
 (Older installs used `*_CAP_TOKENS` raw-token caps; those are no longer read — raw token counts are dominated by cache reads, which Anthropic's limits weight at ~0.1×, so they over-reported badly.)
 
+## The "Proyectos" tab — naming and aliases
+
+The fetch script aggregates per-project token usage from the raw JSONL transcripts under
+`~/.claude/projects/<slug>/`, where `<slug>` is the project path with `/` turned into `-`
+(e.g. `/Users/me/code/cps` → `-Users-me-code-cps`). To keep this list clean it **normalizes**
+each slug to a canonical project name:
+
+- **Subdirectories and git worktrees under a known repo are merged into that repo.** The known
+  repos come from `~/.claude.json`'s `.projects` map (the real paths Claude Code has seen); the
+  slug is matched by **longest prefix** at a segment boundary, so `-Users-me-code-cps-cpscsmWasm`
+  folds into `cps`. This works even when the repo name itself has dashes (e.g. `claude-quota-widget`).
+- **Ephemeral worktrees** under `/private/tmp` or `/tmp` (slugs `-private-tmp-*` / `-tmp-*`) collapse
+  into a single **`(worktrees)`** bucket instead of one entry per throwaway worktree.
+- **Anything else** falls back to the **last path segment** of the slug (not the whole ugly path).
+
+**Optional aliases:** to rename a canonical project (e.g. an internal repo name you'd rather see as
+a product name), drop a JSON map at `~/.claude/proyectos-alias.json` mapping canonical name → alias:
+
+```sh
+cp brain/proyectos-alias.example.json ~/.claude/proyectos-alias.json
+$EDITOR ~/.claude/proyectos-alias.json        # {"registros_bats_y_buses": "MegaFlux", ...}
+```
+
+The file is optional — the script tolerates its absence. The alias is applied **after**
+normalization, so it renames the merged/canonical project, not each raw slug.
+
 ## Troubleshooting
 
 ```sh

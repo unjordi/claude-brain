@@ -264,15 +264,25 @@ if [[ -n "$DAILY_JSON" ]]; then
   # --- Fase 3: uso por proyecto (carpeta ~/.claude/projects/<slug>) -----------
   # ccusage no separa por proyecto (ni `daily` ni `session` traen la ruta) ->
   # se agrega a mano desde los mismos jsonl crudos de fase 2, por directorio.
-  # El slug de Claude Code (path con "/" -> "-") se traduce a nombre legible
-  # vía ~/.claude.json .projects (mapa de rutas reales); si un proyecto ya no
-  # aparece ahí (borrado/otra máquina), se cae a una versión legible del slug.
-  PROJECT_NAMES_JSON="{}"
+  # El slug de Claude Code (path con "/" -> "-") se NORMALIZA a un nombre de
+  # proyecto canónico: un subdir/worktree BAJO un repo conocido se fusiona con
+  # su raíz (longest-prefix contra las rutas reales de ~/.claude.json .projects),
+  # los worktrees efímeros (/private/tmp, /tmp) caen a un bucket "(worktrees)",
+  # y lo que no casa usa el último segmento del slug (no el path completo feo).
+  # Un alias opcional (~/.claude/proyectos-alias.json) renombra el canónico.
+  #  $PROJECT_REPOS_JSON: [{slug,name}] de cada repo real conocido.
+  PROJECT_REPOS_JSON="[]"
   if [[ -r "$HOME/.claude.json" ]]; then
-    PROJECT_NAMES_JSON="$(jq -c '
-      [(.projects // {}) | keys[] | {(gsub("/"; "-")): (split("/") | last)}] | add // {}
-    ' "$HOME/.claude.json" 2>/dev/null || echo '{}')"
-    jq -e . <<<"$PROJECT_NAMES_JSON" >/dev/null 2>&1 || PROJECT_NAMES_JSON="{}"
+    PROJECT_REPOS_JSON="$(jq -c '
+      [(.projects // {}) | keys[] | {slug: gsub("/"; "-"), name: (split("/") | last)}]
+    ' "$HOME/.claude.json" 2>/dev/null || echo '[]')"
+    jq -e . <<<"$PROJECT_REPOS_JSON" >/dev/null 2>&1 || PROJECT_REPOS_JSON="[]"
+  fi
+  # Alias opcional: mapa {"<nombre-canónico>":"<alias>"}; tolera que no exista.
+  PROJECT_ALIAS_JSON="{}"
+  if [[ -r "$HOME/.claude/proyectos-alias.json" ]]; then
+    PROJECT_ALIAS_JSON="$(jq -c '.' "$HOME/.claude/proyectos-alias.json" 2>/dev/null || echo '{}')"
+    jq -e . <<<"$PROJECT_ALIAS_JSON" >/dev/null 2>&1 || PROJECT_ALIAS_JSON="{}"
   fi
   PROJECT_DAY_TSV=""
   if [[ -d "$PROJ" ]]; then
@@ -327,12 +337,27 @@ if [[ -n "$DAILY_JSON" ]]; then
   fi
   PROJECT_STATS_JSON='{"projects":[],"by_day":{}}'
   if [[ -n "${PROJECT_DAY_TSV// /}" ]]; then
-    PROJECT_STATS_JSON="$(printf '%s' "$PROJECT_DAY_TSV" | jq -R -s --argjson names "$PROJECT_NAMES_JSON" '
+    PROJECT_STATS_JSON="$(printf '%s' "$PROJECT_DAY_TSV" | jq -R -s \
+        --argjson repos "$PROJECT_REPOS_JSON" --argjson aliases "$PROJECT_ALIAS_JSON" '
+      # Nombre canónico de un slug de proyecto:
+      #  1) (o extiende) un repo conocido -> nombre del repo raíz (longest-prefix
+      #     con frontera de segmento: slug == repo.slug o empieza con repo.slug+"-");
+      #  2) worktree efímero (-private-tmp-*, -tmp-*) -> bucket "(worktrees)";
+      #  3) si no casa -> último segmento del slug (no el path completo).
+      # Luego aplica el alias opcional sobre ese nombre canónico.
+      def canon($slug):
+        ( [ $repos[] | select(.slug as $rs | ($slug == $rs or ($slug | startswith($rs + "-")))) ]
+            | max_by(.slug | length) ) as $repo
+        | (if $repo != null then $repo.name
+           elif ($slug | test("^-(private-)?tmp-")) then "(worktrees)"
+           else ($slug | split("-") | last)
+           end) as $base
+        | ($aliases[$base] // $base);
       (split("\n") | map(select(length > 0) | split("\t"))
         | map({slug: .[0], date: .[1], in_tok: (.[2]|tonumber), out_tok: (.[3]|tonumber)})
-        | map(. + {name: ($names[.slug] // (.slug | ltrimstr("-") | gsub("-"; " ")))})
+        | map(. + {name: canon(.slug)})
       ) as $rows
-      | ($rows | group_by(.slug)
+      | ($rows | group_by(.name)
           | map({project: .[0].name, in_tok: (map(.in_tok) | add), out_tok: (map(.out_tok) | add)})
           | map(. + {tot: (.in_tok + .out_tok)})
           | sort_by(-.tot)) as $projs
