@@ -74,6 +74,11 @@ public sealed class QuotaService
         }
     }
 
+    /// ¿Alguna ventana (5h / semanal) YA pasó su reset? Si sí, el % cacheado es viejo (debería
+    /// haber bajado) → conviene refrescar aunque el caché no haya llegado al piso de 5.5 min.
+    public bool AnyResetPassed =>
+        Rel.IsPast(Snapshot?.FiveHour?.ResetsAt) || Rel.IsPast(Snapshot?.Weekly?.ResetsAt);
+
     public double? AgeSeconds
     {
         get
@@ -93,8 +98,8 @@ public sealed class QuotaService
             string account = Snapshot.AccountEmail
                 ?? (Snapshot.Basis == "oauth" ? "datos reales" : "estimado local");
             if (Snapshot.AccountMismatch)
-                return $"⚠ {account} no es la cuenta fijada · ⟳ 5 min · act. hace: {Rel.CompactReset(Snapshot.UpdatedAt)}";
-            return $"{account} · ⟳ 5 min · últ. act. hace: {Rel.CompactReset(Snapshot.UpdatedAt)}";
+                return $"⚠ {account} no es la cuenta fijada · ⟳ 5 min + al reset 5h · act. hace: {Rel.CompactReset(Snapshot.UpdatedAt)}";
+            return $"{account} · ⟳ 5 min + al reset 5h · últ. act. hace: {Rel.CompactReset(Snapshot.UpdatedAt)}";
         }
     }
 

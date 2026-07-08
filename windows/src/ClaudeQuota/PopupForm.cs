@@ -336,10 +336,18 @@ public sealed class PopupForm : Form
     private static string Caption(Bucket? bucket)
     {
         if (bucket == null) return "";
-        string s = $"Se restablece {Rel.Relative(bucket.ResetsAt)}";
+        string s = ResetLine(bucket.ResetsAt);
         if (bucket.CostUsd is double c)
             s += $" · ≈ ${c.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)} (API equiv local)";
         return s;
+    }
+
+    /// "Se restablece en Nmin" (futuro) o "Se restableció hace Nmin · actualizando…" (ya pasó → el %
+    /// cacheado quedó viejo y el fetch disparado por el reset lo está poniendo al día).
+    private static string ResetLine(string? iso)
+    {
+        string r = Rel.Relative(iso);
+        return Rel.IsPast(iso) ? $"Se restableció {r} · actualizando…" : $"Se restablece {r}";
     }
 
     // ----- Tab 1: Resumen -----

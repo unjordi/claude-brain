@@ -125,6 +125,13 @@ public static class Rel
         return diff < 0 ? $"hace {val}{unit}" : $"en {val}{unit}";
     }
 
+    /// ¿El instante ya pasó? (resets_at en el pasado → la ventana ya se reinició y el % cacheado es viejo).
+    public static bool IsPast(string? iso)
+    {
+        var date = Parse(iso);
+        return date is DateTimeOffset d && d < DateTimeOffset.UtcNow;
+    }
+
     public static string CompactReset(string? iso)
     {
         var date = Parse(iso);

@@ -118,9 +118,16 @@ internal static class Program
         {
             _svc.Reload();
             RedrawIcon();
-            if (_svc.AgeSeconds is double age && age > StaleThreshold)
-                RunFetch(force: false);
+            if (ShouldRefetch) RunFetch(force: true);
         }
+
+        // Refresca si el caché superó el piso de 5.5 min, O si una ventana YA pasó su reset (el %
+        // cacheado quedó viejo) y el caché tiene >60s — así el 100% no se queda pegado tras el reset.
+        // El >60s acota el disparo por-reset (no cada tick de 10s); el guard `_fetching` de RunFetch
+        // evita fetches solapados.
+        private bool ShouldRefetch =>
+            _svc.AgeSeconds is double age &&
+            (age > StaleThreshold || (_svc.AnyResetPassed && age > 60));
 
         private async void RunFetch(bool force)
         {
@@ -164,7 +171,7 @@ internal static class Program
             if (_popup.Visible) { _popup.Hide(); return; }
 
             _svc.Reload();
-            if (_svc.AgeSeconds is double age && age > StaleThreshold) RunFetch(force: false);
+            if (ShouldRefetch) RunFetch(force: true);
             _popup.RefreshData();
             PositionPopup();
             _popup.Show();

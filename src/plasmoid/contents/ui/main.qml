@@ -164,12 +164,28 @@ PlasmoidItem {
         refreshRunner.connectSource("systemctl --user start claude-quota.service")
     }
 
+    // epoch ms del último forceRefresh disparado por un reset ya pasado (guard anti-bucle).
+    property double lastResetRefresh: 0
+
     Timer {
         interval: 10000
         repeat: true
         running: true
         triggeredOnStart: true
-        onTriggered: reload()
+        onTriggered: {
+            reload()   // re-lee state.json/stats.json local (barato)
+            // Anti-"% pegado": si una ventana (5h/semanal) YA pasó su reset pero el snapshot es
+            // viejo (>60s), el % mostrado sería el de la ventana anterior hasta el próximo fetch.
+            // Disparamos forceRefresh() para adelantarlo. Acotado por lastResetRefresh (≥60s) para
+            // NO machacar systemctl/API cada tick de 10s; el piso anti-abuso de ~5 min lo aplica
+            // claude-quota.service por dentro (un forceRefresh de más ahí es no-op). Espeja el
+            // `(anyResetPassed && age > 60)` de AppDelegate.swift.
+            var age = root.snapshotAgeSec()
+            if (root.anyResetPassed && age > 60 && (Date.now() - root.lastResetRefresh) > 60000) {
+                root.lastResetRefresh = Date.now()
+                root.forceRefresh()
+            }
+        }
     }
 
     // ---------- Color / estado ----------
@@ -187,6 +203,15 @@ PlasmoidItem {
 
     readonly property real fivePct: snapshot && snapshot.five_hour ? snapshot.five_hour.percent : -1
     readonly property real weekPct: snapshot && snapshot.weekly    ? snapshot.weekly.percent    : -1
+
+    // true si el reset de la ventana 5h o semanal YA pasó (el % que se ve puede estar pegado en el
+    // de la ventana anterior). Espeja QuotaModel.anyResetPassed del macOS.
+    readonly property bool anyResetPassed: {
+        if (!snapshot) return false
+        var a = snapshot.five_hour ? isPast(snapshot.five_hour.resets_at) : false
+        var b = snapshot.weekly    ? isPast(snapshot.weekly.resets_at)    : false
+        return a || b
+    }
 
     // Límites semanales acotados a UN modelo (weekly_scoped con scope.model).
     // Efímeros y cambiantes → se renderizan dinámicamente, sin hardcodear modelos.
@@ -647,8 +672,8 @@ PlasmoidItem {
                             ? root.snapshot.account_email
                             : (root.snapshot.basis === "oauth" ? "datos reales" : "estimado local")
                         if (root.snapshot.account_mismatch === true)
-                            return "⚠ " + account + " no es la cuenta fijada · ⟳ 5 min · act. " + root.relativeTime(root.snapshot.updated_at)
-                        return account + " · ⟳ 5 min · act. " + root.relativeTime(root.snapshot.updated_at)
+                            return "⚠ " + account + " no es la cuenta fijada · ⟳ 5 min + al reset 5h · act. " + root.relativeTime(root.snapshot.updated_at)
+                        return account + " · ⟳ 5 min + al reset 5h · act. " + root.relativeTime(root.snapshot.updated_at)
                     }
                 }
             }
@@ -1182,7 +1207,12 @@ PlasmoidItem {
             Layout.fillWidth: true; opacity: 0.65; font.pointSize: Kirigami.Theme.smallFont.pointSize
             text: {
                 if (!block) return ""
-                let s = "Se restablece " + root.relativeTime(block.resets_at)
+                // Past-aware: si el resets_at ya pasó, el % puede estar pegado en el de la ventana
+                // anterior mientras llega el fetch → "Se restableció … · actualizando…". Espeja
+                // resetLine() de PopoverView.swift.
+                let past = root.isPast(block.resets_at)
+                let s = (past ? "Se restableció " : "Se restablece ") + root.relativeTime(block.resets_at)
+                if (past) s += " · actualizando…"
                 if (block.cost_usd !== null && block.cost_usd !== undefined)
                     s += " · ≈ $" + block.cost_usd.toFixed(2) + " (API equiv local)"
                 return s
@@ -1244,9 +1274,25 @@ PlasmoidItem {
         return "Claude: 5h " + five + " · 7d " + wk + warn
     }
     toolTipSubText: snapshot && snapshot.five_hour
-                    ? "sesión se restablece " + relativeTime(snapshot.five_hour.resets_at) : ""
+                    ? (isPast(snapshot.five_hour.resets_at)
+                       ? "sesión se restableció " + relativeTime(snapshot.five_hour.resets_at) + " · actualizando…"
+                       : "sesión se restablece " + relativeTime(snapshot.five_hour.resets_at)) : ""
 
     // ---------- Helpers ----------
+    // true si el instante ISO ya pasó (o es exactamente ahora). Espeja RelativeTime.isPast del macOS.
+    function isPast(iso) {
+        if (!iso) return false
+        const t = Date.parse(iso)
+        if (isNaN(t)) return false
+        return t <= Date.now()
+    }
+    // Edad del snapshot en segundos (a partir de updated_at); -1 si no hay dato válido.
+    function snapshotAgeSec() {
+        if (!snapshot || !snapshot.updated_at) return -1
+        const t = Date.parse(snapshot.updated_at)
+        if (isNaN(t)) return -1
+        return (Date.now() - t) / 1000
+    }
     function relativeTime(iso) {
         if (!iso) return ""
         const t = Date.parse(iso); if (isNaN(t)) return iso
