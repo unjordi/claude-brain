@@ -17,6 +17,8 @@ struct PopoverView: View {
     @State private var healing = false
     /// Mensaje transitorio tras curar/actualizar el cerebro.
     @State private var healMsg: String? = nil
+    /// Autoupdate del widget (winturbo-style): chequeo de versión + botón de actualizar.
+    @ObservedObject private var updater = Updater.shared
 
     // Neutral surfaces adapt to light/dark via labelColor; accents are fixed hex.
     private var label: Color { Color(nsColor: .labelColor) }
@@ -387,6 +389,8 @@ struct PopoverView: View {
                 .foregroundStyle(label.opacity(0.6))
                 .fixedSize(horizontal: false, vertical: true)
 
+            updateBanner
+
             brainHealth
 
             ForEach(brainTiers.indices, id: \.self) { i in
@@ -404,6 +408,39 @@ struct PopoverView: View {
         }
         .padding(16)
         .onAppear { brainState = BrainInspector.inspect() }
+        .task { await updater.checkIfStale() }
+    }
+
+    /// Banner de AUTOUPDATE (winturbo-style): solo aparece si el repo avanzó respecto al build actual.
+    @ViewBuilder
+    private var updateBanner: some View {
+        if updater.updateAvailable {
+            Button(action: { updater.runUpdate() }) {
+                HStack(spacing: 6) {
+                    if updater.updating {
+                        ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 12, height: 12)
+                    } else {
+                        Image(systemName: "arrow.up.circle.fill")
+                    }
+                    Text(updater.updating
+                         ? "Actualizando… (se relanza sola)"
+                         : (updater.canSelfUpdate
+                            ? "Actualizar widget (\(updater.localShort) → \(updater.remoteShort))"
+                            : "Hay versión nueva (\(updater.remoteShort)) — actualiza a mano"))
+                        .font(.caption).fontWeight(.semibold)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 9).padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 6).fill(accent.opacity(0.16)))
+                .foregroundStyle(accent)
+            }
+            .buttonStyle(.plain)
+            .disabled(updater.updating || !updater.canSelfUpdate)
+            .help(updater.canSelfUpdate
+                  ? "Corre git pull + install.sh en tu clon y relanza el widget con la versión nueva."
+                  : "No encuentro el clon del repo; actualiza a mano con git pull && ./install.sh.")
+        }
     }
 
     /// Resumen de salud LEÍDO de la realidad: cuántas piezas globales están activas + leyenda + hora.

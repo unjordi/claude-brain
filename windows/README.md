@@ -78,6 +78,25 @@ autostart entry, and launches it. Re-run any time to update in place.
 
 **Build prerequisite:** [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
+## Autoupdate ligero (winturbo-style)
+
+Igual que el puerto macOS, `install.ps1` escribe un `version.json` **junto al exe**
+(`%LOCALAPPDATA%\Programs\ClaudeQuota\version.json`) con el `sha`, la `date`, la ruta del
+`repo` (el clon local) y la `branch` del commit con que se buildeó (lee git desde el repo).
+Al abrir la pestaña **Cerebro**, el widget consulta `commits/main` de
+`github.com/unjordi/claude-brain` (throttle 1×/15 min, timeout 6 s, **fail-open**: sin red /
+sin `version.json` / sin clon → no molesta). Si el remoto avanzó, dibuja arriba un banner naranja
+**"⬆ Actualizar widget (local → remoto)"**.
+
+Al pulsarlo, corre un `.ps1` **temporal y detachado** (`UseShellExecute`, ventana oculta) que
+hace `git -C <repo> fetch origin` + `git merge --ff-only origin/main` y **solo si el fast-forward
+tiene éxito** llama a `windows\install.ps1`. Como el exe es self-contained single-file, no puede
+sobreescribirse mientras corre: por eso NO nos auto-cerramos a ciegas — es `install.ps1` quien
+detiene la instancia vieja (soltando el lock del exe), reconstruye, recopia y relanza. El script
+vive en un proceso pwsh/powershell aparte, así que sobrevive a que maten al widget. Si el ff aborta
+(árbol sucio / no-ff) no toca nada: la app sigue viva → **nunca te quedas sin widget**; un respaldo
+a 60 s resetea el banner y avisa. Requiere `git` + `pwsh`/`powershell` en el PATH del clon.
+
 ## Account guard (opt-in)
 
 Claude Code and the Claude desktop app can share a single OS credential slot, so a
@@ -121,7 +140,8 @@ tray. Source layout:
 | `Format.cs` | pctColor, `Fmt.*`, `Rel.*`, prettyModel, palette — ports of main.qml |
 | `StatsCompute.cs` | streaks, heatmap cells, model colors |
 | `TrayIconRenderer.cs` | the two-row tray bitmap → `Icon` |
-| `PopupForm.cs` | the owner-drawn 3-tab popover |
+| `PopupForm.cs` | the owner-drawn 5-tab popover (incl. the Cerebro tab + update banner) |
+| `Updater.cs` | lightweight autoupdate: reads `version.json`, checks GitHub, launches the detached ff-merge + reinstall |
 
 ## Notes / differences from Linux & macOS
 

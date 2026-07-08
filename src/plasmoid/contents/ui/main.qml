@@ -17,8 +17,9 @@ PlasmoidItem {
     property var stats: null
 
     property int currentTab: 0
-    // Al abrir/volver a la pestaña Cerebro (idx 3) re-lee el estado real de ~/.claude (doc = realidad).
-    onCurrentTabChanged: if (currentTab === 3) scanBrain()
+    // Al abrir/volver a la pestaña Cerebro (idx 3) re-lee el estado real de ~/.claude (doc = realidad)
+    // y chequea si hay versión nueva del widget (throttle 15 min dentro de checkUpdate).
+    onCurrentTabChanged: if (currentTab === 3) { scanBrain(); checkUpdate() }
 
     readonly property string cacheDir: {
         const raw = "" + StandardPaths.writableLocation(StandardPaths.GenericCacheLocation)
@@ -80,6 +81,78 @@ PlasmoidItem {
             root.brainHeal = (data["exit code"] === 0) ? "ok" : "error"
             disconnectSource(source)
             root.scanBrain()   // re-lee el estado tras curar
+        }
+    }
+
+    // Autoupdate (1/3): lee la versión EMBEBIDA (contents/version.json, escrita por install.sh al
+    // empaquetar). Reusa el engine "executable" con `cat`, igual que state.json/stats.json.
+    P5Support.DataSource {
+        id: versionSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            if (data["exit code"] === 0 && data.stdout) {
+                try {
+                    var o = JSON.parse(data.stdout)
+                    root.updLocalShort = o.sha ? o.sha : "?"
+                    root.updRepoPath = o.repo ? o.repo : ""
+                    root.updLocalDate = o.date ? o.date : ""
+                    // Auto-update posible solo si version.json trae un repo (clon en disco); si no,
+                    // el botón invita a hacerlo a mano. FAIL-OPEN.
+                    root.updCanSelfUpdate = root.updRepoPath !== ""
+                } catch (e) { /* fail-open: build sin version.json → no molesta */ }
+            }
+            disconnectSource(source)
+            root.updLocalLoaded = true
+            root.checkUpdateRemote()   // encadena la consulta a GitHub
+        }
+    }
+
+    // Autoupdate (2/3): consulta commits/main de claude-brain en GitHub (curl está en Linux). GitHub
+    // exige User-Agent. FAIL-OPEN: sin red / rc!=0 / parse fallido → no muestra nada.
+    P5Support.DataSource {
+        id: updateCheckSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            disconnectSource(source)
+            if (data["exit code"] !== 0 || !data.stdout) return   // sin red → fail-open
+            try {
+                var o = JSON.parse(data.stdout)
+                var fullSha = o.sha
+                if (!fullSha) return
+                var rDateIso = (o.commit && o.commit.committer) ? o.commit.committer.date : ""
+                root.updRemoteShort = ("" + fullSha).substring(0, 7)
+                // Novedad = el sha remoto NO empieza con el local Y (si hay fechas) el remoto es más nuevo.
+                var differs = ("" + fullSha).indexOf(root.updLocalShort) !== 0
+                var newer = true
+                if (root.updLocalDate && rDateIso) {
+                    var lt = Date.parse(root.updLocalDate), rt = Date.parse(rDateIso)
+                    if (!isNaN(lt) && !isNaN(rt)) newer = rt > lt + 2000
+                }
+                root.updateAvailable = differs && newer
+            } catch (e) { /* fail-open */ }
+        }
+    }
+
+    // Autoupdate (3/3): corre el update. DIFERENCIA CLAVE CON macOS: en KDE el applet vive DENTRO de
+    // plasmashell (no es un proceso propio que se pueda matar/relanzar como el .app), así que NO se
+    // mata plasmashell: el update = git ff + install.sh (kpackagetool6 -u actualiza el paquete) y el
+    // applet toma la versión nueva al RECARGAR el plasmoide. `nohup` lo blinda de un SIGHUP si
+    // plasmashell recargara el applet a media instalación; sin `&` para que el exit code vuelva aquí.
+    P5Support.DataSource {
+        id: updateRunSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            disconnectSource(source)
+            root.updating = false
+            if (data["exit code"] === 0) {
+                root.updateMessage = "✓ actualizado (recarga el widget)"
+                root.updateAvailable = false
+            } else {
+                root.updateMessage = "✗ error (revisa /tmp/claude-quota-update.log)"
+            }
         }
     }
 
@@ -294,6 +367,63 @@ PlasmoidItem {
     function healBrainGlobal() {
         root.brainHeal = "running"
         healSource.connectSource("bash '" + brainScript + "' heal")
+    }
+
+    // ---------- Autoupdate LIGERO (winturbo-style) del widget ----------
+    // Espeja Updater.swift: la versión con que se empaquetó el plasmoid (sha/fecha/repo/branch) va
+    // embebida en contents/version.json (la escribe install.sh al empaquetar). Al abrir la pestaña
+    // Cerebro se compara contra commits/main de claude-brain en GitHub; si el repo avanzó, se ofrece un
+    // botón que hace git ff + install.sh. FAIL-OPEN: sin red / sin version.json / sin repo → no molesta.
+    property bool updateAvailable: false
+    property bool updating: false
+    property string updateMessage: ""       // "", "✓ actualizado…", "✗ error…" (resultado del update)
+    property string updLocalShort: "?"      // sha corto embebido ("?" si no hay version.json)
+    property string updRemoteShort: "?"     // sha corto remoto (commits/main)
+    property string updRepoPath: ""         // ruta del clon en disco (de version.json)
+    property string updLocalDate: ""        // ISO del commit embebido ("" si no hay)
+    property bool updLocalLoaded: false     // version.json ya leído (una sola vez)
+    property bool updCanSelfUpdate: false   // hay repo en disco → botón auto; si no, "a mano"
+    property double updLastCheck: 0         // epoch ms del último chequeo remoto (throttle 15 min)
+    readonly property string updSlug: "unjordi/claude-brain"
+
+    // Ruta del version.json embebido, relativa a este main.qml (…/contents/ui/ → …/contents/version.json).
+    readonly property string versionFile: {
+        var u = "" + Qt.resolvedUrl("../version.json")
+        if (u.startsWith("file://")) u = u.substring("file://".length)
+        return u
+    }
+
+    // Chequea como mucho 1×/15 min (evita el rate-limit anónimo de GitHub). Primero carga version.json
+    // (una sola vez); su onNewData encadena la consulta remota. Fire-and-forget desde la vista.
+    function checkUpdate() {
+        var now = Date.now()
+        if (root.updLastCheck > 0 && (now - root.updLastCheck) < 900000) return   // < 15 min → no reconsulta
+        root.updLastCheck = now
+        if (!root.updLocalLoaded) {
+            versionSource.connectSource("cat '" + root.versionFile + "'")
+        } else {
+            root.checkUpdateRemote()
+        }
+    }
+    function checkUpdateRemote() {
+        if (root.updLocalShort === "?") return   // sin version.json (build viejo) → no molesta
+        var url = "https://api.github.com/repos/" + root.updSlug + "/commits/main"
+        updateCheckSource.connectSource("curl -fsSL -H 'User-Agent: claude-quota-widget' '" + url + "'")
+    }
+    // Jala lo último (fast-forward) y reinstala el plasmoid. NO mata plasmashell (el applet vive dentro).
+    // El applet toma la versión nueva al recargar el plasmoide. FAIL-OPEN: sin repo → invita a hacerlo a mano.
+    function runUpdate() {
+        if (!root.updCanSelfUpdate || root.updRepoPath === "") {
+            root.updateMessage = "actualiza a mano: git pull && ./install.sh"
+            return
+        }
+        root.updating = true
+        root.updateMessage = ""
+        var repo = root.updRepoPath
+        var inner = "cd '" + repo + "' && git fetch origin --quiet && git merge --ff-only origin/main"
+                  + " && bash '" + repo + "/install.sh'"
+        var cmd = "nohup bash -lc \"" + inner + "\" >/tmp/claude-quota-update.log 2>&1"
+        updateRunSource.connectSource(cmd)
     }
 
     function inArr(a, x) { return a && a.indexOf(x) !== -1 }
@@ -633,7 +763,7 @@ PlasmoidItem {
                 id: cerebroScroll
                 contentWidth: availableWidth   // sin scroll horizontal; solo vertical
                 clip: true
-                Component.onCompleted: root.scanBrain()   // primera lectura al construir la vista
+                Component.onCompleted: { root.scanBrain(); root.checkUpdate() }   // primera lectura + chequeo de versión
                 ColumnLayout {
                     width: cerebroScroll.availableWidth
                     spacing: Kirigami.Units.largeSpacing
@@ -652,6 +782,51 @@ PlasmoidItem {
                         Layout.fillWidth: true; opacity: 0.6; wrapMode: Text.WordWrap
                         font.pointSize: Kirigami.Theme.smallFont.pointSize
                         text: "Guardarraíles + gobernanza + normas de Claude Code. Viaja por git, aplica en toda máquina. De más duro (arriba) a más leve (abajo). Toca una pieza para ver su evento y un ejemplo."
+                    }
+
+                    // Banner de AUTOUPDATE (winturbo-style, espeja updateBanner de PopoverView.swift):
+                    // solo aparece si el repo avanzó respecto al build empaquetado. Naranja #e8884a @16%.
+                    // Al pulsarlo corre git ff + install.sh (ver runUpdate); en KDE el applet toma la
+                    // versión nueva al RECARGAR el plasmoide (kquitapp6 plasmashell && kstart plasmashell,
+                    // o re-loguear) — no se fuerza aquí. Fail-open: sin repo → "actualiza a mano", no hace nada.
+                    Rectangle {
+                        id: updBanner
+                        Layout.fillWidth: true
+                        visible: root.updateAvailable || root.updating || root.updateMessage !== ""
+                        radius: Kirigami.Units.smallSpacing
+                        color: Qt.rgba(0.91, 0.53, 0.29, 0.16)   // #e8884a @ 16%
+                        implicitHeight: updRow.implicitHeight + Kirigami.Units.smallSpacing * 2
+                        RowLayout {
+                            id: updRow
+                            anchors.left: parent.left; anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.margins: Kirigami.Units.smallSpacing
+                            spacing: Kirigami.Units.smallSpacing
+                            PC3.Label {
+                                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                color: "#e8884a"; font.bold: true
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                text: root.updating
+                                      ? "… Actualizando… (recarga el widget al terminar)"
+                                      : (root.updateMessage !== ""
+                                         ? root.updateMessage
+                                         : (root.updCanSelfUpdate
+                                            ? "⬆ Actualizar widget (" + root.updLocalShort + " → " + root.updRemoteShort + ")"
+                                            : "⬆ Hay versión nueva (" + root.updRemoteShort + ") — actualiza a mano"))
+                            }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            enabled: !root.updating && root.updCanSelfUpdate && root.updateAvailable
+                            onClicked: root.runUpdate()
+                            PC3.ToolTip.text: root.updCanSelfUpdate
+                                ? "Corre git fetch + merge --ff-only origin/main + install.sh en tu clon. En KDE el applet toma la versión nueva al recargar el plasmoide (kquitapp6 plasmashell && kstart plasmashell, o re-loguear)."
+                                : "No hay 'repo' en version.json; actualiza a mano con git pull && ./install.sh."
+                            PC3.ToolTip.visible: containsMouse
+                            PC3.ToolTip.delay: 500
+                        }
                     }
 
                     // Recuadro de SALUD: piezas globales activas + leyenda + hora + botón-curita.

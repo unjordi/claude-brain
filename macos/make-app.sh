@@ -30,6 +30,15 @@ if [[ -d "$ROOT/../brain" ]]; then
     cp -R "$ROOT/../brain" "$APP/Contents/Resources/brain"
 fi
 
+# Versión EMBEBIDA para el autoupdate (winturbo-style): el SHA + la fecha del commit con que se
+# buildeó y la ruta del clon, para que la app compare contra GitHub y sepa desde dónde re-jalar.
+_sha="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+_date="$(git -C "$ROOT" show -s --format=%cI HEAD 2>/dev/null || echo "")"
+_repo="$(cd "$ROOT/.." 2>/dev/null && pwd || echo "")"
+_branch="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+printf '{"sha":"%s","date":"%s","repo":"%s","branch":"%s"}\n' \
+  "$_sha" "$_date" "$_repo" "$_branch" > "$APP/Contents/Resources/version.json"
+
 # Ad-hoc codesign so Gatekeeper/TCC treat it as a stable identity across rebuilds.
 codesign --force --sign - "$APP" >&2 2>/dev/null || true
 

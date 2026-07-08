@@ -38,6 +38,19 @@ Write-Host "==> Instalando en $dest ..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 Copy-Item (Join-Path $pub "$appName.exe") $exe -Force
 
+# Version EMBEBIDA para el autoupdate (winturbo-style), espejo del bloque version.json de
+# macos/make-app.sh: el SHA + la fecha del commit con que se buildeo y la ruta del clon, para que
+# la app compare contra GitHub y sepa desde donde re-jalar. install.ps1 corre DESDE el repo, asi
+# que puede leer git. El repo raiz es el padre de windows/ ($here). Fail-safe: si git no responde,
+# quedan valores neutros y el chequeo de la app falla-abierto (no molesta).
+$repoRoot = Split-Path -Parent $here
+$sha    = (git -C $repoRoot rev-parse --short HEAD 2>$null); if (-not $sha)    { $sha = 'unknown' }
+$date   = (git -C $repoRoot show -s --format=%cI HEAD 2>$null); if (-not $date) { $date = '' }
+$branch = (git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null); if (-not $branch) { $branch = '' }
+$version = [ordered]@{ sha = $sha; date = $date; repo = $repoRoot; branch = $branch }
+$version | ConvertTo-Json -Compress | Set-Content -Path (Join-Path $dest 'version.json') -Encoding utf8
+Write-Host "==> version.json embebido (sha $sha, rama $branch) para el autoupdate." -ForegroundColor Green
+
 # Empaqueta el cerebro (brain/) JUNTO al exe para que el boton-curita 🩹 de la pestaña Cerebro
 # pueda correr install-brain.ps1 sin depender de donde este el clon del repo. El boton lo busca
 # en <AppDir>\brain\install-brain.ps1 (relativo a AppContext.BaseDirectory).
