@@ -455,6 +455,27 @@ enum RelativeTime {
         return date.timeIntervalSinceNow < 0
     }
 
+    /// Reset ESPECÍFICO/útil (como la app oficial de Claude): ventanas cercanas (<24h, p.ej. la de 5h)
+    /// → duración fina "en 4h 36min"; lejanas (≥24h, semanales) → fecha absoluta "el mié 7:59 a. m.".
+    static let resetDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_MX")
+        f.dateFormat = "EEE'@'h:mm"   // "mié@7:59"
+        return f
+    }()
+    static func resetDetail(_ iso: String?) -> String {
+        guard let date = parse(iso) else { return "" }
+        let secs = date.timeIntervalSinceNow
+        if secs < 86400 {   // < 24h → duración compacta "en 4h36m"
+            let total = max(0, Int(secs.rounded()))
+            let h = total / 3600, m = (total % 3600) / 60
+            if h > 0 { return m > 0 ? "en \(h)h\(m)m" : "en \(h)h" }
+            if total >= 60 { return "en \(m)m" }
+            return "en <1m"
+        }
+        return resetDayFormatter.string(from: date)   // ≥ 24h → "mié@7:59"
+    }
+
     static func compactReset(_ iso: String?) -> String {
         guard let iso else { return "" }
         guard let date = parse(iso) else { return "" }

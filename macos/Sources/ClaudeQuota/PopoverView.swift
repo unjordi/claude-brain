@@ -206,8 +206,10 @@ struct PopoverView: View {
     /// "Se restablece en Nmin" (futuro) o "Se restableció hace Nmin · actualizando…" (ya pasó → el %
     /// cacheado quedó viejo y el fetch disparado por el reset lo está poniendo al día).
     private func resetLine(_ iso: String?) -> String {
-        let r = RelativeTime.relative(iso)
-        return RelativeTime.isPast(iso) ? "Se restableció \(r) · actualizando…" : "Se restablece \(r)"
+        if RelativeTime.isPast(iso) {
+            return "Se restableció \(RelativeTime.relative(iso)) · actualizando…"
+        }
+        return "Se restablece \(RelativeTime.resetDetail(iso))"   // "en 4h 36min" / "el mié 7:59 a. m."
     }
 
     private func caption(_ bucket: Bucket?) -> String {
