@@ -32,6 +32,7 @@ struct PopoverView: View {
             railButton(1, "chart.bar.doc.horizontal", "Resumen")
             railButton(2, "chart.bar", "Modelos")
             railButton(3, "folder", "Proyectos")
+            railButton(4, "brain", "Cerebro")
             Spacer()
             HStack(spacing: 6) {
                 Button(action: onRefresh) {
@@ -70,8 +71,10 @@ struct PopoverView: View {
             ScrollView(.vertical, showsIndicators: false) { resumenTab }
         case 2:
             modelosTab
-        default:
+        case 3:
             proyectosTab
+        default:
+            ScrollView(.vertical, showsIndicators: true) { cerebroTab }
         }
     }
 
@@ -355,6 +358,113 @@ struct PopoverView: View {
             }
         }
     }
+
+    // ===== Tab 4: Cerebro =====
+
+    /// Infografía del cerebro global de Claude Code: los componentes instalados,
+    /// jerarquizados de INVIOLABLE (hooks que deniegan) → SUGERENCIA LEVE (skills opt-in).
+    /// Contenido ESTÁTICO (refleja `brain/`); se mantiene a mano cuando cambian las piezas.
+    private var cerebroTab: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // Encabezado de marca: destello Claude + 🧠.
+            HStack(spacing: 7) {
+                Image(systemName: "sparkle")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(accent)
+                Text("🧠 Cerebro global")
+                    .font(.headline)
+            }
+            Text("Guardarraíles + gobernanza + normas de Claude Code. Viaja por git, aplica en toda máquina. De más duro (arriba) a más leve (abajo).")
+                .font(.caption2)
+                .foregroundStyle(label.opacity(0.6))
+                .fixedSize(horizontal: false, vertical: true)
+
+            ForEach(brainTiers.indices, id: \.self) { i in
+                tierSection(brainTiers[i])
+            }
+
+            Text("Instalado por `install-brain.sh` · probado por `test-brain.sh` · sin `jq` los hooks fallan ABIERTO (no bloquean).")
+                .font(.caption2)
+                .foregroundStyle(label.opacity(0.45))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+    }
+
+    /// Un nivel del cerebro: espina de color + encabezado + hojas con conectores de árbol.
+    @ViewBuilder
+    private func tierSection(_ tier: BrainTier) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 2).fill(tier.color).frame(width: 3)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(tier.emoji).font(.title3)
+                    Text(tier.title).font(.subheadline).fontWeight(.heavy)
+                        .foregroundStyle(tier.color)
+                }
+                Text(tier.subtitle).font(.caption2).foregroundStyle(label.opacity(0.6))
+                ForEach(tier.items.indices, id: \.self) { j in
+                    brainLeaf(tier.items[j], last: j == tier.items.count - 1, color: tier.color)
+                }
+            }
+        }
+    }
+
+    /// Una hoja del árbol: conector monoespaciado + emoji + nombre (mono) — descripción.
+    @ViewBuilder
+    private func brainLeaf(_ item: BrainItem, last: Bool, color: Color) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(last ? "└─" : "├─")
+                .font(.system(.footnote, design: .monospaced))
+                .foregroundStyle(color.opacity(0.55))
+            Text(item.emoji).font(.footnote)
+            (Text(item.name).font(.system(.footnote, design: .monospaced)).fontWeight(.semibold)
+                + Text("  " + item.desc).font(.caption2).foregroundColor(label.opacity(0.62)))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Datos ESTÁTICOS del cerebro (reflejan `brain/hooks`, `brain/norms`, `brain/skills`).
+    private var brainTiers: [BrainTier] {
+        [
+            BrainTier(
+                emoji: "🔒", title: "INVIOLABLE", color: Color(hex: "#dc3545"),
+                subtitle: "hooks que BLOQUEAN (deny) — no negociables",
+                items: [
+                    BrainItem("🚧", "git-branch-guard", "push/merge a develop·main → denegado, te redirige a ramita→MR"),
+                    BrainItem("🔗", "merge-squash-guard", "MR a develop sin --squash → denegado (1 commit limpio)"),
+                    BrainItem("✋", "confirmar-merge-develop", "merge a develop sin tu OK → denegado; a main exige OK súper-explícito"),
+                    BrainItem("✅", "dod-verificar", "declarar “listo” sin build+tests+memoria → denegado"),
+                    BrainItem("💸", "delegacion-gate", "reclutar agente con costo → pide tu consentimiento (puede negar)"),
+                ]),
+            BrainTier(
+                emoji: "🔔", title: "AUTOMÁTICO", color: accent,
+                subtitle: "hooks que inyectan / recuerdan — no bloquean",
+                items: [
+                    BrainItem("🧭", "sesion-inicio", "al abrir/retomar reinyecta rama + norma de git + orden de leer memoria"),
+                    BrainItem("💾", "precompact-volcar-estado", "antes de compactar, vuelca avance/decisiones/pendientes a memoria"),
+                    BrainItem("📊", "recordar-dashboard", "antes de un push, recuerda actualizar el dashboard del cerebro"),
+                    BrainItem("📝", "delegacion-registrar", "registra el consentimiento (materializa el “pregunta 1×”)"),
+                ]),
+            BrainTier(
+                emoji: "📜", title: "NORMAS", color: Color(hex: "#4a90d9"),
+                subtitle: "reglas que Claude se autoimpone (CLAUDE.md)",
+                items: [
+                    BrainItem("🎯", "Definición de LISTO", "verde técnico ≠ listo; exige tu QA o tu OK expreso"),
+                    BrainItem("🪞", "Doc = realidad", "cambió algo → actualiza su doc en la misma tanda, sin preguntar"),
+                    BrainItem("🌿", "Flujo de git", "ramita → MR → develop (squash); main es release-only"),
+                    BrainItem("💰", "Costo de delegación", "gratis / incluido / con costo — window-aware, lee tu cuota"),
+                ]),
+            BrainTier(
+                emoji: "💡", title: "SKILLS", color: Color(hex: "#3aa76d"),
+                subtitle: "herramientas opt-in — las invocas tú",
+                items: [
+                    BrainItem("📦", "cerrar-slice", "build+tests+memoria al día + MR con resumen curado por slice"),
+                ]),
+        ]
+    }
 }
 
 // MARK: - Subcomponents
@@ -406,6 +516,25 @@ private struct ProgressBar: View {
             }
         }
         .frame(height: 9)
+    }
+}
+
+/// Un nivel del cerebro (tier) con sus hojas — datos estáticos de la pestaña Cerebro.
+private struct BrainTier {
+    let emoji: String
+    let title: String
+    let color: Color
+    let subtitle: String
+    let items: [BrainItem]
+}
+
+/// Una hoja del árbol del cerebro (un hook / norma / skill).
+private struct BrainItem {
+    let emoji: String
+    let name: String
+    let desc: String
+    init(_ emoji: String, _ name: String, _ desc: String) {
+        self.emoji = emoji; self.name = name; self.desc = desc
     }
 }
 
