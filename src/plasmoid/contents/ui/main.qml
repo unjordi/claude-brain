@@ -101,12 +101,6 @@ PlasmoidItem {
         var sym = cur === "USD" ? "$" : (cur ? cur + " " : "$")
         return sym + v.toFixed(2)
     }
-    // Importe en dólares compacto para el costo "equivalente API" (tokens×tarifa)
-    // de modelos: 2 decimales bajo $1000, entero arriba.
-    function fmtUsd(v) {
-        if (v === undefined || v === null) return "—"
-        return v >= 1000 ? "$" + Math.round(v) : "$" + v.toFixed(2)
-    }
 
     // Paleta para modelos (distinta por modelo, cohesiva con el acento).
     readonly property var modelPalette: ["#e8884a", "#5b9bd5", "#9b6dd6", "#5fb98e", "#d6a15b", "#c96daa"]
@@ -357,11 +351,6 @@ PlasmoidItem {
             ColumnLayout {
                 spacing: Kirigami.Units.largeSpacing
                 Kirigami.Heading { level: 3; text: "Uso por modelo"; Layout.fillWidth: true }
-                PC3.Label {
-                    text: "$ = equivalente API (tokens×tarifa), no gasto de bolsillo"
-                    opacity: 0.5; Layout.fillWidth: true; wrapMode: Text.WordWrap
-                    font.pointSize: Kirigami.Theme.smallFont.pointSize
-                }
                 // gráfico de barras apiladas por día
                 Item {
                     id: chartArea
@@ -409,11 +398,6 @@ PlasmoidItem {
                                 PC3.Label {
                                     opacity: 0.7
                                     text: root.fmtTok(modelData.in_tok) + " in · " + root.fmtTok(modelData.out_tok) + " out"
-                                }
-                                PC3.Label {
-                                    visible: modelData.cost !== undefined && modelData.cost !== null
-                                    opacity: 0.55
-                                    text: "· " + root.fmtUsd(modelData.cost)
                                 }
                                 PC3.Label {
                                     text: modelData.pct.toFixed(1) + "%"; font.bold: true

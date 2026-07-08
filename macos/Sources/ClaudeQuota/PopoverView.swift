@@ -247,9 +247,6 @@ struct PopoverView: View {
     private var modelosTab: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Uso por modelo").font(.headline)
-            Text("$ = equivalente API (tokens×tarifa), no gasto de bolsillo")
-                .font(.caption2)
-                .foregroundStyle(label.opacity(0.5))
             stackedChart.frame(height: 126)
             // Encabezado + gráfico fijos; solo la lista scrollea (altura acotada al
             // espacio restante) → el popover no crece por más modelos que se acumulen.
@@ -264,11 +261,6 @@ struct PopoverView: View {
                             Spacer()
                             Text("\(Fmt.tok(m.in_tok)) in · \(Fmt.tok(m.out_tok)) out")
                                 .foregroundStyle(label.opacity(0.7))
-                            if let c = m.cost {
-                                Text("· \(Fmt.usd(c))")
-                                    .foregroundStyle(label.opacity(0.55))
-                                    .help("Equivalente API acumulado (tokens×tarifa), no gasto de bolsillo")
-                            }
                             Text(String(format: "%.1f%%", m.pct ?? 0))
                                 .fontWeight(.bold)
                                 .foregroundStyle(model.modelColor(m.model))
@@ -313,9 +305,6 @@ struct PopoverView: View {
     private var proyectosTab: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Uso por proyecto").font(.headline)
-            Text("$ = equivalente API (tokens×tarifa), no gasto de bolsillo")
-                .font(.caption2)
-                .foregroundStyle(label.opacity(0.5))
             stackedProjectChart.frame(height: 126)
             // Encabezado + gráfico fijos; solo la lista scrollea (altura acotada al
             // espacio restante) → el popover no crece por más proyectos que se acumulen.
@@ -330,11 +319,6 @@ struct PopoverView: View {
                             Spacer()
                             Text("\(Fmt.tok(p.in_tok)) in · \(Fmt.tok(p.out_tok)) out")
                                 .foregroundStyle(label.opacity(0.7))
-                            if let c = p.cost {
-                                Text("· \(Fmt.usd(c))")
-                                    .foregroundStyle(label.opacity(0.55))
-                                    .help("Equivalente API acumulado (tokens×tarifa), no gasto de bolsillo")
-                            }
                             Text(String(format: "%.1f%%", p.pct ?? 0))
                                 .fontWeight(.bold)
                                 .foregroundStyle(model.projectColor(p.project))
