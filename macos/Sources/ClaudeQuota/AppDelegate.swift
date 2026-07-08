@@ -41,6 +41,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refresh() {
         model.reload()
+        // Avisos del cerebro para la píldora (sin abrir el popover): 🩹 si le falta una pieza,
+        // ⬆ si hay versión nueva. El estado del cerebro se lee del ~/.claude real (barato); el de
+        // update se leyó en el último chequeo (se refresca abajo, throttle 15 min).
+        let heal = !BrainInspector.inspect().isComplete
+        // refresh() siempre corre en main (applicationDidFinishLaunching / Timer / main.async);
+        // assumeIsolated deja leer la propiedad @MainActor del Updater sin marcar toda la clase.
+        let updateAvail = MainActor.assumeIsolated { Updater.shared.updateAvailable }
         if let button = statusItem.button {
             let five = PillImage.RowData(label: "5h",
                                          pct: model.fivePct,
@@ -50,10 +57,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                          reset: model.snapshot?.weekly?.resets_at)
             button.image = PillImage.render(five: five, week: week,
                                             hasError: model.statusKey == "error",
+                                            update: updateAvail, heal: heal,
                                             appearance: button.effectiveAppearance)
-            button.toolTip = model.tooltip
+            var tip = model.tooltip
+            if heal { tip += " · 🩹 al cerebro le falta una pieza" }
+            if updateAvail { tip += " · ⬆ actualización disponible" }
+            button.toolTip = tip
         }
         if let age = model.ageSeconds, age > staleThreshold { runFetch() }
+        Task { @MainActor in await Updater.shared.checkIfStale() }
     }
 
     /// Force a real fetch regardless of cache age (from the popover button).

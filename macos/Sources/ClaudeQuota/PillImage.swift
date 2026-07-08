@@ -21,6 +21,7 @@ enum PillImage {
     private static let resetFont = NSFont.systemFont(ofSize: 7, weight: .regular)
 
     static func render(five: RowData, week: RowData, hasError: Bool,
+                       update: Bool = false, heal: Bool = false,
                        appearance: NSAppearance?) -> NSImage {
         let rows = [five, week]
 
@@ -38,7 +39,11 @@ enum PillImage {
             if !rt.isEmpty { w += gap + ceil(width(rt, resetFont)) }
             maxWidth = max(maxWidth, w)
         }
-        let totalW = ceil(maxWidth) + 2   // tiny right breathing room
+        // Reserva una columna a la derecha para los avisos del cerebro (🩹 falta pieza / ⬆ update),
+        // para que la píldora te avise sin abrir el popover.
+        let dotD: CGFloat = 6
+        let anyDot = update || heal
+        let totalW = ceil(maxWidth) + 2 + (anyDot ? dotD + 4 : 0)
 
         let image = NSImage(size: NSSize(width: totalW, height: height))
         let draw = {
@@ -46,6 +51,16 @@ enum PillImage {
             // Two rows: top row center y=15, bottom row center y=6 (2px inner margins).
             drawRow(rows[0], hasError: hasError, centerY: 15, barX: barX, pctX: pctX)
             drawRow(rows[1], hasError: hasError, centerY: 6,  barX: barX, pctX: pctX)
+            // Avisos del cerebro a la derecha: 🩹 rojo (falta pieza) arriba, ⬆ naranja (update) abajo.
+            if anyDot {
+                let dx = totalW - dotD - 2
+                if heal && update {
+                    drawDot(x: dx, y: 12, d: dotD, hex: "#dc3545")
+                    drawDot(x: dx, y: 3,  d: dotD, hex: "#e8884a")
+                } else {
+                    drawDot(x: dx, y: (height - dotD) / 2, d: dotD, hex: heal ? "#dc3545" : "#e8884a")
+                }
+            }
             image.unlockFocus()
         }
         if let appearance {
@@ -118,5 +133,11 @@ enum PillImage {
 
     private static func width(_ s: String, _ font: NSFont) -> CGFloat {
         (s as NSString).size(withAttributes: [.font: font]).width
+    }
+
+    /// Un puntito relleno (aviso del cerebro) en la píldora de la barra.
+    private static func drawDot(x: CGFloat, y: CGFloat, d: CGFloat, hex: String) {
+        NSColor(hex: hex).setFill()
+        NSBezierPath(ovalIn: NSRect(x: x, y: y, width: d, height: d)).fill()
     }
 }
