@@ -402,14 +402,20 @@ struct PopoverView: View {
     /// Conversaciones recientes del app de escritorio (leídas del cache local por chats-extract.js,
     /// sin red ni cookies). Click abre el chat en claude.ai; hover muestra el summary.
     private var chatsTab: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("Chats").font(.headline)
             if model.chats.isEmpty {
                 Text("Sin conversaciones locales.\nAbre el app de escritorio de Claude y espera al próximo refresco.")
                     .font(.caption).foregroundStyle(label.opacity(0.6))
                 Spacer()
             } else {
-                ScrollView(.vertical, showsIndicators: true) {
+                chatsPerDayChart.frame(height: 90)                 // chats/día apilados por modelo
+                VStack(spacing: 4) {                               // desglose por modelo con %
+                    ForEach(chatsByModel) { chatModelRow($0) }
+                }
+                Divider().overlay(label.opacity(0.12))
+                Text("recientes").font(.caption).foregroundStyle(label.opacity(0.5))
+                ScrollView(.vertical, showsIndicators: true) {     // lista clickeable
                     VStack(spacing: 6) {
                         ForEach(model.chats.prefix(20)) { c in chatRow(c) }
                     }
@@ -421,7 +427,42 @@ struct PopoverView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    /// Una fila de la pestaña Chats: título + badge de modelo + fecha; click abre, hover -> summary.
+    /// Gráfica de barras apiladas: una barra por día, altura = # chats, segmentos por color de modelo.
+    private var chatsPerDayChart: some View {
+        let days = chatDays
+        let maxC = Double(maxDayChatCount)
+        return GeometryReader { geo in
+            let h = geo.size.height
+            HStack(alignment: .bottom, spacing: 2) {
+                ForEach(days.indices, id: \.self) { i in
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        ForEach(days[i].segs.indices, id: \.self) { j in
+                            Rectangle()
+                                .fill(model.modelColor(days[i].segs[j].0))
+                                .frame(height: h * CGFloat(Double(days[i].segs[j].1) / maxC))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                }
+            }
+        }
+    }
+
+    /// Fila del desglose por modelo: swatch + modelo + conteo + %.
+    @ViewBuilder
+    private func chatModelRow(_ r: ChatModelStat) -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 2).fill(model.modelColor(r.model)).frame(width: 10, height: 10)
+            Text(Fmt.prettyModel(r.model)).fontWeight(.bold).lineLimit(1)
+            Spacer()
+            Text("\(r.count)").foregroundStyle(label.opacity(0.7))
+            Text(String(format: "%.0f%%", r.pct)).fontWeight(.bold)
+                .foregroundStyle(model.modelColor(r.model)).frame(minWidth: 44, alignment: .trailing)
+        }
+    }
+
+    /// Una fila de chat: título + badge de modelo + fecha; click abre en claude.ai, hover -> summary.
     @ViewBuilder
     private func chatRow(_ c: Chat) -> some View {
         Button {
@@ -436,9 +477,9 @@ struct PopoverView: View {
                     .frame(minWidth: 48, alignment: .trailing)
             }
             .contentShape(Rectangle())
+            .help(c.summary ?? "")     // hover -> summary (en el contenido de la fila)
         }
         .buttonStyle(.plain)
-        .help(c.summary ?? "")
     }
 
     @ViewBuilder
@@ -449,6 +490,36 @@ struct PopoverView: View {
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(col.opacity(0.22), in: Capsule())
             .foregroundStyle(col)
+    }
+
+    // ---- datos derivados de model.chats para la pestaña Chats ----
+
+    /// Reparto por modelo (conteo + % del total), ordenado desc.
+    private var chatsByModel: [ChatModelStat] {
+        let total = model.chats.count
+        guard total > 0 else { return [] }
+        var counts: [String: Int] = [:]
+        for c in model.chats { counts[c.model ?? "?", default: 0] += 1 }
+        return counts.map { ChatModelStat(model: $0.key, count: $0.value,
+                                          pct: Double($0.value) * 100 / Double(total)) }
+            .sorted { $0.count > $1.count }
+    }
+
+    /// Chats agrupados por día (asc) → segmentos (modelo, conteo) para la gráfica apilada.
+    private var chatDays: [(day: String, segs: [(String, Int)])] {
+        var byDay: [String: [String: Int]] = [:]
+        for c in model.chats {
+            let day = String((c.updated_at ?? c.created_at ?? "").prefix(10))
+            guard !day.isEmpty else { continue }
+            byDay[day, default: [:]][c.model ?? "?", default: 0] += 1
+        }
+        return byDay.keys.sorted().map { day in
+            (day, byDay[day]!.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 })
+        }
+    }
+
+    private var maxDayChatCount: Int {
+        max(1, chatDays.map { $0.segs.reduce(0) { $0 + $1.1 } }.max() ?? 1)
     }
 
     /// Fecha relativa desde el prefijo YYYY-MM-DD de un ISO (granularidad de día, robusto a micros).

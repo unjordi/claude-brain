@@ -135,6 +135,14 @@ struct Chat: Codable, Identifiable {
     var id: String { uuid }
 }
 
+/// Reparto de chats por modelo (para la lista con % de la pestaña Chats).
+struct ChatModelStat: Identifiable {
+    let model: String
+    let count: Int
+    let pct: Double
+    var id: String { model }
+}
+
 // MARK: - Model
 
 /// Reads the cache files every refresh tick and exposes derived view state.
