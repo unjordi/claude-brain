@@ -316,8 +316,8 @@ PlasmoidItem {
     // De más duro (arriba) a más leve (abajo).
     readonly property var brainTiers: [
         {
-            emoji: "🔒", title: "INVIOLABLE", color: "#dc3545",
-            subtitle: "hooks que BLOQUEAN (deny) — no negociables",
+            emoji: "🔒", title: "Hooks Forzosos", color: "#cf5a49",
+            subtitle: "hooks que bloquean (deny) — no negociables",
             items: [
                 { emoji: "🚧", name: "git-branch-guard",       desc: "push/merge a develop·main → denegado, te redirige a ramita→MR",
                   event: "PreToolUse · Bash",

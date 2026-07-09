@@ -395,7 +395,7 @@ struct PopoverView: View {
     // ===== Tab 4: Cerebro =====
 
     /// Infografía del cerebro global de Claude Code: los componentes instalados,
-    /// jerarquizados de INVIOLABLE (hooks que deniegan) → SUGERENCIA LEVE (skills opt-in).
+    /// jerarquizados de Hooks Forzosos (los que deniegan) → Skills (opt-in, las invocas tú).
     /// Contenido ESTÁTICO (refleja `brain/`); se mantiene a mano cuando cambian las piezas.
     private var cerebroTab: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -705,8 +705,8 @@ struct PopoverView: View {
     private var brainTiers: [BrainTier] {
         [
             BrainTier(
-                emoji: "🔒", title: "INVIOLABLE", color: Color(hex: "#dc3545"),
-                subtitle: "hooks que BLOQUEAN (deny) — no negociables",
+                emoji: "🔒", title: "Hooks Forzosos", color: Color(hex: "#cf5a49"),
+                subtitle: "hooks que bloquean (deny) — no negociables",
                 items: [
                     BrainItem("🚧", "git-branch-guard", "push/merge a develop·main → denegado, te redirige a ramita→MR",
                               "PreToolUse · Bash",

@@ -62,13 +62,13 @@ Puerta por OS: **Linux/KDE** → `./install.sh` · **macOS** → [`macos/`](maco
 [`windows/`](windows/) (`pwsh -File install.ps1`). **Prereq de los guardias: [`jq`](https://jqlang.github.io/jq/)**
 (sin él los hooks **fallan abierto** y no se cablea `settings.json`).
 
-## La jerarquía — de inviolable a sugerencia leve
+## La jerarquía — de lo más duro a la sugerencia leve
 
 El cerebro se ordena por *dureza*: arriba lo que te **bloquea** sin negociar; abajo lo que apenas
 **sugiere**. Cada pieza sabe qué evento la dispara. Esta es, tal cual, la pestaña “Cerebro” del widget.
 
 ```
-🔒 INVIOLABLE — hooks que BLOQUEAN (deny) · no negociables
+🔒 Hooks Forzosos — hooks que bloquean (deny) · no negociables
 ├─ 🚧 git-branch-guard         push/merge a develop·main → denegado
 ├─ 🔗 merge-squash-guard       MR a develop sin --squash → denegado
 ├─ 🕵️  secret-scan             commit/push con un secreto → denegado

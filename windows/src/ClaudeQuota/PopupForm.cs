@@ -1118,7 +1118,7 @@ public sealed class PopupForm : Form
     /// del array `brainTiers` de la GUI macOS (event/detail copiados literales, en español).
     private BrainTier[] BrainTiers =>
     [
-        new("🔒", "INVIOLABLE", Fmt.Hex("#dc3545"), "hooks que BLOQUEAN (deny) — no negociables",
+        new("🔒", "Hooks Forzosos", Fmt.Hex("#cf5a49"), "hooks que bloquean (deny) — no negociables",
         [
             new("🚧", "git-branch-guard", "push/merge a develop·main → denegado, te redirige a ramita→MR",
                 "PreToolUse · Bash",
