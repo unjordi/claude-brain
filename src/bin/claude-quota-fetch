@@ -385,7 +385,10 @@ if [[ -n "$DAILY_JSON" ]]; then
           | map({
               key: .[0].date,
               value: (group_by(.name)
-                | map({project: .[0].name, tokens: (map(.in_tok + .out_tok) | add)})
+                | map({project: .[0].name,
+                       in_tok:  (map(.in_tok)  | add),
+                       out_tok: (map(.out_tok) | add),
+                       tokens:  (map(.in_tok + .out_tok) | add)})
                 | sort_by(-.tokens))
             })
           | from_entries) as $by_day
@@ -408,6 +411,8 @@ if [[ -n "$DAILY_JSON" ]]; then
           cost:    (.totalCost // 0),
           models:  (.modelBreakdowns // [] | map({
                       model:   .modelName,
+                      in_tok:  (.inputTokens  // 0),
+                      out_tok: (.outputTokens // 0),
                       tokens:  ((.inputTokens // 0) + (.outputTokens // 0))
                    })),
           projects: ($proj.by_day[.period] // [])
