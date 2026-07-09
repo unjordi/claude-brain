@@ -37,8 +37,31 @@ public sealed class QuotaService
     /// Optional pinned account (uuid or email) — the account-guard config.
     /// If present and the active account differs, the UI warns of a mismatch.
     public static string AccountPinFile => Path.Combine(CacheDir, "account");
-    private static string CredentialsFile => Path.Combine(Home, ".claude", ".credentials.json");
-    private static string ProjectsDir => Path.Combine(Home, ".claude", "projects");
+    /// Config dir: CLAUDE_CONFIG_DIR if set (Claude Code honors it), else ~/.claude.
+    private static string ClaudeDir
+    {
+        get
+        {
+            var cfg = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
+            return string.IsNullOrEmpty(cfg) ? Path.Combine(Home, ".claude") : cfg;
+        }
+    }
+    private static string CredentialsFile => Path.Combine(ClaudeDir, ".credentials.json");
+    private static string ProjectsDir => Path.Combine(ClaudeDir, "projects");
+    /// ~/.claude.json (account + project names). Under CLAUDE_CONFIG_DIR if it lives there.
+    private static string ClaudeJsonFile
+    {
+        get
+        {
+            var cfg = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
+            if (!string.IsNullOrEmpty(cfg))
+            {
+                var p = Path.Combine(cfg, ".claude.json");
+                if (File.Exists(p)) return p;
+            }
+            return Path.Combine(Home, ".claude.json");
+        }
+    }
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -254,6 +277,10 @@ public sealed class QuotaService
 
     private static string? ReadOAuthToken()
     {
+        // CLAUDE_CODE_OAUTH_TOKEN (long-lived token de `claude setup-token`) gana si está presente:
+        // deja al widget leer /usage sin un .credentials.json de sesión iniciada.
+        var envTok = Environment.GetEnvironmentVariable("CLAUDE_CODE_OAUTH_TOKEN");
+        if (!string.IsNullOrEmpty(envTok)) return envTok;
         try
         {
             if (!File.Exists(CredentialsFile)) return null;
@@ -277,7 +304,7 @@ public sealed class QuotaService
     {
         try
         {
-            string path = Path.Combine(Home, ".claude.json");
+            string path = ClaudeJsonFile;
             if (!File.Exists(path)) return (null, null);
             using var doc = JsonDocument.Parse(File.ReadAllText(path));
             if (doc.RootElement.TryGetProperty("oauthAccount", out var acc) &&
@@ -423,7 +450,7 @@ public sealed class QuotaService
         var map = new Dictionary<string, string>();
         try
         {
-            string path = Path.Combine(Home, ".claude.json");
+            string path = ClaudeJsonFile;
             if (!File.Exists(path)) return map;
             using var doc = JsonDocument.Parse(File.ReadAllText(path));
             if (doc.RootElement.TryGetProperty("projects", out var projs) &&

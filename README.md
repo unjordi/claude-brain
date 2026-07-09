@@ -47,6 +47,10 @@ repo y corre el instalador maestro (**cerebro + daemon + widget**). Idempotente.
 > también instala el CLI por ti (instalador nativo; sáltalo con `--no-claude-code`), pero el **login es
 > tuyo**: corre `claude` y haz `/login` una vez. Sin sesión de Claude Code el widget solo muestra el
 > fallback calibrado, no tu cuota real. (Tu suscripción Pro/Max sirve.)
+>
+> **Variables de entorno que el widget honra** (las mismas que Claude Code): `CLAUDE_CODE_OAUTH_TOKEN`
+> (token de larga vida de `claude setup-token` — el widget lo usa directo, sin necesitar un login en
+> este equipo) y `CLAUDE_CONFIG_DIR` (si moviste tu `.claude` de sitio, el widget lo busca ahí).
 
 **O a mano**, si ya tienes los prereqs:
 

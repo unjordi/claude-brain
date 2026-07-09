@@ -26,6 +26,14 @@ WARN_PCT="${WARN_PCT:-60}"
 CRIT_PCT="${CRIT_PCT:-85}"
 
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude-quota"
+# Config de Claude Code: honra CLAUDE_CONFIG_DIR (si está, el .claude vive ahí), si no ~/.claude.
+CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+# ~/.claude.json (cuenta + nombres de proyecto): bajo CLAUDE_CONFIG_DIR si vive ahí, si no en ~.
+if [[ -n "${CLAUDE_CONFIG_DIR:-}" && -r "$CLAUDE_CONFIG_DIR/.claude.json" ]]; then
+  CLAUDE_JSON="$CLAUDE_CONFIG_DIR/.claude.json"
+else
+  CLAUDE_JSON="$HOME/.claude.json"
+fi
 STATE_FILE="$CACHE_DIR/state.json"
 TMP_FILE="$CACHE_DIR/state.json.tmp"
 
@@ -56,18 +64,20 @@ write_error() {
 # --- Primary: the OAuth usage endpoint /usage itself reads -------------------
 
 oauth_token() {
-  [[ -r "$HOME/.claude/.credentials.json" ]] || return 1
-  jq -er '.claudeAiOauth.accessToken // empty' "$HOME/.claude/.credentials.json"
+  # CLAUDE_CODE_OAUTH_TOKEN (token de larga vida de `claude setup-token`) gana si está presente.
+  [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && { printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN"; return 0; }
+  [[ -r "$CLAUDE_DIR/.credentials.json" ]] || return 1
+  jq -er '.claudeAiOauth.accessToken // empty' "$CLAUDE_DIR/.credentials.json"
 }
 
 # The account email (display only), from Claude Code's own local config —
 # not part of the OAuth token, so read separately and best-effort.
 account_email() {
-  [[ -r "$HOME/.claude.json" ]] || return 1
-  jq -er '.oauthAccount.emailAddress // empty' "$HOME/.claude.json"
+  [[ -r "$CLAUDE_JSON" ]] || return 1
+  jq -er '.oauthAccount.emailAddress // empty' "$CLAUDE_JSON"
 }
 ACCOUNT_EMAIL="$(account_email 2>/dev/null || true)"
-ACCOUNT_UUID="$(jq -er '.oauthAccount.accountUuid // empty' "$HOME/.claude.json" 2>/dev/null || true)"
+ACCOUNT_UUID="$(jq -er '.oauthAccount.accountUuid // empty' "$CLAUDE_JSON" 2>/dev/null || true)"
 
 # Account guard (opt-in): if a pinned account (uuid OR email) is configured in
 # $CLAUDE_QUOTA_ACCOUNT (default ~/.config/claude-quota/account) and the active
@@ -255,7 +265,7 @@ fi
 if [[ -n "$DAILY_JSON" ]]; then
   # --- Fase 2: sesiones, mensajes y hora pico desde transcripts crudos --------
   # grep/awk (NO jq) porque ~/.claude/projects puede pesar cientos de MB.
-  PROJ="$HOME/.claude/projects"
+  PROJ="$CLAUDE_DIR/projects"
   SESSIONS=0; MESSAGES=0; PEAK_HOUR=-1
   if [[ -d "$PROJ" ]]; then
     SESSIONS=$(( $(find "$PROJ" -name '*.jsonl' 2>/dev/null | wc -l) ))
@@ -280,16 +290,16 @@ if [[ -n "$DAILY_JSON" ]]; then
   # Un alias opcional (~/.claude/proyectos-alias.json) renombra el canónico.
   #  $PROJECT_REPOS_JSON: [{slug,name}] de cada repo real conocido.
   PROJECT_REPOS_JSON="[]"
-  if [[ -r "$HOME/.claude.json" ]]; then
+  if [[ -r "$CLAUDE_JSON" ]]; then
     PROJECT_REPOS_JSON="$(jq -c '
       [(.projects // {}) | keys[] | {slug: gsub("/"; "-"), name: (split("/") | last)}]
-    ' "$HOME/.claude.json" 2>/dev/null || echo '[]')"
+    ' "$CLAUDE_JSON" 2>/dev/null || echo '[]')"
     jq -e . <<<"$PROJECT_REPOS_JSON" >/dev/null 2>&1 || PROJECT_REPOS_JSON="[]"
   fi
   # Alias opcional: mapa {"<nombre-canónico>":"<alias>"}; tolera que no exista.
   PROJECT_ALIAS_JSON="{}"
-  if [[ -r "$HOME/.claude/proyectos-alias.json" ]]; then
-    PROJECT_ALIAS_JSON="$(jq -c '.' "$HOME/.claude/proyectos-alias.json" 2>/dev/null || echo '{}')"
+  if [[ -r "$CLAUDE_DIR/proyectos-alias.json" ]]; then
+    PROJECT_ALIAS_JSON="$(jq -c '.' "$CLAUDE_DIR/proyectos-alias.json" 2>/dev/null || echo '{}')"
     jq -e . <<<"$PROJECT_ALIAS_JSON" >/dev/null 2>&1 || PROJECT_ALIAS_JSON="{}"
   fi
   PROJECT_DAY_TSV=""
