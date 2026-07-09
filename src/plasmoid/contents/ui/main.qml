@@ -17,9 +17,9 @@ PlasmoidItem {
     property var stats: null
 
     property int currentTab: 0
-    // Al abrir/volver a la pestaña Cerebro (idx 3) re-lee el estado real de ~/.claude (doc = realidad)
+    // Al abrir/volver a la pestaña Cerebro (idx 4) re-lee el estado real de ~/.claude (doc = realidad)
     // y chequea si hay versión nueva del widget (throttle 15 min dentro de checkUpdate).
-    onCurrentTabChanged: if (currentTab === 3) { scanBrain(); checkUpdate() }
+    onCurrentTabChanged: if (currentTab === 4) { scanBrain(); checkUpdate() }
 
     readonly property string cacheDir: {
         const raw = "" + StandardPaths.writableLocation(StandardPaths.GenericCacheLocation)
@@ -237,6 +237,13 @@ PlasmoidItem {
         if (!stats || !stats.models) return modelPalette[0]
         for (var i = 0; i < stats.models.length; i++)
             if (stats.models[i].model === name) return modelPalette[i % modelPalette.length]
+        return modelPalette[0]
+    }
+    // Color por proyecto — mismo esquema que modelColorFor (índice en la lista → paleta).
+    function projectColorFor(name) {
+        if (!stats || !stats.projects) return modelPalette[0]
+        for (var i = 0; i < stats.projects.length; i++)
+            if (stats.projects[i].project === name) return modelPalette[i % modelPalette.length]
         return modelPalette[0]
     }
     function prettyModel(id) {
@@ -607,8 +614,9 @@ PlasmoidItem {
             TabRailButton { idx: 0; icon: "speedometer";        label: "Límites" }
             TabRailButton { idx: 1; icon: "view-statistics";    label: "Resumen" }
             TabRailButton { idx: 2; icon: "office-chart-bar";   label: "Modelos" }
+            TabRailButton { idx: 3; icon: "folder";             label: "Proyectos" }
             // Sin ícono "cerebro" nativo bueno en Breeze → emoji 🧠 como glifo del riel.
-            TabRailButton { idx: 3; emoji: "🧠";                label: "Cerebro" }
+            TabRailButton { idx: 4; emoji: "🧠";                label: "Cerebro" }
             Item { Layout.fillHeight: true }
             PC3.ToolButton {
                 icon.name: "view-refresh"; flat: true
@@ -779,7 +787,74 @@ PlasmoidItem {
                 }
             }
 
-            // ===== Tab 3: Cerebro (VIVO) =====
+            // ===== Tab 3: Proyectos =====
+            // Uso de Claude Code por carpeta de proyecto (subconjunto de Modelos). Espeja el
+            // proyectosTab del Swift / PaintProyectos de Windows: gráfica apilada por día + lista.
+            ColumnLayout {
+                spacing: Kirigami.Units.largeSpacing
+                Kirigami.Heading { level: 3; text: "Uso por proyecto"; Layout.fillWidth: true }
+                // gráfico de barras apiladas por día (mismo eje que Modelos: normalizado por maxDayTokens)
+                Item {
+                    id: projChartArea
+                    Layout.fillWidth: true; Layout.preferredHeight: Kirigami.Units.gridUnit * 7
+                    RowLayout {
+                        anchors.fill: parent; spacing: 2
+                        Repeater {
+                            model: root.stats ? root.stats.days : []
+                            delegate: Item {
+                                Layout.fillWidth: true; Layout.fillHeight: true
+                                property var day: modelData
+                                ColumnLayout {
+                                    anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right
+                                    spacing: 0
+                                    Repeater {
+                                        model: day.projects
+                                        delegate: Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: projChartArea.height * (modelData.tokens / root.maxDayTokens)
+                                            color: root.projectColorFor(modelData.project)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // tabla de proyectos — scrolleable (muchos proyectos → scroll interno, popup estable)
+                PC3.ScrollView {
+                    id: projScroll
+                    Layout.fillWidth: true; Layout.fillHeight: true
+                    contentWidth: availableWidth   // sin scroll horizontal
+                    clip: true
+                    ColumnLayout {
+                        width: projScroll.availableWidth
+                        spacing: Kirigami.Units.smallSpacing
+                        Repeater {
+                            model: root.stats ? root.stats.projects : []
+                            delegate: RowLayout {
+                                Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                                Rectangle { width: 10; height: 10; radius: 2; color: root.projectColorFor(modelData.project) }
+                                PC3.Label {
+                                    text: modelData.project ? modelData.project : "—"; font.bold: true
+                                    elide: Text.ElideRight; Layout.maximumWidth: Kirigami.Units.gridUnit * 8
+                                }
+                                Item { Layout.fillWidth: true }
+                                PC3.Label {
+                                    opacity: 0.7
+                                    text: root.fmtTok(modelData.in_tok) + " in · " + root.fmtTok(modelData.out_tok) + " out"
+                                }
+                                PC3.Label {
+                                    text: modelData.pct.toFixed(1) + "%"; font.bold: true
+                                    color: root.projectColorFor(modelData.project)
+                                    Layout.minimumWidth: Kirigami.Units.gridUnit * 2.5; horizontalAlignment: Text.AlignRight
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ===== Tab 4: Cerebro (VIVO) =====
             // Infografía del cerebro global de Claude Code: la ESTRUCTURA es curada (refleja `brain/`),
             // pero el ESTADO de cada pieza se LEE de la realidad (~/.claude vía brain-scan.sh) y se pinta
             // con un punto de estado por hoja + un recuadro de salud arriba. Cada hoja es clickeable
