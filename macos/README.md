@@ -136,6 +136,10 @@ curl -fsSL https://raw.githubusercontent.com/unjordi/claude-brain/main/bootstrap
 and runs the top-level `install.sh`. (It won't auto-install Homebrew itself, and asks you to run
 `xcode-select --install` if `swift` is missing.) **Or by hand** from the repo:
 
+> The widget measures **Claude Code (the `claude` CLI)**: the installer also installs it (skip with
+> `--no-claude-code`), but **you log in** — run `claude` and `/login` once, or the widget only shows the
+> calibrated fallback, not your real quota.
+
 ```sh
 cd macos
 ./install.sh

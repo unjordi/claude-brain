@@ -202,14 +202,20 @@ echo ""
 echo "== (d) los .ps1 son ASCII puro (Windows PowerShell 5.1 lee un .ps1 sin BOM como ANSI, no UTF-8, =="
 echo "==     y un no-ASCII -acento, em-dash, emoji- le rompe la tokenización. Caso real: Windows de Liora) =="
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ps1_noascii=0
-while IFS= read -r f; do
-  # [^[:print:][:cntrl:]] en locale C = cualquier byte 0x80-0xFF (no-ASCII); portable a todo grep.
-  if LC_ALL=C grep -q '[^[:print:][:cntrl:]]' "$f" 2>/dev/null; then
-    bad "ASCII: $f tiene bytes no-ASCII (romperá PowerShell 5.1)"; ps1_noascii=1
-  fi
-done < <(find "$REPO_ROOT" -name '*.ps1' -not -path '*/.git/*' -not -path '*/build/*')
-[ "$ps1_noascii" = 0 ] && ok "ASCII: todos los .ps1 son ASCII puro (a prueba de PowerShell 5.1)"
+if command -v perl >/dev/null 2>&1; then
+  # perl (no grep): determinista e igual en GNU/BSD/ugrep/Git-Bash. Sale 1 si hay algún byte >0x7F.
+  ps1_noascii=0
+  while IFS= read -r f; do
+    if perl -0777 -ne 'exit(/[^\x00-\x7F]/ ? 1 : 0)' "$f" 2>/dev/null; then
+      :   # ASCII limpio
+    else
+      bad "ASCII: $f tiene bytes no-ASCII (romperá PowerShell 5.1)"; ps1_noascii=1
+    fi
+  done < <(find "$REPO_ROOT" -name '*.ps1' -not -path '*/.git/*' -not -path '*/build/*')
+  [ "$ps1_noascii" = 0 ] && ok "ASCII: todos los .ps1 son ASCII puro (a prueba de PowerShell 5.1)"
+else
+  echo "  (perl no disponible -> salto el guard ASCII de .ps1)"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""

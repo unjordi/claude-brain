@@ -6,6 +6,7 @@
 #   ./install.sh --no-plasmoid # only the brain + fetch script + systemd timer (no GUI)
 #   ./install.sh --no-gui      # alias of --no-plasmoid (skip the desktop widget)
 #   ./install.sh --no-brain    # skip the Claude-Code brain (hooks/norms); only daemon + GUI
+#   ./install.sh --no-claude-code # skip auto-installing the Claude Code CLI (the widget measures IT)
 #
 # This is the MASTER installer for claude-brain: it lays down the shared Claude-Code brain
 # (global hooks, delegation-cost governance, skill, norms) AND the quota daemon + optional GUI.
@@ -28,13 +29,15 @@ REINSTALL=0
 SKIP_PLASMOID=0
 SKIP_CCUSAGE=0
 SKIP_BRAIN=0
+SKIP_CLAUDE_CODE=0
 for arg in "$@"; do
   case "$arg" in
-    --reinstall)    REINSTALL=1 ;;
-    --no-plasmoid)  SKIP_PLASMOID=1 ;;
-    --no-gui)       SKIP_PLASMOID=1 ;;
-    --no-brain)     SKIP_BRAIN=1 ;;
-    --no-ccusage)   SKIP_CCUSAGE=1 ;;
+    --reinstall)      REINSTALL=1 ;;
+    --no-plasmoid)    SKIP_PLASMOID=1 ;;
+    --no-gui)         SKIP_PLASMOID=1 ;;
+    --no-brain)       SKIP_BRAIN=1 ;;
+    --no-ccusage)     SKIP_CCUSAGE=1 ;;
+    --no-claude-code) SKIP_CLAUDE_CODE=1 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
@@ -72,6 +75,17 @@ elif command -v npm >/dev/null 2>&1; then
 else
   echo "missing: npm (needed to install ccusage); install Node.js or pass --no-ccusage if you have npx" >&2
   exit 1
+fi
+
+if [[ "$SKIP_CLAUDE_CODE" -eq 0 ]]; then
+  echo "==> Ensuring the Claude Code CLI is installed (the widget measures ITS usage)"
+  if command -v claude >/dev/null 2>&1; then
+    echo "    already present ($(command -v claude))"
+  else
+    echo "    installing via the native installer (auto-updates itself)"
+    curl -fsSL https://claude.ai/install.sh | bash \
+      || echo "    (could not auto-install; do it by hand: curl -fsSL https://claude.ai/install.sh | bash)"
+  fi
 fi
 
 echo "==> Installing fetch script -> $BIN_DEST"
@@ -173,3 +187,17 @@ Debug:
   journalctl --user -u claude-quota.service -n 20
   cat ~/.cache/claude-quota/state.json | jq .
 EOF
+
+# Login reminder: sin sesión de Claude Code el widget no ve tu cuota real (solo el fallback calibrado).
+# El login es interactivo/por-usuario: el instalador NO puede hacerlo por ti.
+if command -v claude >/dev/null 2>&1; then
+  if ! claude auth status >/dev/null 2>&1; then
+    echo ""
+    echo "IMPORTANT: log in to Claude Code so the widget reads your REAL quota:"
+    echo "  claude        # then /login with your account"
+  fi
+else
+  echo ""
+  echo "NOTE: 'claude' isn't on PATH yet (maybe a fresh install) — open a new shell, then:"
+  echo "  claude        # /login so the widget shows your real quota"
+fi

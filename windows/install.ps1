@@ -12,6 +12,7 @@
 param(
     [switch]$NoAutostart,
     [switch]$NoLaunch,          # build + install but don't launch (e.g. from an elevated installer)
+    [switch]$NoClaudeCode,      # skip auto-installing the Claude Code CLI (the thing the widget measures)
     [string]$Configuration = 'Release'
 )
 
@@ -86,3 +87,32 @@ Write-Host "Clic izquierdo = popup de 4 pestanas | clic derecho = menu (Actualiz
 Write-Host ""
 Write-Host "Nota: los tokens/sesiones/hora pico salen de tus transcripts locales." -ForegroundColor DarkGray
 Write-Host "El costo `$ (API-equiv) requiere Node + ccusage en el PATH; si no, sale '-'." -ForegroundColor DarkGray
+
+# -- Claude Code CLI: es lo que el widget MIDE -> asegurarlo (instalador nativo, se auto-actualiza) --
+# El widget lee el token OAuth y los transcripts que escribe el CLI 'claude'. Sin el CLI no hay que medir.
+if (-not $NoClaudeCode) {
+    if (Get-Command claude -ErrorAction SilentlyContinue) {
+        Write-Host ""
+        Write-Host "==> Claude Code (CLI) ya esta instalado." -ForegroundColor Green
+    } else {
+        Write-Host ""
+        Write-Host "==> Instalando Claude Code (CLI) -- es lo que el widget mide (instalador nativo)..." -ForegroundColor Cyan
+        try { Invoke-RestMethod https://claude.ai/install.ps1 | Invoke-Expression }
+        catch { Write-Host "    No pude instalarlo automaticamente; hazlo a mano: irm https://claude.ai/install.ps1 | iex" -ForegroundColor Yellow }
+    }
+}
+
+# Recordatorio de login (interactivo y por-usuario: el script NO puede hacerlo por ti).
+$cc = Get-Command claude -ErrorAction SilentlyContinue
+if ($cc) {
+    & $cc.Source auth status *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "IMPORTANTE: inicia sesion en Claude Code para que el widget muestre tu cuota real:" -ForegroundColor Yellow
+        Write-Host "  claude        (luego /login con tu cuenta)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host ""
+    Write-Host "NOTA: 'claude' aun no esta en el PATH (instalacion nueva) -> abre una terminal NUEVA y corre:" -ForegroundColor Yellow
+    Write-Host "  claude        (y /login, para que el widget vea tu cuota real)" -ForegroundColor Yellow
+}

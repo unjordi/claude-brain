@@ -76,6 +76,10 @@ clones the repo to `%USERPROFILE%\claude-brain`, and runs the brain + widget ins
 just installed something, open a fresh terminal and re-run so the new `PATH` is visible. **Or by
 hand** from the repo:
 
+> The widget measures **Claude Code (the `claude` CLI)** — not the desktop app. The installer also
+> installs the CLI (skip with `-NoClaudeCode`), but **you log in**: run `claude` and `/login` once, or
+> the widget only shows the calibrated fallback. Your Pro/Max subscription works.
+
 ```powershell
 cd windows
 pwsh -File install.ps1              # build, install, autostart, launch

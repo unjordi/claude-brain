@@ -41,7 +41,16 @@ irm https://raw.githubusercontent.com/unjordi/claude-brain/main/bootstrap.ps1 | 
 
 El bootstrap instala los prereqs que falten (git, `jq`, Node; + **.NET 10 SDK** en Windows), clona el
 repo y corre el instalador maestro (**cerebro + daemon + widget**). Idempotente. Flags:
-`curl -fsSL …/bootstrap.sh | bash -s -- --no-gui` (o `--no-brain`).
+`curl -fsSL …/bootstrap.sh | bash -s -- --no-gui` (o `--no-brain`, `--no-claude-code`).
+
+> **El widget mide tu uso de Claude Code (el CLI `claude`), no la app de escritorio.** El instalador
+> también instala el CLI por ti (instalador nativo; sáltalo con `--no-claude-code`), pero el **login es
+> tuyo**: corre `claude` y haz `/login` una vez. Sin sesión de Claude Code el widget solo muestra el
+> fallback calibrado, no tu cuota real. (Tu suscripción Pro/Max sirve.)
+>
+> **Variables de entorno que el widget honra** (las mismas que Claude Code): `CLAUDE_CODE_OAUTH_TOKEN`
+> (token de larga vida de `claude setup-token` — el widget lo usa directo, sin necesitar un login en
+> este equipo) y `CLAUDE_CONFIG_DIR` (si moviste tu `.claude` de sitio, el widget lo busca ahí).
 
 **O a mano**, si ya tienes los prereqs:
 

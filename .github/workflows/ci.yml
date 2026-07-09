@@ -48,3 +48,8 @@ jobs:
             shellcheck --severity=error "$f" || fail=1
           done < <({ find brain -name '*.sh' -type f; find . -maxdepth 1 -name '*.sh' -type f; } | sort)
           exit "$fail"
+
+      # Suite versionada del cerebro: gate de delegación, idempotencia, refresh de normas y el guard
+      # (d) de .ps1-ASCII (que usa perl, presente en ubuntu). Corre contra un $HOME falso aislado.
+      - name: test-brain.sh (suite del cerebro)
+        run: bash brain/test-brain.sh
