@@ -100,6 +100,24 @@ if (-not $NoClaudeCode) {
         try { Invoke-RestMethod https://claude.ai/install.ps1 | Invoke-Expression }
         catch { Write-Host "    No pude instalarlo automaticamente; hazlo a mano: irm https://claude.ai/install.ps1 | iex" -ForegroundColor Yellow }
     }
+    # Asegurar 'claude' en el PATH de usuario: el instalador nativo deja claude.exe pero su cambio de
+    # PATH no siempre aplica (ni en esta sesion ni de forma persistente confiable). Lo buscamos en los
+    # lugares tipicos y agregamos su bin al PATH de USUARIO (como Git\bin en install-brain.ps1) para
+    # que el usuario pueda hacer 'claude' -> /login y el widget lea el token. (Caso real: Windows de Liora.)
+    if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+        $roots = @("$env:LOCALAPPDATA", "$env:USERPROFILE\.local", "$env:USERPROFILE\.claude", "$env:APPDATA\npm") | Where-Object { Test-Path $_ }
+        $found = Get-ChildItem $roots -Recurse -Filter "claude.exe" -ErrorAction SilentlyContinue -Depth 4 |
+                 Select-Object -First 1 -ExpandProperty FullName
+        if ($found) {
+            $cdir = Split-Path $found
+            $u = [Environment]::GetEnvironmentVariable('PATH','User'); if (-not $u) { $u = '' }
+            if (($u -split ';') -notcontains $cdir) {
+                [Environment]::SetEnvironmentVariable('PATH', $u.TrimEnd(';') + ';' + $cdir, 'User')
+                $env:PATH = $env:PATH.TrimEnd(';') + ';' + $cdir   # visible ya en esta sesion
+                Write-Host "==> Agregue '$cdir' (claude) al PATH de usuario." -ForegroundColor Green
+            }
+        }
+    }
 }
 
 # Recordatorio de login (interactivo y por-usuario: el script NO puede hacerlo por ti).
