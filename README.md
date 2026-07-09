@@ -78,7 +78,7 @@ El cerebro se ordena por *dureza*: arriba lo que te **bloquea** sin negociar; ab
    ├─ ✋ confirmar-merge-develop  merge sin tu OK → denegado
    └─ ✅ dod-verificar            Def. of Done (ver Norma 🎯 DoD) sin build+tests+memoria → denegado
 
-🔔 AUTOMÁTICO — inyectan / recuerdan (no bloquean)
+🔔 Automático — inyectan / recuerdan (no bloquean)
 ├─ 📊 recordar-dashboard       recuerda actualizar el dashboard antes del push
 ├─ 🕰️  rama-vieja              avisa si la ramita arrastra base vieja
 ├─ 📝 delegacion-registrar     materializa el "pregunta una sola vez"
@@ -86,13 +86,13 @@ El cerebro se ordena por *dureza*: arriba lo que te **bloquea** sin negociar; ab
    ├─ 🧭 sesion-inicio            reinyecta rama + norma + memoria al abrir
    └─ 💾 precompact-volcar-estado vuelca el avance antes de compactar
 
-📜 NORMAS — reglas que Claude se autoimpone (CLAUDE.md)
+📜 Normas — reglas que Claude se autoimpone (CLAUDE.md)
 ├─ 🎯 Definition of Done       verde técnico ≠ Done/Listo/Ya Quedó; exige QA o un OK explícito
 ├─ 🪞 Doc <= realidad          cambió algo → su doc se actualiza en la tanda
 ├─ 🌿 Flujo de git             ramita → MR → develop; main es release-only
 └─ 💰 Costo de delegación      gratis / incluido / con costo, según tu cuota
 
-💡 SKILLS — opt-in, las invocas tú
+💡 Skills — opt-in, las invocas tú
 └─ 📦 cerrar-slice             build+tests+memoria al día + MR con resumen curado
 ```
 

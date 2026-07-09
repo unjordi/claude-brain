@@ -1142,7 +1142,7 @@ public sealed class PopupForm : Form
                 "PreToolUse · Task",
                 "Freno DURO (distinto del gate que pregunta): si el gasto real ya rebasó un techo configurable (sobreuso o ventana 5h), bloquea reclutar más agentes para que un workflow desbocado no siga quemando dinero. Techo por env (LIMITE_GASTO_OVERAGE_PCT / LIMITE_GASTO_5H_PCT)."),
         ]),
-        new("🔔", "AUTOMÁTICO", _accent, "hooks que inyectan / recuerdan — no bloquean",
+        new("🔔", "Automático", _accent, "hooks que inyectan / recuerdan — no bloquean",
         [
             new("🧭", "sesion-inicio", "al abrir/retomar reinyecta rama + norma de git + orden de leer memoria",
                 "SessionStart",
@@ -1160,7 +1160,7 @@ public sealed class PopupForm : Form
                 "PostToolUse · Task",
                 "Tras un consentimiento aprobado lo registra para no volver a preguntar (1× por máquina o por workflow, según el nivel de costo). Materializa el 'pregunta una sola vez'."),
         ]),
-        new("📜", "NORMAS", Fmt.Hex("#4a90d9"), "reglas que Claude se autoimpone (CLAUDE.md)",
+        new("📜", "Normas", Fmt.Hex("#4a90d9"), "reglas que Claude se autoimpone (CLAUDE.md)",
         [
             new("🎯", "Definition of Done", "verde técnico ≠ Done/Listo/Ya Quedó; exige QA o un OK explícito",
                 "CLAUDE.md · norma",
@@ -1175,7 +1175,7 @@ public sealed class PopupForm : Form
                 "CLAUDE.md · norma",
                 "Reclutar agentes cuesta según nivel: gratis (local), incluido (Claude dentro de la ventana 5h) o con costo (overage / API externa / desconocido). La cadencia del permiso depende del nivel."),
         ]),
-        new("💡", "SKILLS", Fmt.Hex("#3aa76d"), "herramientas opt-in — las invocas tú",
+        new("💡", "Skills", Fmt.Hex("#3aa76d"), "herramientas opt-in — las invocas tú",
         [
             new("📦", "cerrar-slice", "build+tests+memoria al día + MR con resumen curado por slice",
                 "skill · opt-in",

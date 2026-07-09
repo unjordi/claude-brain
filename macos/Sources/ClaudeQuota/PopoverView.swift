@@ -731,7 +731,7 @@ struct PopoverView: View {
                               "Freno DURO (distinto del gate que pregunta): si el gasto real ya rebasó un techo configurable (sobreuso o ventana 5h), bloquea reclutar más agentes para que un workflow desbocado no siga quemando dinero. Techo por env (LIMITE_GASTO_OVERAGE_PCT / LIMITE_GASTO_5H_PCT)."),
                 ]),
             BrainTier(
-                emoji: "🔔", title: "AUTOMÁTICO", color: accent,
+                emoji: "🔔", title: "Automático", color: accent,
                 subtitle: "hooks que inyectan / recuerdan — no bloquean",
                 items: [
                     BrainItem("🧭", "sesion-inicio", "al abrir/retomar reinyecta rama + norma de git + orden de leer memoria",
@@ -751,7 +751,7 @@ struct PopoverView: View {
                               "Tras un consentimiento aprobado lo registra para no volver a preguntar (1× por máquina o por workflow, según el nivel de costo). Materializa el 'pregunta una sola vez'."),
                 ]),
             BrainTier(
-                emoji: "📜", title: "NORMAS", color: Color(hex: "#4a90d9"),
+                emoji: "📜", title: "Normas", color: Color(hex: "#4a90d9"),
                 subtitle: "reglas que Claude se autoimpone (CLAUDE.md)",
                 items: [
                     BrainItem("🎯", "Definition of Done", "verde técnico ≠ Done/Listo/Ya Quedó; exige QA o un OK explícito",
@@ -768,7 +768,7 @@ struct PopoverView: View {
                               "Reclutar agentes cuesta según nivel: gratis (local), incluido (Claude dentro de la ventana 5h) o con costo (overage / API externa / desconocido). La cadencia del permiso depende del nivel."),
                 ]),
             BrainTier(
-                emoji: "💡", title: "SKILLS", color: Color(hex: "#3aa76d"),
+                emoji: "💡", title: "Skills", color: Color(hex: "#3aa76d"),
                 subtitle: "herramientas opt-in — las invocas tú",
                 items: [
                     BrainItem("📦", "cerrar-slice", "build+tests+memoria al día + MR con resumen curado por slice",

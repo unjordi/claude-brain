@@ -343,7 +343,7 @@ PlasmoidItem {
             ]
         },
         {
-            emoji: "🔔", title: "AUTOMÁTICO", color: "#e8884a",
+            emoji: "🔔", title: "Automático", color: "#e8884a",
             subtitle: "hooks que inyectan / recuerdan — no bloquean",
             items: [
                 { emoji: "🧭", name: "sesion-inicio",             desc: "al abrir/retomar reinyecta rama + norma de git + orden de leer memoria",
@@ -364,7 +364,7 @@ PlasmoidItem {
             ]
         },
         {
-            emoji: "📜", title: "NORMAS", color: "#4a90d9",
+            emoji: "📜", title: "Normas", color: "#4a90d9",
             subtitle: "reglas que Claude se autoimpone (CLAUDE.md)",
             items: [
                 { emoji: "🎯", name: "Definition of Done",    desc: "verde técnico ≠ Done/Listo/Ya Quedó; exige QA o un OK explícito",
@@ -382,7 +382,7 @@ PlasmoidItem {
             ]
         },
         {
-            emoji: "💡", title: "SKILLS", color: "#3aa76d",
+            emoji: "💡", title: "Skills", color: "#3aa76d",
             subtitle: "herramientas opt-in — las invocas tú",
             items: [
                 { emoji: "📦", name: "cerrar-slice", desc: "build+tests+memoria al día + MR con resumen curado por slice",
