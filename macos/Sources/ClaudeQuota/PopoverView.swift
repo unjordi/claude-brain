@@ -371,7 +371,7 @@ struct PopoverView: View {
 
     private var stackedProjectChart: some View {
         let days = model.stats?.days ?? []
-        let maxTok = model.maxDayTokens
+        let maxTok = model.maxDayProjectTokens
         return GeometryReader { geo in
             let h = geo.size.height
             HStack(alignment: .bottom, spacing: 2) {

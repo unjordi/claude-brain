@@ -248,6 +248,14 @@ final class QuotaModel: ObservableObject {
         return max(1, days.map { $0.tokens ?? 0 }.max() ?? 1)
     }
 
+    // Máximo de la SUMA de proyectos por día — para normalizar la gráfica de Proyectos con su propio
+    // eje. Los tokens por-modelo (con caché) y por-proyecto (in+out crudos) difieren, así que un día
+    // puede sumar más en proyectos que maxDayTokens y la barra se saldría del viewport si se usa ese.
+    var maxDayProjectTokens: Double {
+        guard let days = stats?.days, !days.isEmpty else { return 1 }
+        return max(1, days.map { ($0.projects ?? []).reduce(0) { $0 + ($1.tokens ?? 0) } }.max() ?? 1)
+    }
+
     // rachas (días consecutivos con uso), port de streaks{} en main.qml
     var streaks: (cur: Int, max: Int) {
         guard let days = stats?.days, !days.isEmpty else { return (0, 0) }

@@ -295,6 +295,20 @@ PlasmoidItem {
         return m
     }
 
+    // La gráfica de PROYECTOS se normaliza con SU propio máximo (suma de proyectos por día), no con
+    // maxDayTokens: los tokens por-modelo (con caché) y por-proyecto (in+out crudos) se cuentan
+    // distinto, así que un día puede sumar más en proyectos que el max por-modelo -> desbordaría.
+    readonly property real maxDayProjectTokens: {
+        if (!stats || !stats.days || !stats.days.length) return 1
+        var m = 1
+        for (var i = 0; i < stats.days.length; i++) {
+            var ps = stats.days[i].projects, s = 0
+            if (ps) for (var j = 0; j < ps.length; j++) s += ps[j].tokens
+            m = Math.max(m, s)
+        }
+        return m
+    }
+
     // ---------- Pestaña Cerebro: ESTRUCTURA curada + ESTADO real ----------
     // La ESTRUCTURA (qué piezas hay, su explicación, su evento y detalle) es curada y espeja el
     // BrainItem de PopoverView.swift; el ESTADO de instalación de cada pieza se LEE de la realidad
@@ -811,7 +825,7 @@ PlasmoidItem {
                                         model: day.projects
                                         delegate: Rectangle {
                                             Layout.fillWidth: true
-                                            Layout.preferredHeight: projChartArea.height * (modelData.tokens / root.maxDayTokens)
+                                            Layout.preferredHeight: projChartArea.height * (modelData.tokens / root.maxDayProjectTokens)
                                             color: root.projectColorFor(modelData.project)
                                         }
                                     }

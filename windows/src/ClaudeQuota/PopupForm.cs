@@ -558,7 +558,7 @@ public sealed class PopupForm : Form
     {
         var days = _svc.Stats?.Days ?? new List<StatsDay>();
         if (days.Count == 0) return;
-        double maxTok = StatsCompute.MaxDayTokens(_svc.Stats);
+        double maxTok = StatsCompute.MaxDayProjectTokens(_svc.Stats);
         int gap = Sc(2);
         float barW = Math.Max(1f, (area.Width - gap * (days.Count - 1f)) / days.Count);
         for (int i = 0; i < days.Count; i++)

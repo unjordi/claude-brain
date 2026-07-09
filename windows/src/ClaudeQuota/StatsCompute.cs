@@ -37,6 +37,16 @@ public static class StatsCompute
         return Math.Max(1, days.Max(d => d.Tokens));
     }
 
+    // Máximo de la SUMA de proyectos por día — normaliza la gráfica de Proyectos con su propio eje.
+    // Los tokens por-modelo (con caché) y por-proyecto (in+out crudos) difieren, así que un día puede
+    // sumar más en proyectos que MaxDayTokens y la barra se saldría del viewport si se usa ese.
+    public static double MaxDayProjectTokens(Stats? stats)
+    {
+        var days = stats?.Days;
+        if (days == null || days.Count == 0) return 1;
+        return Math.Max(1, days.Max(d => (d.Projects ?? new List<DayProject>()).Sum(p => p.Tokens)));
+    }
+
     /// rachas (días consecutivos con uso).
     public static (int cur, int max) Streaks(Stats? stats)
     {
