@@ -34,11 +34,11 @@ para que el tag apunte al SHA del build; `build-sha:` en el cuerpo). También `w
 Solo Windows por ahora: macOS compila Swift en ~1 s con las CLT; Linux es QML sin compilar. Ambos
 siguen con el modelo git-based, que ahí no duele.
 
-## Fase 2 — el updater de Windows BAJA el exe (DISEÑO, pendiente de implementar + QA)
+## Fase 2 — el updater de Windows BAJA el exe (IMPLEMENTADO, pendiente de QA)
 
-> ⚠️ **No implementado aún, a propósito.** Reemplazar un exe **en ejecución** es crítico; no se debe
-> shippear sin QA real en Windows, y el asset del release no existe hasta que la Fase 1 esté en
-> `main`. Esta sección es el plan para implementarlo con confianza cuando eso pase.
+> ✅ **Implementado en `Updater.cs`** (compila 0/0). ⚠️ **Pendiente de QA real en Windows** (VM +
+> laptop de Liora) antes de confiar en él, y el asset del release no existe hasta el primer release a
+> `main` que dispare la Fase 1. Diseño y comportamiento reales:
 
 Cambios en `windows/src/ClaudeQuota/Updater.cs`:
 

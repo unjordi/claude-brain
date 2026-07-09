@@ -9,10 +9,15 @@ namespace ClaudeQuota;
 /// <summary>
 /// Autoactualización LIGERA del widget, estilo winturbo — puerto Windows de macos/Updater.swift.
 /// La app trae embebido (version.json, escrito por install.ps1 junto al exe) el SHA + fecha del
-/// commit con que se buildeó y la ruta de su clon. Al abrir la pestaña Cerebro consulta
-/// `commits/main` de GitHub; si el repo avanzó, ofrece un banner que hace `git fetch` +
-/// `merge --ff-only` + `install.ps1` y relanza. FAIL-OPEN: sin red / sin version.json / sin
-/// clon → no molesta.
+/// commit con que se buildeó y la ruta de su clon. Al abrir la pestaña Cerebro chequea GitHub.
+///
+/// DOS rutas de update (fail-open en ambas):
+///  1) DESCARGA (preferida, fase 2): consulta el release rolling 'windows-latest'; si trae el asset
+///     ClaudeQuota.exe con un build-sha distinto al embebido, BAJA el exe y hace swap — SIN clon ni
+///     .NET SDK. La publica release-windows.yml al hacer release a main.
+///  2) GIT (fallback pre-release): si no hay release aún, compara `commits/main` y —solo con clon—
+///     hace `git fetch` + `merge --ff-only` + `install.ps1` (recompila).
+/// FAIL-OPEN: sin red / sin version.json / sin release ni clon → no molesta.
 ///
 /// Enfoque de AUTO-REEMPLAZO en Windows: el exe es self-contained single-file y, si estuviera
 /// corriendo, `install.ps1` no podría sobreescribirlo (lock). Por eso NO nos auto-cerramos a
@@ -42,6 +47,11 @@ internal sealed class Updater
     private DateTime? _lastCheck;      // UTC
     private bool _loaded;
     private const string Slug = "unjordi/claude-brain";
+
+    // Ruta de DESCARGA (fase 2): URL del asset ClaudeQuota.exe en el release rolling 'windows-latest'
+    // + su build-sha. Si está presente, actualizamos bajando el exe (SIN clon ni .NET SDK).
+    private string? _assetUrl;
+    private string _remoteFullSha = "";
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(6) };
 
@@ -89,6 +99,15 @@ internal sealed class Updater
 
     private async Task CheckAsync()
     {
+        // Ruta preferida: el release 'windows-latest' (descarga del exe, SIN .NET SDK ni clon). Si
+        // aún no existe el release (404) o falla, cae al chequeo git-based (commits/main + rebuild).
+        try
+        {
+            using var ctsR = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+            if (await CheckReleaseAsync(ctsR.Token)) return;
+        }
+        catch { /* fail-open → intenta la ruta git-based abajo */ }
+
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get,
@@ -124,12 +143,58 @@ internal sealed class Updater
         catch { /* fail-open: sin red / json raro / timeout → no molesta */ }
     }
 
+    /// Consulta el release rolling 'windows-latest': si trae el asset ClaudeQuota.exe y un
+    /// 'build-sha:' distinto al embebido, prepara la DESCARGA (no requiere clon ni SDK). Devuelve
+    /// true si MANEJÓ el chequeo (haya o no update); false si no hay release/asset/sha comparable →
+    /// el llamador cae a la ruta git-based. Fail-open vía el catch del llamador.
+    private async Task<bool> CheckReleaseAsync(CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get,
+            $"https://api.github.com/repos/{Slug}/releases/tags/windows-latest");
+        req.Headers.UserAgent.ParseAdd("claude-quota-widget");
+        req.Headers.Accept.ParseAdd("application/vnd.github+json");
+        using var resp = await Http.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode) return false;   // sin release aún (404) → fallback git-based
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        // build-sha del cuerpo del release (lo escribe release-windows.yml).
+        string full = "";
+        if (root.TryGetProperty("body", out var bodyEl) && bodyEl.GetString() is string b)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(b, "build-sha:\\s*([0-9a-fA-F]{7,40})");
+            if (m.Success) full = m.Groups[1].Value;
+        }
+        if (full.Length == 0) return false;            // sin sha comparable → fallback
+
+        // asset ClaudeQuota.exe
+        string? url = null;
+        if (root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
+            foreach (var a in assets.EnumerateArray())
+                if (a.TryGetProperty("name", out var n) && n.GetString() == "ClaudeQuota.exe"
+                    && a.TryGetProperty("browser_download_url", out var u) && u.GetString() is string dl)
+                { url = dl; break; }
+        if (url == null) return false;                 // release sin exe → fallback
+
+        _assetUrl = url;
+        _remoteFullSha = full;
+        RemoteShort = full.Length >= 7 ? full[..7] : full;
+        CanSelfUpdate = true;                          // la descarga no necesita clon
+        UpdateAvailable = !full.StartsWith(LocalShort, StringComparison.OrdinalIgnoreCase);
+        return true;
+    }
+
     /// Lanza el update DETACHADO. Espeja `runUpdate` del Swift: solo reinstala si el fast-forward a
     /// origin/main tiene éxito; si aborta, NO toca nada (la app sigue viva). Devuelve true si logró
     /// LANZAR el script (no garantiza que el update complete — eso lo resuelve el propio script:
     /// en éxito mata esta app y abre la nueva; en fallo, el llamador resetea el estado por timeout).
     public bool TryLaunchUpdate()
     {
+        // Ruta de DESCARGA (release): no necesita clon ni .NET SDK. Preferida cuando hay asset.
+        if (_assetUrl != null) return TryLaunchDownloadUpdate();
+
+        // Ruta git-based (fallback pre-release): requiere clon con el reinstalador de Windows.
         if (!CanSelfUpdate || _repoPath.Length == 0)
         {
             Message = "actualiza a mano: git pull && pwsh -File windows\\install.ps1";
@@ -151,12 +216,60 @@ internal sealed class Updater
             "if ($LASTEXITCODE -ne 0) { exit 1 }   # árbol sucio / no-ff → NO relanzar, app intacta\n" +
             $"& '{installPs1.Replace("'", "''")}'\n";
 
-        string tmp = Path.Combine(Path.GetTempPath(), "claude-quota-update.ps1");
+        return LaunchDetached(script, "claude-quota-update.ps1");
+    }
+
+    /// Fase 2: descarga el exe del release y hace SWAP. No necesita clon ni .NET SDK. Fail-open
+    /// DURO: el script solo detiene/reemplaza el widget SI la descarga fue válida; ante cualquier
+    /// fallo de descarga, la app queda intacta (peor caso = no auto-actualiza, nunca un brick).
+    private bool TryLaunchDownloadUpdate()
+    {
+        string? exe = Environment.ProcessPath;   // el exe instalado que corre ahora
+        if (string.IsNullOrEmpty(exe))
+        {
+            Message = "no pude ubicar el exe para reemplazar";
+            return false;
+        }
+        string shortSha = _remoteFullSha.Length >= 7 ? _remoteFullSha[..7] : _remoteFullSha;
+
+        // Detachado: baja el exe a TEMP; SOLO si es válido (existe y pesa MBs) detiene el widget
+        // (suelta el lock del single-file), reemplaza el exe, reescribe version.json, refresca brain/
+        // si hay clon (para el botón-curita) y relanza. Si la descarga falla → exit sin tocar nada.
+        var sb = new StringBuilder();
+        sb.Append("$ErrorActionPreference='SilentlyContinue'\n");
+        sb.Append($"$url='{_assetUrl!.Replace("'", "''")}'\n");
+        sb.Append($"$exe='{exe.Replace("'", "''")}'\n");
+        sb.Append($"$repo='{_repoPath.Replace("'", "''")}'\n");
+        sb.Append($"$sha='{shortSha.Replace("'", "''")}'\n");
+        sb.Append("$dir=Split-Path $exe\n");
+        sb.Append("$tmp=Join-Path $env:TEMP 'ClaudeQuota.new.exe'\n");
+        sb.Append("Start-Sleep -Seconds 1\n");
+        sb.Append("try { Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing } catch { exit 1 }\n");
+        sb.Append("if (-not (Test-Path $tmp) -or (Get-Item $tmp).Length -lt 1000000) { exit 1 }\n");
+        sb.Append("Get-Process ClaudeQuota -ErrorAction SilentlyContinue | Stop-Process -Force\n");
+        sb.Append("Start-Sleep -Milliseconds 900\n");
+        sb.Append("Copy-Item $tmp $exe -Force\n");
+        sb.Append("if (-not $?) { Start-Process $exe; exit 1 }\n");   // copy falló → relanzo la vieja
+        sb.Append("$vj = @{ sha=$sha; date=''; repo=$repo; branch='main' } | ConvertTo-Json -Compress\n");
+        sb.Append("Set-Content -Path (Join-Path $dir 'version.json') -Value $vj -Encoding utf8\n");
+        sb.Append("if ($repo -and (Test-Path (Join-Path $repo '.git'))) {\n");
+        sb.Append("  git -C $repo fetch origin; git -C $repo merge --ff-only origin/main\n");
+        sb.Append("  $bsrc = Join-Path $repo 'brain'\n");
+        sb.Append("  if (Test-Path $bsrc) { Copy-Item $bsrc (Join-Path $dir 'brain') -Recurse -Force }\n");
+        sb.Append("}\n");
+        sb.Append("Remove-Item $tmp -Force\n");
+        sb.Append("Start-Process $exe\n");
+        return LaunchDetached(sb.ToString(), "claude-quota-update-dl.ps1");
+    }
+
+    /// Escribe el script a un .ps1 temporal y lo lanza DETACHADO (UseShellExecute + ventana oculta),
+    /// para que sobreviva a que el update cierre esta app. pwsh primero, powershell de respaldo.
+    private bool LaunchDetached(string script, string tmpName)
+    {
+        string tmp = Path.Combine(Path.GetTempPath(), tmpName);
         try { File.WriteAllText(tmp, script, new UTF8Encoding(false)); }
         catch { Message = "no pude escribir el script de update"; return false; }
 
-        // Lanzar DETACHADO: UseShellExecute=true + ventana oculta → proceso independiente que
-        // sobrevive a que install.ps1 cierre esta app. pwsh primero, powershell de respaldo.
         foreach (var shell in new[] { "pwsh", "powershell" })
         {
             try
