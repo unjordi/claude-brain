@@ -477,3 +477,14 @@ if command -v node >/dev/null 2>&1 && [[ -f "$CHATS_EXTRACT" ]]; then
     printf '%s' "$CHATS_JSON" > "$CACHE_DIR/chats.json.tmp" && mv "$CACHE_DIR/chats.json.tmp" "$CACHE_DIR/chats.json"
   fi
 fi
+
+# --- Sesiones de Claude Code por proyecto (para el dropdown de "resumir") -> sessions.json ---
+# sessions-extract.js lista las sesiones (~/.claude/projects/<slug>/*.jsonl) con id/cwd/fecha/label.
+# Fail-open: sin node / sin el script -> no hay sessions.json (el dropdown sale vacío).
+SESSIONS_EXTRACT="$(cd "$(dirname "$0")" && pwd)/sessions-extract.js"
+if command -v node >/dev/null 2>&1 && [[ -f "$SESSIONS_EXTRACT" ]]; then
+  SESS_JSON="$(node "$SESSIONS_EXTRACT" 2>/dev/null || true)"
+  if [[ -n "$SESS_JSON" ]] && jq -e 'type=="array"' <<<"$SESS_JSON" >/dev/null 2>&1; then
+    printf '%s' "$SESS_JSON" > "$CACHE_DIR/sessions.json.tmp" && mv "$CACHE_DIR/sessions.json.tmp" "$CACHE_DIR/sessions.json"
+  fi
+fi
