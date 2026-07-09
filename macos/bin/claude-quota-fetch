@@ -465,3 +465,15 @@ if [[ -n "$DAILY_JSON" ]]; then
     rm -f "$STATS_TMP"
   fi
 fi
+
+# --- Chats del app de escritorio (fuente A local) -> chats.json --------------
+# chats-extract.js lee el cache local de IndexedDB del app de escritorio (Snappy + V8), SIN red ni
+# cookies. Fail-open: sin node / sin el script / sin app de escritorio instalada -> no hay chats.json
+# (la pestaña Chats queda vacía). Se instala junto al fetch (mismo dir).
+CHATS_EXTRACT="$(cd "$(dirname "$0")" && pwd)/chats-extract.js"
+if command -v node >/dev/null 2>&1 && [[ -f "$CHATS_EXTRACT" ]]; then
+  CHATS_JSON="$(node "$CHATS_EXTRACT" 2>/dev/null || true)"
+  if [[ -n "$CHATS_JSON" ]] && jq -e 'type=="array"' <<<"$CHATS_JSON" >/dev/null 2>&1; then
+    printf '%s' "$CHATS_JSON" > "$CACHE_DIR/chats.json.tmp" && mv "$CACHE_DIR/chats.json.tmp" "$CACHE_DIR/chats.json"
+  fi
+fi

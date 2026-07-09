@@ -320,9 +320,13 @@ function resolveBlobBuffer(inputPath) {
   // busca el archivo de blob que contiene el marcador de conversaciones
   const marker = Buffer.from('conversations_v2');
   const hit = grepBlob(blobRoot, marker);
-  if (!hit) throw new Error('no se hallo blob con "conversations_v2" bajo ' + blobRoot);
-  return fs.readFileSync(hit);
+  if (!hit) { rmQuiet(snap); throw new Error('no se hallo blob con "conversations_v2" bajo ' + blobRoot); }
+  const buf = fs.readFileSync(hit);
+  rmQuiet(snap);   // limpia el snapshot (el daemon corre esto cada pocos min -> nada de fuga en /tmp)
+  return buf;
 }
+
+function rmQuiet(dir) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {} }
 
 function findBlobDir(root) {
   const entries = fs.readdirSync(root, { withFileTypes: true });

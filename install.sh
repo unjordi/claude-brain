@@ -91,6 +91,10 @@ fi
 echo "==> Installing fetch script -> $BIN_DEST"
 install -D -m 0755 "$BIN_SRC" "$BIN_DEST"
 
+# chats-extract.js junto al fetch (el fetch lo corre con node para producir chats.json local).
+CHATS_SRC="$ROOT/bin/chats-extract.js"
+[[ -f "$CHATS_SRC" ]] && install -D -m 0755 "$CHATS_SRC" "$(dirname "$BIN_DEST")/chats-extract.js"
+
 if [[ ! -f "$LIMITS_DEFAULT" ]]; then
   echo "==> Seeding default limits at $LIMITS_DEFAULT"
   install -d "$(dirname "$LIMITS_DEFAULT")"
