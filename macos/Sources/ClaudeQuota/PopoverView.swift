@@ -51,7 +51,7 @@ struct PopoverView: View {
             railButton(1, "chart.bar.doc.horizontal", "Resumen")
             railButton(2, "chart.bar", "Modelos")
             railButton(3, "folder", "Proyectos")
-            railButton(4, "message", "Chats")
+            if !model.chats.isEmpty { railButton(4, "message", "Chats") }   // solo si hay chats locales
             railButton(5, "brain", "Cerebro", badge: updater.updateAvailable, heal: brainIncomplete)
             Spacer()
             HStack(spacing: 6) {
