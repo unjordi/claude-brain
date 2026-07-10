@@ -63,6 +63,30 @@ nombre canónico: subdirectorios y worktrees bajo un repo conocido (de `.project
 segmento** del path. Para renombrar un proyecto canónico, deja un mapa en `~/.claude/proyectos-alias.json`
 (`cp brain/proyectos-alias.example.json …`), aplicado después de normalizar. El archivo es opcional.
 
+Cada fila de proyecto con **sesiones de Claude Code** trae un chevron (▸): despliégala para ver sus
+sesiones recientes (de `sessions.json`, máx 12) y **haz clic en una para "resumirla"** — abre una
+terminal en su `cwd` y corre `claude --resume <id>`. En Linux se intenta la primera terminal
+disponible en cascada: `konsole` (KDE) → `x-terminal-emulator` (default Debian/Ubuntu) →
+`gnome-terminal` → `xterm`.
+
+## Filtro de rango {hoy · 7d · 30d · ∞}
+
+Al pie de **Resumen / Modelos / Proyectos / Chats** hay 4 píldoras de rango; la activa va en acento.
+Recortan los datos a **hoy**, **últimos 7 días**, **últimos 30 días** o **∞** (todo el histórico,
+default). El corte filtra `stats.days[]` por fecha local y recalcula tarjetas, tablas y gráficas
+apiladas sobre esos días (reescaladas a su propio máximo). El **heatmap** de Resumen se queda
+all-time; **Racha** y **Hora pico** también (son métricas de todo el histórico). A ∞ todo coincide
+con lo que se mostraba antes del filtro.
+
+## La pestaña "Chats" (solo si hay conversaciones locales)
+
+Lee `~/.cache/claude-quota/chats.json` (lo produce el fetch con `chats-extract.js`, leyendo el caché
+local del app de escritorio de Claude **sin red ni cookies**). Muestra el desglose por modelo
+(swatch + modelo + conteo + %) y la lista de recientes (título + badge de modelo + fecha relativa);
+al pasar el cursor sobre un chat, su resumen sale en el pie. Es **read-only** (no abre el chat: no
+hay deep-link fiable). El riel **solo muestra la pestaña si hay chats** (sin app de escritorio o sin
+`node` no hay `chats.json` y la pestaña no aparece — fail-open).
+
 ## Diagnóstico
 
 ```sh
