@@ -55,6 +55,10 @@ else
 fi
 
 # ── (3) Instalar (cerebro + daemon + widget) ────────────────────────────────
-say "corriendo install.sh $*"
-cd "$DIR" && ./install.sh "$@"
+# Puerta por OS: macOS tiene su propio instalador (launchd + .app); el raíz es Linux/KDE
+# (systemd + plasmoid, exige systemctl/kpackagetool6 → moriría en una Mac).
+INSTALLER="./install.sh"
+[[ "$OSTYPE" == darwin* ]] && INSTALLER="./macos/install.sh"
+say "corriendo $INSTALLER $*"
+cd "$DIR" && bash "$INSTALLER" "$@"
 say "listo — tu máquina quedó con el cerebro puesto. 🎀"
