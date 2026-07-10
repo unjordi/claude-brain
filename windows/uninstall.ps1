@@ -1,6 +1,7 @@
 #!/usr/bin/env pwsh
-# Uninstall Claude Quota (Windows): stop it, drop autostart, remove the app and
-# its cache. Leaves your Claude Code credentials/transcripts untouched.
+# Uninstall Claude Brain Widget (Windows): stop it, drop autostart, remove the app and
+# its cache. Also cleans up the old 'ClaudeQuota' name if a previous install left it.
+# Leaves your Claude Code credentials/transcripts untouched.
 #
 #   pwsh -File uninstall.ps1
 #   pwsh -File uninstall.ps1 -KeepCache
@@ -9,20 +10,21 @@
 param([switch]$KeepCache)
 
 $ErrorActionPreference = 'SilentlyContinue'
-$appName = 'ClaudeQuota'
-$dest    = Join-Path $env:LOCALAPPDATA "Programs\$appName"
-$cache   = Join-Path $env:LOCALAPPDATA 'claude-quota'
+$cache   = Join-Path $env:LOCALAPPDATA 'claude-quota'   # dir de cache interno (id sin renombrar)
 $runKey  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 
 Write-Host "==> Deteniendo..." -ForegroundColor Cyan
-Get-Process $appName | Stop-Process -Force
+Get-Process ClaudeBrain,ClaudeQuota | Stop-Process -Force
 Start-Sleep -Milliseconds 400
 
 Write-Host "==> Quitando autoarranque..." -ForegroundColor Cyan
-Remove-ItemProperty -Path $runKey -Name $appName
+Remove-ItemProperty -Path $runKey -Name 'ClaudeBrain'
+Remove-ItemProperty -Path $runKey -Name 'ClaudeQuota'   # nombre viejo (migracion)
 
-Write-Host "==> Borrando $dest ..." -ForegroundColor Cyan
-Remove-Item $dest -Recurse -Force
+foreach ($n in @('ClaudeBrain','ClaudeQuota')) {
+    $d = Join-Path $env:LOCALAPPDATA "Programs\$n"
+    if (Test-Path $d) { Write-Host "==> Borrando $d ..." -ForegroundColor Cyan; Remove-Item $d -Recurse -Force }
+}
 
 if (-not $KeepCache) {
     Write-Host "==> Borrando cache $cache ..." -ForegroundColor Cyan

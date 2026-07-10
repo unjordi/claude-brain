@@ -1,11 +1,13 @@
 #!/usr/bin/env pwsh
-# Build + install Claude Quota (Windows tray widget).
+# Install Claude Brain Widget (Windows tray widget).
 #
-# Publishes a self-contained single-file exe (no .NET runtime needed on the
-# target), copies it to %LOCALAPPDATA%\Programs\ClaudeQuota, registers it to
-# start with Windows, and launches it. Re-run any time to update in place.
+# By default DOWNLOADS the precompiled self-contained exe (ClaudeBrain.exe) from the rolling
+# 'windows-latest' release -> NO .NET SDK needed. Falls back to building from source (dotnet publish)
+# if the download fails; -Build forces building. Installs to %LOCALAPPDATA%\Programs\ClaudeBrain,
+# registers autostart, and launches. Re-run any time to update in place. Migrates old 'ClaudeQuota'.
 #
-#   pwsh -File install.ps1            # build, install, autostart, launch
+#   pwsh -File install.ps1            # download exe, install, autostart, launch
+#   pwsh -File install.ps1 -Build     # build from source instead (needs .NET SDK)
 #   pwsh -File install.ps1 -NoAutostart
 #
 [CmdletBinding()]
@@ -13,31 +15,57 @@ param(
     [switch]$NoAutostart,
     [switch]$NoLaunch,          # build + install but don't launch (e.g. from an elevated installer)
     [switch]$NoClaudeCode,      # skip auto-installing the Claude Code CLI (the thing the widget measures)
+    [switch]$Build,             # force build-from-source (dotnet publish) instead of downloading the release exe
     [string]$Configuration = 'Release'
 )
 
 $ErrorActionPreference = 'Stop'
 $here    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $proj    = Join-Path $here 'src\ClaudeQuota\ClaudeQuota.csproj'
-$appName = 'ClaudeQuota'
-$dest    = Join-Path $env:LOCALAPPDATA "Programs\$appName"
-$exe     = Join-Path $dest "$appName.exe"
+$appName  = 'ClaudeBrain'
+$dest     = Join-Path $env:LOCALAPPDATA "Programs\$appName"
+$exe      = Join-Path $dest "$appName.exe"
+$assetUrl = 'https://github.com/unjordi/claude-brain/releases/download/windows-latest/ClaudeBrain.exe'
 
 Write-Host "==> Deteniendo instancia previa (si corre)..." -ForegroundColor Cyan
-Get-Process $appName -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process ClaudeBrain,ClaudeQuota -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 400
 
-Write-Host "==> Publicando ($Configuration, self-contained, single-file)..." -ForegroundColor Cyan
-$pub = Join-Path $here 'publish'
-if (Test-Path $pub) { Remove-Item $pub -Recurse -Force }
-dotnet publish $proj -c $Configuration -r win-x64 --self-contained true `
-    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
-    -o $pub
-if ($LASTEXITCODE -ne 0) { throw "dotnet publish fallo ($LASTEXITCODE)" }
-
-Write-Host "==> Instalando en $dest ..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
-Copy-Item (Join-Path $pub "$appName.exe") $exe -Force
+
+# Migracion desde el nombre viejo: si un install previo dejo 'ClaudeQuota', quita su autostart y su
+# carpeta para no quedar con dos widgets/dos entradas tras el rename a ClaudeBrain.
+Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'ClaudeQuota' -ErrorAction SilentlyContinue
+$oldDest = Join-Path $env:LOCALAPPDATA 'Programs\ClaudeQuota'
+if (Test-Path $oldDest) { Remove-Item $oldDest -Recurse -Force -ErrorAction SilentlyContinue }
+
+# Preferimos BAJAR el exe precompilado del release (SIN .NET SDK). Fallback: compilar desde fuente
+# (requiere SDK). -Build fuerza compilar (devs). Nota: si el release se esta re-construyendo, la
+# descarga puede dar 404 por ~1-2 min -> reintenta, o instala el SDK.
+$got = $false
+if (-not $Build) {
+    Write-Host "==> Bajando el exe precompilado del release 'windows-latest' (sin .NET SDK)..." -ForegroundColor Cyan
+    try {
+        Invoke-WebRequest -Uri $assetUrl -OutFile $exe -UseBasicParsing
+        if ((Test-Path $exe) -and (Get-Item $exe).Length -gt 1000000) {
+            $got = $true; Write-Host "    listo ($((Get-Item $exe).Length) bytes)" -ForegroundColor Green
+        }
+    } catch { Write-Host "    no pude bajar el exe: $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+if (-not $got) {
+    if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+        throw "No pude bajar el exe y no hay .NET SDK para compilar. Reintenta en 1-2 min (el release 'windows-latest' se esta construyendo) o instala el .NET 10 SDK y re-corre."
+    }
+    Write-Host "==> Compilando desde fuente ($Configuration, self-contained, single-file)..." -ForegroundColor Cyan
+    $pub = Join-Path $here 'publish'
+    if (Test-Path $pub) { Remove-Item $pub -Recurse -Force }
+    dotnet publish $proj -c $Configuration -r win-x64 --self-contained true `
+        -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+        -o $pub
+    if ($LASTEXITCODE -ne 0) { throw "dotnet publish fallo ($LASTEXITCODE)" }
+    Copy-Item (Join-Path $pub "$appName.exe") $exe -Force
+}
+Write-Host "==> Instalado en $dest" -ForegroundColor Cyan
 
 # Version EMBEBIDA para el autoupdate (winturbo-style), espejo del bloque version.json de
 # macos/make-app.sh: el SHA + la fecha del commit con que se buildeo y la ruta del clon, para que

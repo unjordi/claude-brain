@@ -10,7 +10,8 @@ namespace ClaudeQuota;
 /// </summary>
 internal static class Program
 {
-    private const string AppName = "ClaudeQuota";
+    private const string AppName = "ClaudeBrain";   // exe + nombre del valor de autostart
+    private const string OldAppName = "ClaudeQuota"; // migración: limpiar el autostart viejo
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const double StaleThreshold = 330; // 5.5 min, matches the mac port
 
@@ -274,6 +275,9 @@ internal static class Program
             {
                 using var k = Registry.CurrentUser.CreateSubKey(RunKey);
                 if (k == null) return;
+                // Migración: borra el valor viejo "ClaudeQuota" (si un install previo lo dejó) para
+                // no quedar con dos entradas de autostart tras el rename a ClaudeBrain.
+                k.DeleteValue(OldAppName, throwOnMissingValue: false);
                 if (on) k.SetValue(AppName, $"\"{Application.ExecutablePath}\"");
                 else k.DeleteValue(AppName, throwOnMissingValue: false);
             }

@@ -13,7 +13,7 @@ namespace ClaudeQuota;
 ///
 /// DOS rutas de update (fail-open en ambas):
 ///  1) DESCARGA (preferida, fase 2): consulta el release rolling 'windows-latest'; si trae el asset
-///     ClaudeQuota.exe con un build-sha distinto al embebido, BAJA el exe y hace swap — SIN clon ni
+///     ClaudeBrain.exe con un build-sha distinto al embebido, BAJA el exe y hace swap — SIN clon ni
 ///     .NET SDK. La publica release-windows.yml al hacer release a main.
 ///  2) GIT (fallback pre-release): si no hay release aún, compara `commits/main` y —solo con clon—
 ///     hace `git fetch` + `merge --ff-only` + `install.ps1` (recompila).
@@ -48,7 +48,7 @@ internal sealed class Updater
     private bool _loaded;
     private const string Slug = "unjordi/claude-brain";
 
-    // Ruta de DESCARGA (fase 2): URL del asset ClaudeQuota.exe en el release rolling 'windows-latest'
+    // Ruta de DESCARGA (fase 2): URL del asset ClaudeBrain.exe en el release rolling 'windows-latest'
     // + su build-sha. Si está presente, actualizamos bajando el exe (SIN clon ni .NET SDK).
     private string? _assetUrl;
     private string _remoteFullSha = "";
@@ -143,7 +143,7 @@ internal sealed class Updater
         catch { /* fail-open: sin red / json raro / timeout → no molesta */ }
     }
 
-    /// Consulta el release rolling 'windows-latest': si trae el asset ClaudeQuota.exe y un
+    /// Consulta el release rolling 'windows-latest': si trae el asset ClaudeBrain.exe y un
     /// 'build-sha:' distinto al embebido, prepara la DESCARGA (no requiere clon ni SDK). Devuelve
     /// true si MANEJÓ el chequeo (haya o no update); false si no hay release/asset/sha comparable →
     /// el llamador cae a la ruta git-based. Fail-open vía el catch del llamador.
@@ -168,11 +168,11 @@ internal sealed class Updater
         }
         if (full.Length == 0) return false;            // sin sha comparable → fallback
 
-        // asset ClaudeQuota.exe
+        // asset ClaudeBrain.exe
         string? url = null;
         if (root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
             foreach (var a in assets.EnumerateArray())
-                if (a.TryGetProperty("name", out var n) && n.GetString() == "ClaudeQuota.exe"
+                if (a.TryGetProperty("name", out var n) && n.GetString() == "ClaudeBrain.exe"
                     && a.TryGetProperty("browser_download_url", out var u) && u.GetString() is string dl)
                 { url = dl; break; }
         if (url == null) return false;                 // release sin exe → fallback
@@ -242,11 +242,11 @@ internal sealed class Updater
         sb.Append($"$repo='{_repoPath.Replace("'", "''")}'\n");
         sb.Append($"$sha='{shortSha.Replace("'", "''")}'\n");
         sb.Append("$dir=Split-Path $exe\n");
-        sb.Append("$tmp=Join-Path $env:TEMP 'ClaudeQuota.new.exe'\n");
+        sb.Append("$tmp=Join-Path $env:TEMP 'ClaudeBrain.new.exe'\n");
         sb.Append("Start-Sleep -Seconds 1\n");
         sb.Append("try { Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing } catch { exit 1 }\n");
         sb.Append("if (-not (Test-Path $tmp) -or (Get-Item $tmp).Length -lt 1000000) { exit 1 }\n");
-        sb.Append("Get-Process ClaudeQuota -ErrorAction SilentlyContinue | Stop-Process -Force\n");
+        sb.Append("Get-Process ClaudeBrain -ErrorAction SilentlyContinue | Stop-Process -Force\n");
         sb.Append("Start-Sleep -Milliseconds 900\n");
         sb.Append("Copy-Item $tmp $exe -Force\n");
         sb.Append("if (-not $?) { Start-Process $exe; exit 1 }\n");   // copy falló → relanzo la vieja
