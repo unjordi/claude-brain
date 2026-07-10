@@ -72,17 +72,22 @@ struct StatsDay: Codable {
     let out_tok: Double?
     let tokens: Double?
     let cost: Double?
+    let messages: Double?
     let models: [DayModel]?
     let projects: [DayProject]?
 }
 
 struct DayModel: Codable {
     let model: String?
+    let in_tok: Double?
+    let out_tok: Double?
     let tokens: Double?
 }
 
 struct DayProject: Codable {
     let project: String?
+    let in_tok: Double?
+    let out_tok: Double?
     let tokens: Double?
 }
 
