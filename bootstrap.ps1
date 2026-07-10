@@ -6,6 +6,14 @@
 # Hace: (1) instala con winget lo que falte (Git, .NET 10 SDK, jq, Node), (2) clona/actualiza el repo,
 # (3) instala el cerebro (hooks) + el widget de bandeja. Idempotente.
 $ErrorActionPreference = 'Stop'
+
+# Permite ejecutar los .ps1 que este script invoca (install-brain.ps1 / install.ps1) aunque la maquina
+# tenga ExecutionPolicy Restricted/AllSigned. Este script corre via `iex` (una CADENA, que la policy no
+# frena), pero invocar un ARCHIVO .ps1 con `&` SI esta sujeto a la policy -> lo ponemos en Bypass SOLO
+# para ESTE proceso (no toca la config global de la maquina, no persiste). Fix de raiz del gotcha
+# "running scripts is disabled on this system" (caso real del onboarding, 2026-07-10).
+try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force } catch {}
+
 $repo = 'https://github.com/unjordi/claude-brain'
 $dir  = if ($env:CLAUDE_BRAIN_DIR) { $env:CLAUDE_BRAIN_DIR } else { "$env:USERPROFILE\claude-brain" }
 function Say($m) { Write-Host "claude-brain > $m" -ForegroundColor DarkYellow }
