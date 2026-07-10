@@ -257,6 +257,11 @@ internal sealed class Updater
         sb.Append("  $bsrc = Join-Path $repo 'brain'\n");
         sb.Append("  if (Test-Path $bsrc) { Copy-Item $bsrc (Join-Path $dir 'brain') -Recurse -Force }\n");
         sb.Append("}\n");
+        // (Re)crea el acceso directo del menu Inicio, para que un install viejo (sin .lnk) lo gane al
+        // autoactualizar y para refrescar el icono/target. Best-effort. Espeja install.ps1.
+        sb.Append("$sm=[Environment]::GetFolderPath('Programs')\n");
+        sb.Append("Remove-Item (Join-Path $sm 'Claude Quota.lnk') -Force\n");   // nombre viejo
+        sb.Append("try { $ws=New-Object -ComObject WScript.Shell; $lk=$ws.CreateShortcut((Join-Path $sm 'Claude Brain.lnk')); $lk.TargetPath=$exe; $lk.WorkingDirectory=$dir; $lk.IconLocation=$exe; $lk.Description='Claude Brain Widget'; $lk.Save() } catch {}\n");
         sb.Append("Remove-Item $tmp -Force\n");
         sb.Append("Start-Process $exe\n");
         return LaunchDetached(sb.ToString(), "claude-quota-update-dl.ps1");
