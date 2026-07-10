@@ -6,6 +6,7 @@
 #   ./install.sh --no-gui     # alias of --no-app (skip the menu-bar app)
 #   ./install.sh --no-brain   # skip the Claude-Code brain (hooks/norms); only daemon + app
 #   ./install.sh --no-ccusage # don't npm-install ccusage; fall back to npx at runtime
+#   ./install.sh --no-claude-code # skip auto-installing the Claude Code CLI (the widget measures IT)
 #
 # This is the macOS MASTER installer for claude-brain: it lays down the shared Claude-Code brain
 # (global hooks, delegation-cost governance, skill, norms) AND the quota daemon + optional app.
@@ -28,15 +29,32 @@ STATE_FILE="$HOME/Library/Caches/claude-quota/state.json"
 SKIP_APP=0
 SKIP_CCUSAGE=0
 SKIP_BRAIN=0
+SKIP_CLAUDE_CODE=0
 for arg in "$@"; do
   case "$arg" in
-    --no-app)      SKIP_APP=1 ;;
-    --no-gui)      SKIP_APP=1 ;;
-    --no-brain)    SKIP_BRAIN=1 ;;
-    --no-ccusage)  SKIP_CCUSAGE=1 ;;
+    --no-app)         SKIP_APP=1 ;;
+    --no-gui)         SKIP_APP=1 ;;
+    --no-brain)       SKIP_BRAIN=1 ;;
+    --no-ccusage)     SKIP_CCUSAGE=1 ;;
+    --no-claude-code) SKIP_CLAUDE_CODE=1 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
+
+# Asegura que ~/.local/bin (donde viven el fetch y, típicamente, el CLI `claude`) esté en el PATH,
+# en zsh Y bash (macOS default es zsh, pero no asumas). Idempotente por marcador; crea el rc si falta.
+# Lo aplica también a ESTE proceso para que los pasos siguientes vean lo recién instalado.
+ensure_path_local_bin() {
+  local marker="# claude-brain: ~/.local/bin en el PATH (claude, claude-quota-fetch)"
+  local block
+  printf -v block '\n%s\ncase ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac\n' "$marker"
+  local f
+  for f in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
+    if [[ -e "$f" ]] && grep -qF "$marker" "$f" 2>/dev/null; then continue; fi
+    printf '%s' "$block" >> "$f"
+  done
+  case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
+}
 
 if [[ "$SKIP_BRAIN" -eq 0 ]]; then
   if [[ -f "$BRAIN_INSTALLER" ]]; then
@@ -81,6 +99,24 @@ CHATS_SRC="$ROOT/../bin/chats-extract.js"
 [[ -f "$CHATS_SRC" ]] && install -m 0755 "$CHATS_SRC" "$(dirname "$FETCH_DEST")/chats-extract.js"
 SESSIONS_SRC="$ROOT/../bin/sessions-extract.js"
 [[ -f "$SESSIONS_SRC" ]] && install -m 0755 "$SESSIONS_SRC" "$(dirname "$FETCH_DEST")/sessions-extract.js"
+
+# --- CLI `claude` + PATH (el widget MIDE a claude; sin él no hay qué medir) --------------------
+# Espeja la lógica de install.ps1 (fix #67, Windows): si `claude` no está en el PATH pero YA existe
+# en ~/.local/bin (caso real de Felipe), solo hay que exponer el PATH; si no existe, se instala con
+# el instalador nativo (mismo origen que claude.ai/install.ps1 de Windows). Sáltalo con --no-claude-code.
+if [[ "$SKIP_CLAUDE_CODE" -eq 0 ]]; then
+  if command -v claude >/dev/null 2>&1; then
+    echo "==> claude ya está en el PATH ($(command -v claude))"
+  elif [[ -x "$HOME/.local/bin/claude" ]]; then
+    echo "==> claude está en ~/.local/bin pero fuera del PATH — lo expongo (ver abajo)"
+  else
+    echo "==> Instalando el CLI de Claude Code (instalador nativo)"
+    curl -fsSL https://claude.ai/install.sh | bash \
+      || echo "    no pude instalarlo automáticamente; hazlo a mano: curl -fsSL https://claude.ai/install.sh | bash"
+  fi
+fi
+echo "==> Asegurando ~/.local/bin en el PATH (zsh + bash)"
+ensure_path_local_bin
 
 if [[ ! -f "$LIMITS_DEFAULT" ]]; then
   echo "==> Seeding default limits at $LIMITS_DEFAULT"

@@ -42,6 +42,20 @@ for arg in "$@"; do
   esac
 done
 
+# Asegura que ~/.local/bin (donde viven el fetch y, típicamente, el CLI `claude`) esté en el PATH,
+# en zsh Y bash. Idempotente por marcador; crea el rc si falta. Se aplica también a ESTE proceso.
+ensure_path_local_bin() {
+  local marker="# claude-brain: ~/.local/bin en el PATH (claude, claude-quota-fetch)"
+  local block
+  printf -v block '\n%s\ncase ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac\n' "$marker"
+  local f
+  for f in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
+    if [[ -e "$f" ]] && grep -qF "$marker" "$f" 2>/dev/null; then continue; fi
+    printf '%s' "$block" >> "$f"
+  done
+  case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
+}
+
 if [[ "$SKIP_BRAIN" -eq 0 ]]; then
   if [[ -f "$BRAIN_INSTALLER" ]]; then
     echo "==> Installing the Claude-Code brain (global hooks, delegation-cost governance, norms)"
@@ -81,12 +95,16 @@ if [[ "$SKIP_CLAUDE_CODE" -eq 0 ]]; then
   echo "==> Ensuring the Claude Code CLI is installed (the widget measures ITS usage)"
   if command -v claude >/dev/null 2>&1; then
     echo "    already present ($(command -v claude))"
+  elif [[ -x "$HOME/.local/bin/claude" ]]; then
+    echo "    present in ~/.local/bin but not on PATH — exposing it (see below)"
   else
     echo "    installing via the native installer (auto-updates itself)"
     curl -fsSL https://claude.ai/install.sh | bash \
       || echo "    (could not auto-install; do it by hand: curl -fsSL https://claude.ai/install.sh | bash)"
   fi
 fi
+echo "==> Ensuring ~/.local/bin on PATH (zsh + bash)"
+ensure_path_local_bin
 
 echo "==> Installing fetch script -> $BIN_DEST"
 install -D -m 0755 "$BIN_SRC" "$BIN_DEST"
