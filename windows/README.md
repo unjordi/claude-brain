@@ -42,7 +42,7 @@ the always-running tray app **does the fetch itself in C#** every 5 minutes:
 
 ```
 ┌───────────────────────────────────────────────┐
-│  ClaudeQuota.exe (WinForms tray, always on)     │
+│  ClaudeBrain.exe (WinForms tray, always on)     │
 │                                                 │
 │  every 5 min ─┬─ 1. OAuth /usage  (HttpClient)  │  → exact 5h / 7d %, resets
 │               ├─ 2. transcripts   (System.Text) │  → tokens/day+model,
@@ -79,7 +79,7 @@ extractors.
 
 **Chats / sessions extraction.** `chats.json` and `sessions.json` are produced the
 same way as Linux/macOS: `install.ps1` copies the bundled `bin\chats-extract.js`
-and `bin\sessions-extract.js` next to the exe (`…\Programs\ClaudeQuota\bin`), and
+and `bin\sessions-extract.js` next to the exe (`…\Programs\ClaudeBrain\bin`), and
 each fetch runs them with `node` (fail-open: no Node / no script / an error just
 leaves the file absent, so the Chats tab hides and the resume list stays empty).
 `chats-extract.js` reads the desktop app's local IndexedDB (no network);
@@ -98,7 +98,8 @@ not an invoice. They're local to this machine's transcripts.
 irm https://raw.githubusercontent.com/unjordi/claude-brain/main/bootstrap.ps1 | iex
 ```
 
-`bootstrap.ps1` winget-installs anything missing (Git — brings Git Bash, jq, .NET 10 SDK, Node),
+`bootstrap.ps1` winget-installs anything missing (Git — brings Git Bash, jq, Node; and .NET 10 SDK,
+now only a **build fallback** since the widget install downloads the precompiled `ClaudeBrain.exe`),
 clones the repo to `%USERPROFILE%\claude-brain`, and runs the brain + widget installers. If winget
 just installed something, open a fresh terminal and re-run so the new `PATH` is visible. **Or by
 hand** from the repo:
@@ -109,21 +110,25 @@ hand** from the repo:
 
 ```powershell
 cd windows
-pwsh -File install.ps1              # build, install, autostart, launch
+pwsh -File install.ps1              # download exe, install, autostart, launch
+pwsh -File install.ps1 -Build       # build from source instead (needs .NET SDK)
 pwsh -File install.ps1 -NoAutostart # skip the "start with Windows" registration
 ```
 
-`install.ps1` publishes a **self-contained, single-file `.exe`** (bundles the .NET
-runtime — no install needed on the target), copies it to
-`%LOCALAPPDATA%\Programs\ClaudeQuota\ClaudeQuota.exe`, sets the `HKCU\…\Run`
-autostart entry, and launches it. Re-run any time to update in place.
+By default `install.ps1` **downloads the precompiled, self-contained `ClaudeBrain.exe`**
+(bundles the .NET runtime) from the rolling `windows-latest` release — **no .NET SDK needed**.
+It copies it to `%LOCALAPPDATA%\Programs\ClaudeBrain\ClaudeBrain.exe`, sets the `HKCU\…\Run`
+autostart entry, and launches it. Re-run any time to update in place; it also migrates an old
+`ClaudeQuota` install (removes its autostart + folder).
 
-**Build prerequisite:** [.NET 10 SDK](https://dotnet.microsoft.com/download).
+**Fallback / devs:** if the download fails (e.g. the release is rebuilding, ~1–2 min) it builds from
+source with `dotnet publish` — that path needs the [.NET 10 SDK](https://dotnet.microsoft.com/download).
+`-Build` forces it.
 
 ## Autoupdate ligero (winturbo-style)
 
 Igual que el puerto macOS, `install.ps1` escribe un `version.json` **junto al exe**
-(`%LOCALAPPDATA%\Programs\ClaudeQuota\version.json`) con el `sha`, la `date`, la ruta del
+(`%LOCALAPPDATA%\Programs\ClaudeBrain\version.json`) con el `sha`, la `date`, la ruta del
 `repo` (el clon local) y la `branch` del commit con que se buildeó (lee git desde el repo).
 Al abrir la pestaña **Cerebro**, el widget consulta `commits/main` de
 `github.com/unjordi/claude-brain` (throttle 1×/15 min, timeout 6 s, **fail-open**: sin red /

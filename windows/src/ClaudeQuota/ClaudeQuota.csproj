@@ -16,10 +16,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <AssemblyName>ClaudeQuota</AssemblyName>
+    <!-- Nombre del EXE (ClaudeBrain.exe). El namespace interno se queda en ClaudeQuota
+         a propósito: renombrarlo sería churn masivo sin valor visible. -->
+    <AssemblyName>ClaudeBrain</AssemblyName>
     <RootNamespace>ClaudeQuota</RootNamespace>
+    <!-- Ícono del exe (Explorer/taskbar): la ruleta FelixDes, generado del mismo master que
+         el AppIcon de macOS. Sin esto Windows muestra el genérico de .NET. -->
+    <ApplicationIcon>ClaudeBrain.ico</ApplicationIcon>
     <Version>1.0.0</Version>
-    <Product>Claude Quota</Product>
+    <Product>Claude Brain Widget</Product>
     <Company>io.github.unjordi</Company>
     <!-- Single-file / RID are passed by install.ps1 at publish time so that
          plain `dotnet build` / `dotnet run` stays simple during development. -->

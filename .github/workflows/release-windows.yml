@@ -40,8 +40,8 @@ jobs:
             -c Release -r win-x64 --self-contained true `
             -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
             -o publish
-          if (-not (Test-Path publish/ClaudeQuota.exe)) { throw "no se genero publish/ClaudeQuota.exe" }
-          "exe size: $((Get-Item publish/ClaudeQuota.exe).Length) bytes"
+          if (-not (Test-Path publish/ClaudeBrain.exe)) { throw "no se genero publish/ClaudeBrain.exe" }
+          "exe size: $((Get-Item publish/ClaudeBrain.exe).Length) bytes"
 
       - name: Publish rolling 'windows-latest' release with the exe
         env:
@@ -54,8 +54,8 @@ jobs:
           # 'windows-latest' SIEMPRE refleje el commit del exe publicado. El updater compara su sha
           # embebido contra 'build-sha:' del cuerpo del release.
           gh release delete windows-latest --cleanup-tag --yes 2>$null
-          gh release create windows-latest publish/ClaudeQuota.exe `
+          gh release create windows-latest publish/ClaudeBrain.exe `
             --target $sha `
             --title "Widget de Windows (rolling)" `
-            --notes "Widget de Claude Quota para Windows, self-contained single-file (sin .NET SDK).`nbuild-sha: $sha`nAutoupdate: el widget baja este exe y hace swap."
+            --notes "Claude Brain Widget para Windows, self-contained single-file (sin .NET SDK).`nbuild-sha: $sha`nAutoupdate: el widget baja este exe y hace swap."
           "Publicado windows-latest @ $short"
