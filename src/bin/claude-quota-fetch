@@ -266,7 +266,7 @@ if [[ -n "$DAILY_JSON" ]]; then
   # --- Fase 2: sesiones, mensajes y hora pico desde transcripts crudos --------
   # grep/awk (NO jq) porque ~/.claude/projects puede pesar cientos de MB.
   PROJ="$CLAUDE_DIR/projects"
-  SESSIONS=0; MESSAGES=0; PEAK_HOUR=-1
+  SESSIONS=0; MESSAGES=0; PEAK_HOUR=-1; DAY_MSG_JSON="{}"
   if [[ -d "$PROJ" ]]; then
     SESSIONS=$(( $(find "$PROJ" -name '*.jsonl' 2>/dev/null | wc -l) ))
     MESSAGES=$(grep -rcE '"type":"(assistant|user)"' "$PROJ" --include='*.jsonl' 2>/dev/null \
@@ -277,6 +277,16 @@ if [[ -n "$DAILY_JSON" ]]; then
       | grep -oE 'T[0-9]{2}$' | tr -d 'T' \
       | awk -v off="$OFF" 'BEGIN{m=-1;ph=-1} {h=($1+off+24)%24; c[h]++} END{for(i=0;i<24;i++) if(c[i]>m){m=c[i];ph=i}; print ph}')
     [[ -z "$PEAK_HOUR" ]] && PEAK_HOUR=-1
+    # mensajes por DÍA local (para el filtro de rango del Resumen): user/assistant bucketizados.
+    DAY_MSG_JSON="$(grep -rhE '"type":"(assistant|user)"' "$PROJ" --include='*.jsonl' 2>/dev/null | awk -v off="$OFF" '
+      function isLeap(y){return (y%4==0&&y%100!=0)||(y%400==0)}
+      function dim(y,m,  a){split("31 28 31 30 31 30 31 31 30 31 30 31",a," "); return (m==2&&isLeap(y))?29:a[m]+0}
+      function shift(y,m,d,dl,  nd,nm,ny){nd=d+dl;ny=y;nm=m; if(nd<1){nm=m-1; if(nm<1){nm=12;ny=y-1} nd=dim(ny,nm)} else if(nd>dim(y,m)){nd=1;nm=m+1; if(nm>12){nm=1;ny=y+1}} return sprintf("%04d-%02d-%02d",ny,nm,nd)}
+      { if(match($0,/"timestamp":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}/)){ts=substr($0,RSTART+13,13); y=substr(ts,1,4)+0;mo=substr(ts,6,2)+0;da=substr(ts,9,2)+0;hh=substr(ts,12,2)+0} else next
+        lh=hh+off; if(lh<0)dt=shift(y,mo,da,-1); else if(lh>=24)dt=shift(y,mo,da,1); else dt=sprintf("%04d-%02d-%02d",y,mo,da); M[dt]++ }
+      END{ printf "{"; first=1; for(d in M){ printf "%s\"%s\":%d",(first?"":","),d,M[d]; first=0 } printf "}" }
+    ')"
+    jq -e . <<<"$DAY_MSG_JSON" >/dev/null 2>&1 || DAY_MSG_JSON="{}"
   fi
 
   # --- Fase 3: uso por proyecto (carpeta ~/.claude/projects/<slug>) -----------
@@ -400,7 +410,7 @@ if [[ -n "$DAILY_JSON" ]]; then
   STATS_TMP="$CACHE_DIR/stats.json.tmp"
   if jq -n --argjson daily "$DAILY_JSON" --arg ts "$NOW_ISO" \
         --argjson sessions "$SESSIONS" --argjson messages "$MESSAGES" --argjson peak "$PEAK_HOUR" \
-        --argjson proj "$PROJECT_STATS_JSON" '
+        --argjson proj "$PROJECT_STATS_JSON" --argjson msgday "$DAY_MSG_JSON" '
       # "tokens" mostrados = in+out (sin cache, que domina los totales crudos)
       ($daily.daily // []) as $d
       | ($d | map({
@@ -409,6 +419,7 @@ if [[ -n "$DAILY_JSON" ]]; then
           out_tok: (.outputTokens // 0),
           tokens:  ((.inputTokens // 0) + (.outputTokens // 0)),
           cost:    (.totalCost // 0),
+          messages: ($msgday[.period] // 0),
           models:  (.modelBreakdowns // [] | map({
                       model:   .modelName,
                       in_tok:  (.inputTokens  // 0),
