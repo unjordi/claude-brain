@@ -11,10 +11,24 @@ const path = require('path');
 
 const PER_PROJECT = 12;   // tope de sesiones recientes por proyecto (acota la I/O del daemon)
 
-function projectsDir() {
+function claudeBase() {
   const cfg = process.env.CLAUDE_CONFIG_DIR;
-  const base = (cfg && cfg.length) ? cfg : path.join(os.homedir(), '.claude');
-  return path.join(base, 'projects');
+  return (cfg && cfg.length) ? cfg : path.join(os.homedir(), '.claude');
+}
+
+function projectsDir() {
+  return path.join(claudeBase(), 'projects');
+}
+
+// Alias opcional de etiquetas de sesión: mapa {"<sessionId>":"<etiqueta>"} en
+// ~/.claude/sesiones-alias.json (lo escribe el widget al renombrar una sesión). Fail-open:
+// sin archivo / JSON inválido → mapa vacío (se usa la etiqueta derivada del transcript).
+function sessionAliases() {
+  try {
+    const raw = fs.readFileSync(path.join(claudeBase(), 'sesiones-alias.json'), 'utf8');
+    const o = JSON.parse(raw);
+    return (o && typeof o === 'object') ? o : {};
+  } catch (_) { return {}; }
 }
 
 // Lee el prefijo del transcript (basta con los primeros bytes) y saca el cwd + el primer mensaje
@@ -56,6 +70,7 @@ function main() {
     slugs = fs.readdirSync(dir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name);
   } catch (_) { process.stdout.write('[]\n'); return; }
 
+  const aliases = sessionAliases();
   const out = [];
   for (const slug of slugs) {
     const sdir = path.join(dir, slug);
@@ -69,12 +84,13 @@ function main() {
     for (const { f, m } of files.slice(0, PER_PROJECT)) {
       const { cwd, label } = meta(path.join(sdir, f));
       const realCwd = cwd || slug.replace(/^-/, '/').replace(/-/g, '/');   // fallback lossy si no hubo cwd
+      const id = f.replace(/\.jsonl$/, '');
       out.push({
-        id: f.replace(/\.jsonl$/, ''),
+        id,
         project: path.basename(realCwd) || slug,
         cwd: realCwd,
         updated_at: new Date(m).toISOString(),
-        label: label || '(sesión)',
+        label: aliases[id] || label || '(sesión)',   // el alias del widget gana sobre la etiqueta derivada
       });
     }
   }

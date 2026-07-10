@@ -1,6 +1,7 @@
 import QtCore
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Controls as QQC2
 import org.kde.plasma.plasmoid
 import org.kde.plasma.plasma5support as P5Support
 import org.kde.plasma.core as PlasmaCore
@@ -20,6 +21,17 @@ PlasmoidItem {
     // = aún no leído / no existe (fail-open: la pestaña Chats se oculta, el dropdown de sesiones sale vacío).
     property var chats: null
     property var sessions: null
+
+    // ---------- Alias de renombrado (clic-secundario) ----------
+    // Copias EN MEMORIA de los mapas que el data layer lee: proyectos-alias.json (lo lee el fetch)
+    // y sesiones-alias.json (lo lee sessions-extract.js). Se releen en cada reload() (cat, fail-open a
+    // {}). El widget los ESCRIBE al renombrar; escribir + refetch = el nombre nuevo se propaga. La
+    // semántica espeja QuotaModel.swift (renameProject/renameSession/aliasMap). Base = CLAUDE_CONFIG_DIR
+    // o ~/.claude, resuelta por el shell al leer/escribir (aliasDir).
+    property var projAliasMap: ({})
+    property var sessAliasMap: ({})
+    // Expresión de shell para la base de los mapas (idéntica a claude-quota-fetch / sessions-extract.js).
+    readonly property string aliasDir: "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
     // ---------- Filtro de rango {hoy·7d·30d·∞} (Resumen/Modelos/Proyectos/Chats) ----------
     // rangeIdx: 0=hoy (daysBack 0), 1=7d (6), 2=30d (29), 3=∞ (sin recorte). Default ∞ (todo el histórico).
@@ -61,6 +73,15 @@ PlasmoidItem {
                 if (data["exit code"] === 0 && data.stdout) {
                     try { root.sessions = JSON.parse(data.stdout) } catch (e) {}
                 }
+            } else if (source.indexOf("proyectos-alias.json") !== -1) {
+                // Fail-open: sin archivo / JSON roto -> mapa vacío (no hay alias activo).
+                var pm = {}
+                if (data["exit code"] === 0 && data.stdout) { try { pm = JSON.parse(data.stdout) || {} } catch (e) { pm = {} } }
+                root.projAliasMap = pm
+            } else if (source.indexOf("sesiones-alias.json") !== -1) {
+                var sm = {}
+                if (data["exit code"] === 0 && data.stdout) { try { sm = JSON.parse(data.stdout) || {} } catch (e) { sm = {} } }
+                root.sessAliasMap = sm
             } else {
                 if (data["exit code"] === 0 && data.stdout) {
                     try { root.snapshot = JSON.parse(data.stdout); root.snapshotError = "" }
@@ -78,6 +99,17 @@ PlasmoidItem {
         engine: "executable"
         connectedSources: []
         onNewData: function(source, data) { disconnectSource(source); reload() }
+    }
+
+    // Escritura de los mapas de alias (proyectos-alias.json / sesiones-alias.json). Reusa el engine
+    // "executable" (igual que catSource lee con `cat`). Al TERMINAR la escritura dispara forceRefresh()
+    // — así el refetch relee el archivo YA escrito (evita la carrera write-vs-refetch). Espeja el
+    // `writeMap` + `onRefresh()` de PopoverView.swift.
+    P5Support.DataSource {
+        id: writeAliasSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) { disconnectSource(source); root.forceRefresh() }
     }
 
     // Lanzador de terminal para "resumir" una sesión de Claude Code (pestaña Proyectos). Corre el
@@ -195,9 +227,71 @@ PlasmoidItem {
         catSource.connectSource("cat " + cacheDir + "/stats.json")
         catSource.connectSource("cat " + cacheDir + "/chats.json")
         catSource.connectSource("cat " + cacheDir + "/sessions.json")
+        // Mapas de alias (fail-open): para la lógica de "canónico" y "Restaurar original".
+        catSource.connectSource("cat \"" + aliasDir + "/proyectos-alias.json\" 2>/dev/null")
+        catSource.connectSource("cat \"" + aliasDir + "/sesiones-alias.json\" 2>/dev/null")
     }
     function forceRefresh() {
         refreshRunner.connectSource("systemctl --user start claude-quota.service")
+    }
+
+    // ---------- Renombrado por clic-secundario (espeja QuotaModel.swift) ----------
+    // Serializa un mapa {clave:valor} con LLAVES ORDENADAS + pretty (2 espacios) → diff limpio si el
+    // archivo se versiona/sincroniza. (JSON.stringify con array-replacer respeta el orden del array.)
+    function serializeAliasMap(map) {
+        var keys = Object.keys(map).sort()
+        return JSON.stringify(map, keys, 2)
+    }
+    // Escribe el mapa en <aliasDir>/<file> y, al terminar, refetch. Contenido single-quoted y escapado
+    // ('->'\'') para blindar cualquier carácter; `printf '%s'` NO interpreta % ni \ del argumento.
+    function writeAliasMap(file, map) {
+        var json = serializeAliasMap(map)
+        var esc = json.replace(/'/g, "'\\''")
+        var cmd = "mkdir -p \"" + aliasDir + "\" && printf '%s' '" + esc + "' > \"" + aliasDir + "/" + file + "\""
+        writeAliasSource.connectSource(cmd)
+    }
+    // (c) Proyecto: la lista muestra el nombre YA aliaseado. La llave canónica = la entrada cuyo VALOR
+    // == mostrado; si no hay, el mostrado ES el canónico. Nuevo vacío o == canónico → BORRA (revierte).
+    function renameProject(shown, newName) {
+        var map = {}; for (var k in projAliasMap) map[k] = projAliasMap[k]
+        var canonical = shown
+        for (var kk in map) if (map[kk] === shown) { canonical = kk; break }
+        var v = ("" + newName).trim()
+        if (v === "" || v === canonical) delete map[canonical]
+        else map[canonical] = v
+        projAliasMap = map
+        writeAliasMap("proyectos-alias.json", map)
+    }
+    // (d) Sesión: llave = id (estable). Vacío → borra (revierte a la etiqueta derivada del transcript).
+    function renameSession(id, newName) {
+        var map = {}; for (var k in sessAliasMap) map[k] = sessAliasMap[k]
+        var v = ("" + newName).trim()
+        if (v === "") delete map[id]
+        else map[id] = v
+        sessAliasMap = map
+        writeAliasMap("sesiones-alias.json", map)
+    }
+    // ¿El proyecto mostrado tiene alias activo? (es llave O valor del mapa) — para "Restaurar original".
+    function projectAliased(shown) {
+        if (projAliasMap[shown] !== undefined) return true
+        for (var k in projAliasMap) if (projAliasMap[k] === shown) return true
+        return false
+    }
+    function sessionAliased(id) { return sessAliasMap[id] !== undefined && sessAliasMap[id] !== null }
+
+    // Estado del diálogo de renombrado (compartido por proyecto y sesión).
+    property string renameKind: ""   // "project" | "session"
+    property string renameKey: ""    // (c) nombre mostrado del proyecto · (d) id de la sesión
+    function startRename(kind, key, current) {
+        renameKind = kind; renameKey = key
+        renameField.text = current
+        renameDialog.open()
+        renameField.selectAll(); renameField.forceActiveFocus()
+    }
+    function applyRenameFromDialog() {
+        if (renameKind === "project") renameProject(renameKey, renameField.text)
+        else if (renameKind === "session") renameSession(renameKey, renameField.text)
+        renameDialog.close()
     }
 
     // epoch ms del último forceRefresh disparado por un reset ya pasado (guard anti-bucle).
@@ -823,6 +917,42 @@ PlasmoidItem {
         Layout.preferredHeight: Kirigami.Units.gridUnit * 17
         spacing: 0
 
+        // Diálogo de renombrado (compartido por proyecto y sesión). Se abre desde el menú de
+        // clic-secundario vía root.startRename(...). Vacío → "Restaurar original" (borra el alias).
+        Kirigami.PromptDialog {
+            id: renameDialog
+            title: root.renameKind === "session" ? "Renombrar sesión" : "Renombrar proyecto"
+            subtitle: root.renameKind === "session"
+                ? "Nueva etiqueta para esta sesión. Vacío para restaurar la original."
+                : "Nuevo nombre para este proyecto. Vacío para restaurar el original."
+            standardButtons: QQC2.Dialog.NoButton
+            customFooterActions: [
+                Kirigami.Action {
+                    text: "Guardar"
+                    icon.name: "dialog-ok-apply"
+                    onTriggered: root.applyRenameFromDialog()
+                },
+                Kirigami.Action {
+                    text: "Restaurar original"
+                    icon.name: "edit-undo"
+                    visible: root.renameKind === "session"
+                        ? root.sessionAliased(root.renameKey)
+                        : root.projectAliased(root.renameKey)
+                    onTriggered: { renameField.text = ""; root.applyRenameFromDialog() }
+                },
+                Kirigami.Action {
+                    text: "Cancelar"
+                    icon.name: "dialog-cancel"
+                    onTriggered: renameDialog.close()
+                }
+            ]
+            PC3.TextField {
+                id: renameField
+                Layout.fillWidth: true
+                onAccepted: root.applyRenameFromDialog()
+            }
+        }
+
         // riel vertical de pestañas
         ColumnLayout {
             Layout.fillHeight: true
@@ -1072,8 +1202,26 @@ PlasmoidItem {
                                     Layout.fillWidth: true
                                     implicitHeight: prow.implicitHeight
                                     hoverEnabled: true
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                                     cursorShape: nSess > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                    onClicked: if (nSess > 0) root.expandedProject = expanded ? "" : projName
+                                    onClicked: function(mouse) {
+                                        if (mouse.button === Qt.RightButton) projMenu.popup()
+                                        else if (nSess > 0) root.expandedProject = expanded ? "" : projName
+                                    }
+                                    // Clic-secundario → renombrar el proyecto (y restaurar si tiene alias).
+                                    QQC2.Menu {
+                                        id: projMenu
+                                        QQC2.MenuItem {
+                                            text: "Renombrar…"
+                                            onTriggered: root.startRename("project", projName, projName)
+                                        }
+                                        QQC2.MenuItem {
+                                            text: "Restaurar original"
+                                            visible: root.projectAliased(projName)
+                                            height: visible ? implicitHeight : 0
+                                            onTriggered: root.renameProject(projName, "")
+                                        }
+                                    }
                                     RowLayout {
                                         id: prow
                                         anchors.left: parent.left; anchors.right: parent.right
@@ -1113,11 +1261,29 @@ PlasmoidItem {
                                             Layout.fillWidth: true
                                             implicitHeight: srow.implicitHeight
                                             hoverEnabled: true
+                                            acceptedButtons: Qt.LeftButton | Qt.RightButton
                                             cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.resumeSession(modelData.cwd, modelData.id)
+                                            onClicked: function(mouse) {
+                                                if (mouse.button === Qt.RightButton) sessMenu.popup()
+                                                else root.resumeSession(modelData.cwd, modelData.id)
+                                            }
                                             PC3.ToolTip.text: "Resumir en " + modelData.cwd
                                             PC3.ToolTip.visible: containsMouse
                                             PC3.ToolTip.delay: 500
+                                            // Clic-secundario → renombrar la sesión (llave = id estable).
+                                            QQC2.Menu {
+                                                id: sessMenu
+                                                QQC2.MenuItem {
+                                                    text: "Renombrar…"
+                                                    onTriggered: root.startRename("session", modelData.id, modelData.label ? modelData.label : "")
+                                                }
+                                                QQC2.MenuItem {
+                                                    text: "Restaurar original"
+                                                    visible: root.sessionAliased(modelData.id)
+                                                    height: visible ? implicitHeight : 0
+                                                    onTriggered: root.renameSession(modelData.id, "")
+                                                }
+                                            }
                                             RowLayout {
                                                 id: srow
                                                 anchors.left: parent.left; anchors.right: parent.right
