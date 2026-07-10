@@ -23,6 +23,8 @@ struct PopoverView: View {
     @State private var hoveredSummary: String? = nil
     /// Proyecto expandido en la pestaña Proyectos (muestra sus sesiones para resumir).
     @State private var expandedProject: String? = nil
+    /// Rango de tiempo activo (footer {hoy·7d·30d·∞}) para Resumen/Modelos/Proyectos/Chats.
+    @State private var range: TimeRange = .all
 
     // Neutral surfaces adapt to light/dark via labelColor; accents are fixed hex.
     private var label: Color { Color(nsColor: .labelColor) }
@@ -233,16 +235,26 @@ struct PopoverView: View {
     private var resumenTab: some View {
         let s = model.stats?.summary
         let streaks = model.streaks
+        let days = rangedDays()
+        let hasStats = model.stats != nil
+        // Agregados recalculados sobre el rango (a ∞ coinciden con summary).
+        let toks = days.reduce(0.0) { $0 + ($1.tokens ?? 0) }
+        let cost = days.reduce(0.0) { $0 + ($1.cost ?? 0) }
+        let msgs = days.reduce(0.0) { $0 + ($1.messages ?? 0) }
+        let activeDays = days.filter { ($0.tokens ?? 0) > 0 }.count
+        // Sesiones: a ∞ el conteo exacto de summary; en rango, filtrado de sessions.json.
+        let sessions = range == .all ? (s != nil ? Fmt.int(s?.sessions) : "—") : "\(rangedSessionCount())"
+        let fav = rangedModels().first?.name
         let cards: [(String, String)] = [
-            ("Sesiones",        s != nil ? Fmt.int(s?.sessions) : "—"),
-            ("Mensajes",        s != nil ? Fmt.int(s?.messages) : "—"),
-            ("Tokens totales",  s != nil ? Fmt.tok(s?.total_tokens) : "—"),
-            ("Días activos",    s?.active_days.map { "\($0)" } ?? "—"),
+            ("Sesiones",        sessions),
+            ("Mensajes",        hasStats ? Fmt.int(msgs) : "—"),
+            ("Tokens totales",  hasStats ? Fmt.tok(toks) : "—"),
+            ("Días activos",    hasStats ? "\(activeDays)" : "—"),
             ("Racha actual",    "\(streaks.cur)d"),
             ("Racha más larga", "\(streaks.max)d"),
             ("Hora pico",       s != nil ? Fmt.hour(s?.peak_hour) : "—"),
-            ("Modelo favorito", s != nil ? Fmt.prettyModel(s?.favorite_model) : "—"),
-            ("Costo API-equiv", s?.total_cost.map { String(format: "$%.0f", $0) } ?? "—"),
+            ("Modelo favorito", fav != nil ? Fmt.prettyModel(fav) : "—"),
+            ("Costo API-equiv", hasStats ? String(format: "$%.0f", cost) : "—"),
         ]
         return VStack(alignment: .leading, spacing: 12) {
             Text("Resumen").font(.headline)
@@ -257,6 +269,7 @@ struct PopoverView: View {
                 .foregroundStyle(label.opacity(0.6))
             heatmap
             Spacer(minLength: 0)
+            rangeFooter
         }
         .padding(16)
     }
@@ -288,40 +301,29 @@ struct PopoverView: View {
     // ===== Tab 2: Modelos =====
 
     private var modelosTab: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let days = rangedDays()
+        let maxTok = max(1, days.map { $0.tokens ?? 0 }.max() ?? 1)
+        return VStack(alignment: .leading, spacing: 12) {
             Text("Uso por modelo").font(.headline)
-            stackedChart.frame(height: 126)
+            stackedChart(days, maxTok).frame(height: 110)
             // Encabezado + gráfico fijos; solo la lista scrollea (altura acotada al
             // espacio restante) → el popover no crece por más modelos que se acumulen.
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 6) {
-                    ForEach(model.stats?.models ?? [], id: \.model) { m in
-                        HStack(spacing: 6) {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(model.modelColor(m.model))
-                                .frame(width: 10, height: 10)
-                            Text(Fmt.prettyModel(m.model)).fontWeight(.bold)
-                            Spacer()
-                            Text("\(Fmt.tok(m.in_tok)) in · \(Fmt.tok(m.out_tok)) out")
-                                .foregroundStyle(label.opacity(0.7))
-                            Text(String(format: "%.1f%%", m.pct ?? 0))
-                                .fontWeight(.bold)
-                                .foregroundStyle(model.modelColor(m.model))
-                                .frame(minWidth: 44, alignment: .trailing)
-                        }
+                    ForEach(rangedModels()) { m in
+                        usageRow(m, color: model.modelColor(m.name), pretty: true)
                     }
                 }
             }
             .frame(maxHeight: .infinity)
+            rangeFooter
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private var stackedChart: some View {
-        let days = model.stats?.days ?? []
-        let maxTok = model.maxDayTokens
-        return GeometryReader { geo in
+    private func stackedChart(_ days: [StatsDay], _ maxTok: Double) -> some View {
+        GeometryReader { geo in
             let h = geo.size.height
             HStack(alignment: .bottom, spacing: 2) {
                 ForEach(days.indices, id: \.self) { i in
@@ -346,22 +348,25 @@ struct PopoverView: View {
     /// Uso de Claude Code por carpeta de proyecto — un subconjunto de Modelos
     /// (ese tab también cuenta otros CLIs de IA locales que ccusage detecta).
     private var proyectosTab: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let days = rangedDays()
+        let maxTok = max(1, days.map { ($0.projects ?? []).reduce(0.0) { $0 + ($1.tokens ?? 0) } }.max() ?? 1)
+        return VStack(alignment: .leading, spacing: 12) {
             Text("Uso por proyecto").font(.headline)
-            stackedProjectChart.frame(height: 126)
+            stackedProjectChart(days, maxTok).frame(height: 110)
             // Encabezado + gráfico fijos; solo la lista scrollea (altura acotada al
             // espacio restante) → el popover no crece por más proyectos que se acumulen.
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 6) {
-                    ForEach(model.stats?.projects ?? [], id: \.project) { p in
+                    ForEach(rangedProjects()) { p in
                         projectRow(p)
-                        if expandedProject == (p.project ?? "—") {
-                            sessionsList(for: p.project ?? "—")
+                        if expandedProject == p.name {
+                            sessionsList(for: p.name)
                         }
                     }
                 }
             }
             .frame(maxHeight: .infinity)
+            rangeFooter
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -370,23 +375,23 @@ struct PopoverView: View {
     /// Fila de proyecto: swatch + nombre (+ chevron si tiene sesiones) + tokens + %. Tap despliega
     /// sus sesiones de Claude Code para resumir.
     @ViewBuilder
-    private func projectRow(_ p: StatsProject) -> some View {
-        let name = p.project ?? "—"
+    private func projectRow(_ p: UsageStat) -> some View {
+        let name = p.name
         let n = model.sessions.filter { $0.project == name }.count
         Button {
             expandedProject = (expandedProject == name) ? nil : name
         } label: {
             HStack(spacing: 6) {
-                RoundedRectangle(cornerRadius: 2).fill(model.projectColor(p.project)).frame(width: 10, height: 10)
+                RoundedRectangle(cornerRadius: 2).fill(model.projectColor(name)).frame(width: 10, height: 10)
                 Text(name).fontWeight(.bold).lineLimit(1)
                 if n > 0 {
                     Image(systemName: expandedProject == name ? "chevron.down" : "chevron.right")
                         .font(.system(size: 9)).foregroundStyle(label.opacity(0.5))
                 }
                 Spacer()
-                Text("\(Fmt.tok(p.in_tok)) in · \(Fmt.tok(p.out_tok)) out").foregroundStyle(label.opacity(0.7))
-                Text(String(format: "%.1f%%", p.pct ?? 0)).fontWeight(.bold)
-                    .foregroundStyle(model.projectColor(p.project)).frame(minWidth: 44, alignment: .trailing)
+                Text("\(Fmt.tok(p.inTok)) in · \(Fmt.tok(p.outTok)) out").foregroundStyle(label.opacity(0.7))
+                Text(String(format: "%.1f%%", p.pct)).fontWeight(.bold)
+                    .foregroundStyle(model.projectColor(name)).frame(minWidth: 44, alignment: .trailing)
             }
             .contentShape(Rectangle())
         }
@@ -433,10 +438,8 @@ struct PopoverView: View {
         s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
     }
 
-    private var stackedProjectChart: some View {
-        let days = model.stats?.days ?? []
-        let maxTok = model.maxDayProjectTokens
-        return GeometryReader { geo in
+    private func stackedProjectChart(_ days: [StatsDay], _ maxTok: Double) -> some View {
+        GeometryReader { geo in
             let h = geo.size.height
             HStack(alignment: .bottom, spacing: 2) {
                 ForEach(days.indices, id: \.self) { i in
@@ -461,21 +464,24 @@ struct PopoverView: View {
     /// Conversaciones recientes del app de escritorio (leídas del cache local por chats-extract.js,
     /// sin red ni cookies). Click abre el chat en claude.ai; hover muestra el summary.
     private var chatsTab: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let cs = rangedChats()
+        return VStack(alignment: .leading, spacing: 10) {
             Text("Chats").font(.headline)
-            if model.chats.isEmpty {
-                Text("Sin conversaciones locales.\nAbre el app de escritorio de Claude y espera al próximo refresco.")
+            if cs.isEmpty {
+                Text(range == .all
+                     ? "Sin conversaciones locales.\nAbre el app de escritorio de Claude y espera al próximo refresco."
+                     : "Sin conversaciones en este rango.")
                     .font(.caption).foregroundStyle(label.opacity(0.6))
                 Spacer()
             } else {
                 VStack(spacing: 4) {                               // reparto por modelo con %
-                    ForEach(chatsByModel) { chatModelRow($0) }
+                    ForEach(chatsByModel(cs)) { chatModelRow($0) }
                 }
                 Divider().overlay(label.opacity(0.12))
                 Text("recientes").font(.caption).foregroundStyle(label.opacity(0.5))
                 ScrollView(.vertical, showsIndicators: true) {     // lista clickeable
                     VStack(spacing: 6) {
-                        ForEach(model.chats.prefix(20)) { c in chatRow(c) }
+                        ForEach(cs.prefix(20)) { c in chatRow(c) }
                     }
                 }
                 .frame(maxHeight: .infinity)
@@ -487,6 +493,7 @@ struct PopoverView: View {
                     .lineLimit(4)
                     .frame(maxWidth: .infinity, minHeight: 56, alignment: .topLeading)
             }
+            rangeFooter
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -533,11 +540,11 @@ struct PopoverView: View {
     // ---- datos derivados de model.chats para la pestaña Chats ----
 
     /// Reparto por modelo (conteo + % del total), ordenado desc.
-    private var chatsByModel: [ChatModelStat] {
-        let total = model.chats.count
+    private func chatsByModel(_ chats: [Chat]) -> [ChatModelStat] {
+        let total = chats.count
         guard total > 0 else { return [] }
         var counts: [String: Int] = [:]
-        for c in model.chats { counts[c.model ?? "?", default: 0] += 1 }
+        for c in chats { counts[c.model ?? "?", default: 0] += 1 }
         return counts.map { ChatModelStat(model: $0.key, count: $0.value,
                                           pct: Double($0.value) * 100 / Double(total)) }
             .sorted { $0.count > $1.count }
@@ -555,6 +562,101 @@ struct PopoverView: View {
         if days < 7 { return "hace \(days)d" }
         if days < 30 { return "hace \(days / 7)sem" }
         return "hace \(days / 30)mes"
+    }
+
+    // ---- Filtro de rango {hoy·7d·30d·∞} (Resumen/Modelos/Proyectos/Chats) ----
+
+    /// Fecha de corte "yyyy-MM-dd" (hora local) para el rango activo; nil si ∞.
+    private func rangeCutoff() -> String? {
+        guard let back = range.daysBack,
+              let d = Calendar.current.date(byAdding: .day, value: -back, to: Date()) else { return nil }
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = .current
+        return f.string(from: d)
+    }
+
+    /// Días de stats.days[] dentro del rango (todos si ∞). Compara por prefijo de fecha.
+    private func rangedDays() -> [StatsDay] {
+        let all = model.stats?.days ?? []
+        guard let cut = rangeCutoff() else { return all }
+        return all.filter { ($0.date ?? "") >= cut }
+    }
+
+    /// Chats dentro del rango (por updated_at/created_at).
+    private func rangedChats() -> [Chat] {
+        guard let cut = rangeCutoff() else { return model.chats }
+        return model.chats.filter { String(($0.updated_at ?? $0.created_at ?? "").prefix(10)) >= cut }
+    }
+
+    /// Sesiones (sessions.json) dentro del rango, por updated_at.
+    private func rangedSessionCount() -> Int {
+        guard let cut = rangeCutoff() else { return model.sessions.count }
+        return model.sessions.filter { String(($0.updated_at ?? "").prefix(10)) >= cut }.count
+    }
+
+    /// Uso por modelo agregado sobre los días del rango.
+    private func rangedModels() -> [UsageStat] {
+        var acc: [String: (Double, Double)] = [:]
+        for d in rangedDays() {
+            for m in d.models ?? [] {
+                let k = m.model ?? "?"; var v = acc[k] ?? (0, 0)
+                v.0 += m.in_tok ?? 0; v.1 += m.out_tok ?? 0; acc[k] = v
+            }
+        }
+        return usageStats(acc)
+    }
+
+    /// Uso por proyecto agregado sobre los días del rango.
+    private func rangedProjects() -> [UsageStat] {
+        var acc: [String: (Double, Double)] = [:]
+        for d in rangedDays() {
+            for p in d.projects ?? [] {
+                let k = p.project ?? "?"; var v = acc[k] ?? (0, 0)
+                v.0 += p.in_tok ?? 0; v.1 += p.out_tok ?? 0; acc[k] = v
+            }
+        }
+        return usageStats(acc)
+    }
+
+    private func usageStats(_ acc: [String: (Double, Double)]) -> [UsageStat] {
+        let grand = acc.values.reduce(0.0) { $0 + $1.0 + $1.1 }
+        return acc.map {
+            UsageStat(name: $0.key, inTok: $0.value.0, outTok: $0.value.1,
+                      tot: $0.value.0 + $0.value.1,
+                      pct: grand > 0 ? ($0.value.0 + $0.value.1) * 100 / grand : 0)
+        }.sorted { $0.tot > $1.tot }
+    }
+
+    /// Fila de uso (modelo o proyecto): swatch + nombre + in/out + %.
+    @ViewBuilder
+    private func usageRow(_ u: UsageStat, color: Color, pretty: Bool) -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 10, height: 10)
+            Text(pretty ? Fmt.prettyModel(u.name) : u.name).fontWeight(.bold).lineLimit(1)
+            Spacer()
+            Text("\(Fmt.tok(u.inTok)) in · \(Fmt.tok(u.outTok)) out").foregroundStyle(label.opacity(0.7))
+            Text(String(format: "%.1f%%", u.pct)).fontWeight(.bold).foregroundStyle(color)
+                .frame(minWidth: 44, alignment: .trailing)
+        }
+    }
+
+    /// Footer con los 4 botones de rango; el activo va en acento.
+    @ViewBuilder
+    private var rangeFooter: some View {
+        HStack(spacing: 4) {
+            ForEach(TimeRange.allCases) { r in
+                Button { range = r } label: {
+                    Text(r.label)
+                        .font(.caption2).fontWeight(range == r ? .bold : .regular)
+                        .padding(.horizontal, 9).padding(.vertical, 3)
+                        .background(RoundedRectangle(cornerRadius: 5)
+                            .fill(range == r ? accent.opacity(0.2) : label.opacity(0.06)))
+                        .foregroundStyle(range == r ? accent : label.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 2)
     }
 
     // ===== Tab 5: Cerebro =====
@@ -1040,6 +1142,25 @@ private struct BrainItem {
         self.emoji = emoji; self.name = name; self.desc = desc
         self.event = event; self.detail = detail
     }
+}
+
+/// Rango de tiempo del footer {hoy·7d·30d·∞}. `.all` = histórico completo.
+private enum TimeRange: CaseIterable, Identifiable {
+    case today, d7, d30, all
+    var id: Int { switch self { case .today: 0; case .d7: 1; case .d30: 2; case .all: 3 } }
+    var label: String { switch self { case .today: "hoy"; case .d7: "7d"; case .d30: "30d"; case .all: "∞" } }
+    /// Días hacia atrás desde hoy (incluyente); nil = sin recorte.
+    var daysBack: Int? { switch self { case .today: 0; case .d7: 6; case .d30: 29; case .all: nil } }
+}
+
+/// Fila de uso agregada (modelo o proyecto) recalculada por rango: in/out/total/%.
+private struct UsageStat: Identifiable {
+    let name: String
+    let inTok: Double
+    let outTok: Double
+    let tot: Double
+    let pct: Double
+    var id: String { name }
 }
 
 /// A summary stat card: labelColor 6% bg, label (dim, small) over bold value.
