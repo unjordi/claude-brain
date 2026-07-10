@@ -118,6 +118,12 @@ FIVE_HOUR_CAP_USD=45
 WEEKLY_CAP_USD=4800
 WARN_PCT=60
 CRIT_PCT=85
+
+# (e) Sync entre máquinas (opt-in): comparte un snapshot de uso vía una carpeta que tu nube ya
+# replica, y el widget muestra un toggle "esta máquina / todas". "auto" autodetecta Google Drive
+# (en Linux no hay cliente oficial: mejor pon la ruta explícita del mount de rclone/insync); o una
+# ruta. Ausente/vacío = off (100% local, no sube nada).
+# SYNC_DIR=auto
 EOF
 fi
 

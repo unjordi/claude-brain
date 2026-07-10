@@ -64,6 +64,15 @@ struct Stats: Codable {
     let models: [StatsModel]?
     let projects: [StatsProject]?
     let summary: StatsSummary?
+    /// Solo en stats-global.json (vista "todas las máquinas"): qué máquinas aportaron y cuánto.
+    let machines: [MachineStat]?
+}
+
+/// Una máquina que aportó a la vista sincronizada (stats-global.json).
+struct MachineStat: Codable {
+    let name: String?
+    let updated_at: String?
+    let tokens: Double?
 }
 
 struct StatsDay: Codable {
@@ -166,6 +175,8 @@ struct Session: Codable, Identifiable {
 final class QuotaModel: ObservableObject {
     @Published var snapshot: Snapshot?
     @Published var stats: Stats?
+    /// Vista sincronizada entre máquinas (stats-global.json). nil si el sync (e) no está activo.
+    @Published var statsGlobal: Stats?
     @Published var chats: [Chat] = []
     @Published var sessions: [Session] = []
     @Published var loadError: String?
@@ -180,6 +191,11 @@ final class QuotaModel: ObservableObject {
         let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         return cache.appendingPathComponent("claude-quota/stats.json")
     }
+    /// ~/Library/Caches/claude-quota/stats-global.json — vista fusionada de todas las máquinas (sync (e)).
+    static var statsGlobalURL: URL {
+        let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return cache.appendingPathComponent("claude-quota/stats-global.json")
+    }
     /// ~/Library/Caches/claude-quota/chats.json — conversaciones del app de escritorio (fuente local).
     static var chatsURL: URL {
         let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -190,6 +206,53 @@ final class QuotaModel: ObservableObject {
         let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         return cache.appendingPathComponent("claude-quota/sessions.json")
     }
+
+    /// ~/.claude (o CLAUDE_CONFIG_DIR) — base de los mapas de alias que escribe el widget.
+    static var claudeBase: URL {
+        if let cfg = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"], !cfg.isEmpty {
+            return URL(fileURLWithPath: cfg)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
+    }
+
+    private func aliasMap(_ file: String) -> [String: String] {
+        guard let data = try? Data(contentsOf: Self.claudeBase.appendingPathComponent(file)),
+              let m = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
+        return m
+    }
+
+    private func writeMap(_ file: String, _ map: [String: String]) {
+        try? FileManager.default.createDirectory(at: Self.claudeBase, withIntermediateDirectories: true)
+        let url = Self.claudeBase.appendingPathComponent(file)
+        // Orden estable de las llaves → diff limpio si el archivo se versiona/sincroniza (útil para (e)).
+        let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? enc.encode(map) { try? data.write(to: url) }
+    }
+
+    /// (c) Renombra un proyecto. La lista muestra el nombre YA aliaseado, así que la llave canónica
+    /// (la que el fetch usa) es la entrada cuyo VALOR == nombre mostrado; si no hay, el mostrado es el
+    /// canónico. Nombre nuevo vacío (o == canónico) BORRA el alias → revierte. Requiere refetch después.
+    func renameProject(_ shown: String, to newName: String) {
+        var map = aliasMap("proyectos-alias.json")
+        let canonical = map.first(where: { $0.value == shown })?.key ?? shown
+        let v = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if v.isEmpty || v == canonical { map.removeValue(forKey: canonical) } else { map[canonical] = v }
+        writeMap("proyectos-alias.json", map)
+    }
+
+    /// (d) Renombra una sesión por su id (nombre del .jsonl, estable). Vacío revierte a la etiqueta derivada.
+    func renameSession(_ id: String, to newName: String) {
+        var map = aliasMap("sesiones-alias.json")
+        let v = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if v.isEmpty { map.removeValue(forKey: id) } else { map[id] = v }
+        writeMap("sesiones-alias.json", map)
+    }
+
+    /// ¿El proyecto mostrado tiene un alias activo? (es llave o valor del mapa) — para "Restaurar original".
+    func projectAliased(_ shown: String) -> Bool {
+        let m = aliasMap("proyectos-alias.json"); return m[shown] != nil || m.values.contains(shown)
+    }
+    func sessionAliased(_ id: String) -> Bool { aliasMap("sesiones-alias.json")[id] != nil }
 
     /// Reload from disk. On read/parse failure of state.json we keep the last good
     /// snapshot (so a mid-write torn read doesn't blank the UI) but record the error.
@@ -206,6 +269,10 @@ final class QuotaModel: ObservableObject {
            let s = try? JSONDecoder().decode(Stats.self, from: data) {
             stats = s
         }
+        // stats-global.json (sync (e)): presente solo si el sync está activo. Ausente -> statsGlobal nil
+        // -> el toggle "todas" no se ofrece.
+        statsGlobal = (try? Data(contentsOf: Self.statsGlobalURL))
+            .flatMap { try? JSONDecoder().decode(Stats.self, from: $0) }
         // chats.json es best-effort: ausente/roto deja `chats` intacto (pestaña vacía).
         if let data = try? Data(contentsOf: Self.chatsURL),
            let c = try? JSONDecoder().decode([Chat].self, from: data) {

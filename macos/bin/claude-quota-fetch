@@ -504,3 +504,69 @@ if command -v node >/dev/null 2>&1 && [[ -f "$SESSIONS_EXTRACT" ]]; then
     printf '%s' "$SESS_JSON" > "$CACHE_DIR/sessions.json.tmp" && mv "$CACHE_DIR/sessions.json.tmp" "$CACHE_DIR/sessions.json"
   fi
 fi
+
+# --- (e) Sync entre máquinas vía carpeta de nube -----------------------------------------------
+# OPT-IN: se activa solo si SYNC_DIR (en limits.env) o CLAUDE_QUOTA_SYNC_DIR está puesto — así ninguna
+# máquina sube nada sin que lo actives. Valor "auto" autodetecta Google Drive. Cada máquina escribe su
+# snapshot <host>.json en la carpeta (que tu nube ya replica), lee los de TODAS las de la MISMA cuenta y
+# fusiona -> stats-global.json (lo consume el toggle "todas" del widget). Fail-open en cada paso.
+resolve_sync_dir() {
+  local v="${CLAUDE_QUOTA_SYNC_DIR:-${SYNC_DIR:-}}"
+  [[ -z "$v" ]] && return                         # no configurado -> off
+  if [[ "$v" != "auto" ]]; then printf '%s' "$v"; return; fi
+  local d                                          # auto: Google Drive por OS (mac CloudStorage, o clásico)
+  for d in "$HOME/Library/CloudStorage/GoogleDrive-"*/"Mi unidad" \
+           "$HOME/Library/CloudStorage/GoogleDrive-"*/"My Drive" \
+           "$HOME/Google Drive" "$HOME/Mi unidad" "$HOME/GoogleDrive"; do
+    [[ -d "$d" ]] && { printf '%s/claude-brain-sync' "$d"; return; }
+  done
+}
+SYNC_DIR_RESOLVED="$(resolve_sync_dir || true)"
+if [[ -n "${SYNC_DIR_RESOLVED:-}" && -f "$CACHE_DIR/stats.json" ]] && mkdir -p "$SYNC_DIR_RESOLVED" 2>/dev/null; then
+  HOST="$(hostname -s 2>/dev/null || hostname || echo host)"
+  ACCT="$(jq -r '.account_uuid // .account_email // "default"' "$STATE_FILE" 2>/dev/null || echo default)"
+  # snapshot propio = stats.json + metadatos de máquina/cuenta (escritura atómica).
+  SNAP_TMP="$SYNC_DIR_RESOLVED/.$HOST.json.tmp"
+  if jq --arg host "$HOST" --arg ts "$NOW_ISO" --arg acct "$ACCT" \
+        '{machine:$host, updated_at:$ts, account:$acct, stats:.}' "$CACHE_DIR/stats.json" > "$SNAP_TMP" 2>/dev/null; then
+    mv "$SNAP_TMP" "$SYNC_DIR_RESOLVED/$HOST.json"
+  else
+    rm -f "$SNAP_TMP"
+  fi
+  # merge de todos los snapshots de la MISMA cuenta -> stats-global.json (suma por día/modelo/proyecto).
+  GLOBAL_TMP="$CACHE_DIR/stats-global.json.tmp"
+  if jq -s --arg acct "$ACCT" --arg ts "$NOW_ISO" '
+      map(select(.account == $acct)) as $snaps
+      | ([ $snaps[].stats.days[]? ] | group_by(.date) | map({
+            date: .[0].date,
+            in_tok:  (map(.in_tok  // 0) | add), out_tok: (map(.out_tok // 0) | add),
+            tokens:  (map(.tokens  // 0) | add), cost:    (map(.cost    // 0) | add),
+            messages:(map(.messages// 0) | add),
+            models:  ([.[].models[]?]  | group_by(.model)   | map({model:.[0].model,     in_tok:(map(.in_tok//0)|add), out_tok:(map(.out_tok//0)|add), tokens:(map(.tokens//0)|add)})),
+            projects:([.[].projects[]?]| group_by(.project) | map({project:.[0].project, in_tok:(map(.in_tok//0)|add), out_tok:(map(.out_tok//0)|add), tokens:(map(.tokens//0)|add)}))
+          }) | sort_by(.date)) as $days
+      | ([ $days[].models[] ] | group_by(.model) | map({model:.[0].model, in_tok:(map(.in_tok)|add), out_tok:(map(.out_tok)|add)}) | map(.+{tot:(.in_tok+.out_tok)}) | sort_by(-.tot)) as $models
+      | (($models|map(.tot)|add)//0) as $grand
+      | ([ $days[].projects[] ] | group_by(.project) | map({project:.[0].project, in_tok:(map(.in_tok)|add), out_tok:(map(.out_tok)|add)}) | map(.+{tot:(.in_tok+.out_tok), pct:(if $grand>0 then (.in_tok+.out_tok)*100/$grand else 0 end)}) | sort_by(-.tot)) as $projects
+      | {
+          updated_at: $ts,
+          machines: ($snaps | map({name:.machine, updated_at:.updated_at, tokens:(.stats.summary.total_tokens // 0)}) | sort_by(-.tokens)),
+          days: $days,
+          models: ($models | map(.+{pct:(if $grand>0 then .tot*100/$grand else 0 end)})),
+          projects: $projects,
+          summary: {
+            total_tokens: $grand,
+            total_cost:   (($days|map(.cost)|add)//0),
+            active_days:  ($days|map(select(.tokens>0))|length),
+            favorite_model: ($models|(first//{})|.model),
+            sessions:  (($snaps|map(.stats.summary.sessions // 0))|add),
+            messages:  (($days|map(.messages))|add // 0),
+            peak_hour: null
+          }
+        }
+    ' "$SYNC_DIR_RESOLVED"/*.json > "$GLOBAL_TMP" 2>/dev/null && [[ -s "$GLOBAL_TMP" ]]; then
+    mv "$GLOBAL_TMP" "$CACHE_DIR/stats-global.json"
+  else
+    rm -f "$GLOBAL_TMP"
+  fi
+fi
