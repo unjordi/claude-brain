@@ -5,14 +5,14 @@
   equivalent of the systemd timer's OnUnitActiveSec=5min — it enforces the
   5-minute refresh floor so we never poll the underlying data too aggressively.
 
-  __FETCH__ is substituted with the absolute path to claude-quota-fetch by
+  __FETCH__ is substituted with the absolute path to claude-brain-fetch by
   install.sh; the installed copy lives at
-  ~/Library/LaunchAgents/io.github.unjordi.claude-quota.plist.
+  ~/Library/LaunchAgents/io.github.unjordi.claude-brain.plist.
 -->
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>io.github.unjordi.claude-quota</string>
+	<string>io.github.unjordi.claude-brain</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>__FETCH__</string>
@@ -28,8 +28,8 @@
 		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
 	</dict>
 	<key>StandardOutPath</key>
-	<string>/tmp/claude-quota.out.log</string>
+	<string>/tmp/claude-brain.out.log</string>
 	<key>StandardErrorPath</key>
-	<string>/tmp/claude-quota.err.log</string>
+	<string>/tmp/claude-brain.err.log</string>
 </dict>
 </plist>

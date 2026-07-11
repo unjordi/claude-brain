@@ -2,8 +2,8 @@
 #
 # Run `just --list` to see all targets.
 
-LABEL := "io.github.unjordi.claude-quota"
-STATE := "$HOME/Library/Caches/claude-quota/state.json"
+LABEL := "io.github.unjordi.claude-brain"
+STATE := "$HOME/Library/Caches/claude-brain/state.json"
 
 default: help
 
@@ -37,10 +37,10 @@ purge:
 
 # Rebuild the app and relaunch it (after editing Swift sources)
 reload: app
-    pkill -f "Claude Quota.app/Contents/MacOS/ClaudeQuota" 2>/dev/null || true
-    rm -rf "$HOME/Applications/Claude Quota.app"
-    cp -R "build/Claude Quota.app" "$HOME/Applications/"
-    open "$HOME/Applications/Claude Quota.app"
+    pkill -f "Claude Brain Widget.app/Contents/MacOS/ClaudeQuota" 2>/dev/null || true
+    rm -rf "$HOME/Applications/Claude Brain Widget.app"
+    cp -R "build/Claude Brain Widget.app" "$HOME/Applications/"
+    open "$HOME/Applications/Claude Brain Widget.app"
 
 # Run the just-built app in the foreground (logs to terminal; Ctrl-C to stop)
 run: build
@@ -58,11 +58,11 @@ status:
 
 # Tail the fetch agent logs
 logs:
-    tail -f /tmp/claude-quota.out.log /tmp/claude-quota.err.log
+    tail -f /tmp/claude-brain.out.log /tmp/claude-brain.err.log
 
 # Lint shell scripts (requires shellcheck)
 lint:
-    shellcheck install.sh uninstall.sh make-app.sh bin/claude-quota-fetch
+    shellcheck install.sh uninstall.sh make-app.sh bin/claude-brain-fetch
 
 # Wipe build artifacts
 clean:

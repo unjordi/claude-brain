@@ -5,7 +5,7 @@
 # atraganta con el \r -> el bootstrap y los hooks del cerebro se rompen. Caso real: la Windows de
 # Liora (2026-07-08) clonó install-brain.sh con 135 pares CRLF y el bootstrap murió al delegar en bash.
 #
-# Regla: TODO texto en LF por defecto (cubre .sh y el script sin extensión claude-quota-fetch);
+# Regla: TODO texto en LF por defecto (cubre .sh y el script sin extensión claude-brain-fetch);
 # solo los scripts NATIVOS de Windows conservan CRLF.
 * text=auto eol=lf
 

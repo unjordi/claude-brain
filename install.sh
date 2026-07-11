@@ -16,13 +16,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-BIN_SRC="$ROOT/src/bin/claude-quota-fetch"
+BIN_SRC="$ROOT/src/bin/claude-brain-fetch"
 UNIT_SRC="$ROOT/src/systemd"
 PLASMOID_SRC="$ROOT/src/plasmoid"
 PLASMOID_ID="io.github.unjordi.claude-quota-widget"
 BRAIN_INSTALLER="$ROOT/brain/install-brain.sh"
 
-BIN_DEST="$HOME/.local/bin/claude-quota-fetch"
+BIN_DEST="$HOME/.local/bin/claude-brain-fetch"
 UNIT_DEST="$HOME/.config/systemd/user"
 LIMITS_DEFAULT="$HOME/.config/claude-quota/limits.env"
 
@@ -48,7 +48,7 @@ done
 # Asegura que ~/.local/bin (donde viven el fetch y, típicamente, el CLI `claude`) esté en el PATH,
 # en zsh Y bash. Idempotente por marcador; crea el rc si falta. Se aplica también a ESTE proceso.
 ensure_path_local_bin() {
-  local marker="# claude-brain: ~/.local/bin en el PATH (claude, claude-quota-fetch)"
+  local marker="# claude-brain: ~/.local/bin en el PATH (claude, claude-brain-fetch)"
   local block
   printf -v block '\n%s\ncase ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac\n' "$marker"
   local f
@@ -109,6 +109,21 @@ fi
 echo "==> Ensuring ~/.local/bin on PATH (zsh + bash)"
 ensure_path_local_bin
 
+# ── Migración desde el nombre viejo (claude-quota → claude-brain). Idempotente / fail-safe. ──
+# CRÍTICO: un reinstall NO debe dejar 2 timers/daemons vivos ni perder la calibración del usuario.
+echo "==> Migrating any previous 'claude-quota' install (idempotent)"
+# 1) Baja y deshabilita las units VIEJAS antes de instalar las nuevas (evita timer/daemon duplicado).
+systemctl --user disable --now claude-quota.timer claude-quota.service 2>/dev/null || true
+rm -f "$HOME/.config/systemd/user/claude-quota.timer" "$HOME/.config/systemd/user/claude-quota.service"
+rm -f "$HOME/.local/bin/claude-quota-fetch"   # el fetch viejo (renombrado a claude-brain-fetch)
+systemctl --user daemon-reload 2>/dev/null || true
+# 2) Preserva estado: mueve solo el CACHE viejo al nombre nuevo si aún no existe. El dir de CONFIG
+#    (~/.config/claude-quota) NO se renombra — ahí viven limits.env/machine-id/account (calibración +
+#    identidad de sync), que se preservan quietos, igual que en macOS y Windows (contrato invisible).
+if [[ -d "$HOME/.cache/claude-quota" && ! -e "$HOME/.cache/claude-brain" ]]; then
+  mv "$HOME/.cache/claude-quota" "$HOME/.cache/claude-brain"
+fi
+
 echo "==> Installing fetch script -> $BIN_DEST"
 install -D -m 0755 "$BIN_SRC" "$BIN_DEST"
 
@@ -129,7 +144,7 @@ if [[ ! -f "$LIMITS_DEFAULT" ]]; then
 # unreachable (offline, or no ~/.claude/.credentials.json). When Claude Code's
 # OAuth token is available the widget reads the exact /usage percentages and
 # these caps are ignored.
-# After editing, run: systemctl --user restart claude-quota.service
+# After editing, run: systemctl --user restart claude-brain.service
 #
 # Basis is API-EQUIVALENT COST (USD), not raw tokens — cache-read tokens
 # dominate raw counts and Anthropic weights them ~0.1x. Calibrate:
@@ -152,24 +167,24 @@ EOF
 fi
 
 echo "==> Installing systemd user units -> $UNIT_DEST"
-install -D -m 0644 "$UNIT_SRC/claude-quota.service" "$UNIT_DEST/claude-quota.service"
-install -D -m 0644 "$UNIT_SRC/claude-quota.timer"   "$UNIT_DEST/claude-quota.timer"
+install -D -m 0644 "$UNIT_SRC/claude-brain.service" "$UNIT_DEST/claude-brain.service"
+install -D -m 0644 "$UNIT_SRC/claude-brain.timer"   "$UNIT_DEST/claude-brain.timer"
 
 echo "==> Reloading systemd user manager"
 systemctl --user daemon-reload
 
 echo "==> Enabling timer"
-systemctl --user enable --now claude-quota.timer
+systemctl --user enable --now claude-brain.timer
 
 echo "==> Priming cache with one run"
-systemctl --user start claude-quota.service || true
+systemctl --user start claude-brain.service || true
 sleep 1
-if [[ -f "$HOME/.cache/claude-quota/state.json" ]]; then
+if [[ -f "$HOME/.cache/claude-brain/state.json" ]]; then
   echo "    state.json written:"
   jq -c '{status, five: .five_hour.percent, wk: .weekly.percent}' \
-     "$HOME/.cache/claude-quota/state.json" | sed 's/^/    /'
+     "$HOME/.cache/claude-brain/state.json" | sed 's/^/    /'
 else
-  echo "    (no state.json yet — check: journalctl --user -u claude-quota.service)"
+  echo "    (no state.json yet — check: journalctl --user -u claude-brain.service)"
 fi
 
 if [[ "$SKIP_PLASMOID" -eq 0 ]]; then
@@ -233,9 +248,9 @@ Next steps:
   - Hover for the breakdown; tune caps in: $LIMITS_DEFAULT
 
 Debug:
-  systemctl --user status claude-quota.timer
-  journalctl --user -u claude-quota.service -n 20
-  cat ~/.cache/claude-quota/state.json | jq .
+  systemctl --user status claude-brain.timer
+  journalctl --user -u claude-brain.service -n 20
+  cat ~/.cache/claude-brain/state.json | jq .
 EOF
 
 # Login reminder: sin sesión de Claude Code el widget no ve tu cuota real (solo el fallback calibrado).

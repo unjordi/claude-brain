@@ -139,14 +139,14 @@ mismos datos que `/usage`, en tu escritorio, desde cualquier lado. Las pestañas
                  │ cerebro (install-brain.sh)       │ daemon + widget
                  ▼                                  ▼
   ┌───────────────────────────┐   ┌────────────────────────────────┐
-  │  ~/.claude   (EL CEREBRO)  │   │  claude-quota-fetch (daemon)   │
+  │  ~/.claude   (EL CEREBRO)  │   │  claude-brain-fetch (daemon)   │
   │  hooks/ · settings.json    │   │  systemd / launchd · piso 5 min │
   │  CLAUDE.md · skills/       │   │  bash + jq + curl(OAuth) +ccusage│
   └───────────▲───────────────┘   └────────────────┬───────────────┘
               │ refleja + cura 🩹                   │ escribe
               │  (install-brain.sh)                 ▼
               │                    ┌────────────────────────────────┐
-              │                    │  ~/.cache/claude-quota/         │
+              │                    │  ~/.cache/claude-brain/         │
               │                    │    state.json · stats.json      │
               │                    └────────────────┬───────────────┘
               │                                     │ lee cada 10 s

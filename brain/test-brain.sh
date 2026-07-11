@@ -52,7 +52,7 @@ echo ""
 echo "== (b) gate de delegación (\$HOME falso, snapshot de cuota de prueba) =="
 
 CDIR="$FAKEHOME/.claude"
-CACHE="$FAKEHOME/.cache/claude-quota"
+CACHE="$FAKEHOME/.cache/claude-brain"
 CONS="$CDIR/delegacion-consentimiento.json"
 mkdir -p "$CDIR" "$CACHE"
 cp "$HOOKS/agentes-costo.json" "$CDIR/agentes-costo.json"

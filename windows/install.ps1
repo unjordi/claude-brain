@@ -39,6 +39,16 @@ Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' 
 $oldDest = Join-Path $env:LOCALAPPDATA 'Programs\ClaudeQuota'
 if (Test-Path $oldDest) { Remove-Item $oldDest -Recurse -Force -ErrorAction SilentlyContinue }
 
+# Migracion del CACHE: el dir de estado paso de %LOCALAPPDATA%\claude-quota a \claude-brain. Movemos
+# el viejo al nuevo (idempotente) para NO perder machine-id (identidad estable del sync), la cuenta
+# fijada (account) ni la calibracion. Si ya existe el nuevo, dejamos el viejo intacto (no clobber).
+$oldCache = Join-Path $env:LOCALAPPDATA 'claude-quota'
+$newCache = Join-Path $env:LOCALAPPDATA 'claude-brain'
+if ((Test-Path $oldCache) -and -not (Test-Path $newCache)) {
+    try { Move-Item $oldCache $newCache -Force; Write-Host "==> Cache migrado: claude-quota -> claude-brain (machine-id/account/calibracion conservados)." -ForegroundColor Green }
+    catch { Write-Host "==> Aviso: no pude migrar el cache viejo ($($_.Exception.Message)); se regenera limpio." -ForegroundColor Yellow }
+}
+
 # Preferimos BAJAR el exe precompilado del release (SIN .NET SDK). Fallback: compilar desde fuente
 # (requiere SDK). -Build fuerza compilar (devs). Nota: si el release se esta re-construyendo, la
 # descarga puede dar 404 por ~1-2 min -> reintenta, o instala el SDK.

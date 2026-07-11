@@ -31,15 +31,15 @@ if [[ "$SKIP_BRAIN" -eq 0 ]]; then
 fi
 
 echo "==> Stopping and disabling timer"
-systemctl --user disable --now claude-quota.timer 2>/dev/null || true
+systemctl --user disable --now claude-brain.timer 2>/dev/null || true
 
 echo "==> Removing systemd user units"
-rm -f "$HOME/.config/systemd/user/claude-quota.timer"
-rm -f "$HOME/.config/systemd/user/claude-quota.service"
+rm -f "$HOME/.config/systemd/user/claude-brain.timer"
+rm -f "$HOME/.config/systemd/user/claude-brain.service"
 systemctl --user daemon-reload || true
 
 echo "==> Removing fetch script"
-rm -f "$HOME/.local/bin/claude-quota-fetch"
+rm -f "$HOME/.local/bin/claude-brain-fetch"
 
 echo "==> Removing plasmoid"
 if command -v kpackagetool6 >/dev/null 2>&1; then
@@ -47,7 +47,7 @@ if command -v kpackagetool6 >/dev/null 2>&1; then
 fi
 
 echo "==> Removing cache"
-rm -rf "$HOME/.cache/claude-quota"
+rm -rf "$HOME/.cache/claude-brain"
 
 if [[ "$KEEP_CFG" -eq 0 ]]; then
   echo "==> Removing config"

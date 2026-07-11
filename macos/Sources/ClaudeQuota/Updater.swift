@@ -73,8 +73,8 @@ final class Updater: ObservableObject {
         // la nueva). Si el merge aborta (árbol sucio / no-ff), NO mata nada y la app sigue viva → sin
         // riesgo de quedarte sin widget. El `pkill` va justo antes de reinstalar, no a ciegas.
         let inner = "sleep 1; cd '\(repoPath)' && git fetch origin --quiet && git merge --ff-only origin/main "
-            + "&& { pkill -f 'Claude Quota.app/Contents/MacOS/ClaudeQuota'; bash '\(repoPath)/macos/install.sh' --no-brain; }"
-        let cmd = "nohup bash -lc \"\(inner)\" >/tmp/claude-quota-update.log 2>&1 &"
+            + "&& { pkill -f 'Claude Brain Widget.app/Contents/MacOS/ClaudeQuota'; bash '\(repoPath)/macos/install.sh' --no-brain; }"
+        let cmd = "nohup bash -lc \"\(inner)\" >/tmp/claude-brain-update.log 2>&1 &"
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
         p.arguments = ["-lc", cmd]
@@ -84,7 +84,7 @@ final class Updater: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
             guard let self, self.updating else { return }
             self.updating = false
-            self.message = "el update no completó (revisa /tmp/claude-quota-update.log)"
+            self.message = "el update no completó (revisa /tmp/claude-brain-update.log)"
         }
     }
 }

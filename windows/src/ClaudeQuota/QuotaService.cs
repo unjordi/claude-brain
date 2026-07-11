@@ -4,12 +4,12 @@ using System.Text.Json;
 namespace ClaudeQuota;
 
 /// <summary>
-/// The Windows data pipeline — the C# analogue of src/bin/claude-quota-fetch.
+/// The Windows data pipeline — the C# analogue of src/bin/claude-brain-fetch.
 ///
 /// Unlike the Linux/mac ports (which run a bash script on a systemd/launchd
 /// timer and let the UI only read the cache), the always-running tray app does
 /// the fetch itself in-process every 5 minutes. It still writes the same
-/// state.json / stats.json cache files under %LOCALAPPDATA%\claude-quota so the
+/// state.json / stats.json cache files under %LOCALAPPDATA%\claude-brain so the
 /// snapshot stays inspectable and cross-platform-compatible.
 ///
 /// Sources, in order of authority:
@@ -38,7 +38,7 @@ public sealed class QuotaService
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     private static string CacheDir =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                     "claude-quota");
+                     "claude-brain");
     public static string StateFile => Path.Combine(CacheDir, "state.json");
     public static string StatsFile => Path.Combine(CacheDir, "stats.json");
     /// stats-global.json — vista fusionada de todas las máquinas (sync (e)); mismo dir del cache.

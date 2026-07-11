@@ -4,7 +4,7 @@ namespace ClaudeQuota;
 
 /// <summary>
 /// (e) Sync entre máquinas vía carpeta de nube — el análogo C# del bloque "(e) Sync entre máquinas"
-/// del script bash src/bin/claude-quota-fetch (mac/linux).
+/// del script bash src/bin/claude-brain-fetch (mac/linux).
 ///
 /// OPT-IN: se activa solo si CLAUDE_QUOTA_SYNC_DIR (env) o el archivo de config `sync-dir` está puesto,
 /// así ninguna máquina sube nada sin que lo actives. El valor "auto" autodetecta Google Drive en Windows.

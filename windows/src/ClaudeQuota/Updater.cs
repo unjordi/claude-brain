@@ -216,7 +216,7 @@ internal sealed class Updater
             "if ($LASTEXITCODE -ne 0) { exit 1 }   # árbol sucio / no-ff → NO relanzar, app intacta\n" +
             $"& '{installPs1.Replace("'", "''")}'\n";
 
-        return LaunchDetached(script, "claude-quota-update.ps1");
+        return LaunchDetached(script, "claude-brain-update.ps1");
     }
 
     /// Fase 2: descarga el exe del release y hace SWAP. No necesita clon ni .NET SDK. Fail-open
@@ -264,7 +264,7 @@ internal sealed class Updater
         sb.Append("try { $ws=New-Object -ComObject WScript.Shell; $lk=$ws.CreateShortcut((Join-Path $sm 'Claude Brain.lnk')); $lk.TargetPath=$exe; $lk.WorkingDirectory=$dir; $lk.IconLocation=$exe; $lk.Description='Claude Brain Widget'; $lk.Save() } catch {}\n");
         sb.Append("Remove-Item $tmp -Force\n");
         sb.Append("Start-Process $exe\n");
-        return LaunchDetached(sb.ToString(), "claude-quota-update-dl.ps1");
+        return LaunchDetached(sb.ToString(), "claude-brain-update-dl.ps1");
     }
 
     /// Escribe el script a un .ps1 temporal y lo lanza DETACHADO (UseShellExecute + ventana oculta),

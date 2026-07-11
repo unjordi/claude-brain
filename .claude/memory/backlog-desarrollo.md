@@ -20,7 +20,7 @@ tuvo y lo perdió, no debería desechar a lo wey."* → tres estados, no dos:
 - **Tuvo OAuth y lo perdió, VIEJO** (fuera de ventana → el número ya no significa) → degradar, pero aun así
   decir "último real: X% a las HH:MM, no puedo refrescar", nunca un 0% con cara de verdad.
 
-**El patrón ya existe a medias:** líneas 42‑50 de `src/bin/claude-quota-fetch` YA cargan hacia adelante el
+**El patrón ya existe a medias:** líneas 42‑50 de `src/bin/claude-brain-fetch` YA cargan hacia adelante el
 `resets_at` real del último OAuth cuando cae a fallback (un "próximo lunes" adivinado estaría mal). Solo hay
 que **extender ese mismo mecanismo a los porcentajes** (y a `cost_usd`/`tokens`), con el timestamp de staleness.
 
@@ -33,7 +33,7 @@ que **extender ese mismo mecanismo a los porcentajes** (y a `cost_usd`/`tokens`)
 3. **Marcar visualmente** el modo stale/fallback en las 3 GUIs (⚠ / "estimado local" / "último real HH:MM")
    en vez de un número confiado. Un 0% confiado tapando un 98% real es la trampa de UX que hay que matar.
 
-**Dónde toca:** `src/bin/claude-quota-fetch` + `macos/bin/claude-quota-fetch` (la lógica de basis + carry-forward);
+**Dónde toca:** `src/bin/claude-brain-fetch` + `macos/bin/claude-brain-fetch` (la lógica de basis + carry-forward);
 Windows `QuotaService` (misma lógica en C#); el badge de estado en las 3 GUIs (Swift/QML/WinForms). **No urge**
 (el caso se auto-cura al refrescar el token), pero es correctez de datos: el widget no debe mentir con cara de verdad.
 

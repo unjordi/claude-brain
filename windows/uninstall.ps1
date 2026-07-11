@@ -10,7 +10,8 @@
 param([switch]$KeepCache)
 
 $ErrorActionPreference = 'SilentlyContinue'
-$cache   = Join-Path $env:LOCALAPPDATA 'claude-quota'   # dir de cache interno (id sin renombrar)
+$cache   = Join-Path $env:LOCALAPPDATA 'claude-brain'    # dir de cache interno (state/stats/machine-id/account)
+$cacheOld = Join-Path $env:LOCALAPPDATA 'claude-quota'   # nombre viejo del cache (migracion): se limpia igual
 $runKey  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 
 Write-Host "==> Deteniendo..." -ForegroundColor Cyan
@@ -34,6 +35,7 @@ foreach ($n in @('ClaudeBrain','ClaudeQuota')) {
 if (-not $KeepCache) {
     Write-Host "==> Borrando cache $cache ..." -ForegroundColor Cyan
     Remove-Item $cache -Recurse -Force
+    Remove-Item $cacheOld -Recurse -Force   # nombre viejo (migracion): por si un install previo lo dejo
 }
 
 Write-Host "Desinstalado." -ForegroundColor Green

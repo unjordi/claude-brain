@@ -37,8 +37,8 @@ la KDE Store (`github.com/FelixDes/claude-kde-usage-widget`), conservando el cos
   máquina) → se etiqueta **"(API equiv local)"** para que no parezca roto cuando
   coincide con el % (p. ej. el primer día de la semana, ver memoria).
 - Pipeline: un script `fetch` (bash en Linux/mac) corre cada 5 min (systemd timer /
-  launchd) y escribe `~/.cache/claude-quota/state.json` (límites) y
-  `~/.cache/claude-quota/stats.json` (stats); la UI solo lee esos caches.
+  launchd) y escribe `~/.cache/claude-brain/state.json` (límites) y
+  `~/.cache/claude-brain/stats.json` (stats); la UI solo lee esos caches.
 - **`stats.json`** alimenta las pestañas Resumen/Modelos (todo LOCAL de esa máquina):
   - `days[]` / `models[]` salen de **`ccusage daily --json --breakdown`** (¡el `--json`
     es obligatorio o devuelve tabla y rompe el jq!).
@@ -75,14 +75,14 @@ la KDE Store (`github.com/FelixDes/claude-kde-usage-widget`), conservando el cos
   - **Iterar:** tras editar Swift, `pkill -f 'Claude Quota.app'` ANTES de re-correr
     `./install.sh` — `open` sobre una app ya corriendo solo la activa, NO relanza
     el binario nuevo.
-  - **Fetch:** el bloque de `stats.json` de `macos/bin/claude-quota-fetch` es
+  - **Fetch:** el bloque de `stats.json` de `macos/bin/claude-brain-fetch` es
     IDÉNTICO al de `src/bin/` (BSD-safe: bash 3.2, `date -v`, BSD grep) — si se
-    toca uno, replicar en el otro. Caches en `~/Library/Caches/claude-quota/`.
+    toca uno, replicar en el otro. Caches en `~/Library/Caches/claude-brain/`.
   - **Icono:** `make-icon.sh` genera `AppIcon.icns` programáticamente (Swift
     here-doc, gauge naranja sobre squircle grafito; sin binarios en el repo) y
     `make-app.sh` lo mete al bundle. El **cache de iconos de macOS es terco**:
     tras instalar, `killall Finder` y reabrir Ajustes; a veces solo aparece al
-    siguiente login. El script `claude-quota-fetch` en "Elementos de inicio"
+    siguiente login. El script `claude-brain-fetch` en "Elementos de inicio"
     siempre saldrá con icono "exec" genérico (macOS no da icono a scripts).
   - Los helpers de UI (pctColor, relativeTime, fmtTok/fmtInt/fmtHour,
     prettyModel, modelPalette, rachas, heatmap) viven en `QuotaModel.swift` y

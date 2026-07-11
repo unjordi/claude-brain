@@ -49,7 +49,7 @@ PlasmoidItem {
     // la lee writeAliasSource para decidir el refresh: sesión → rápido (sessions-extract.js), proyecto
     // → fetch completo (afecta la agregación de tokens). Espeja el applyRename kind-aware del macOS.
     property bool lastAliasWasSession: false
-    // Expresión de shell para la base de los mapas (idéntica a claude-quota-fetch / sessions-extract.js).
+    // Expresión de shell para la base de los mapas (idéntica a claude-brain-fetch / sessions-extract.js).
     readonly property string aliasDir: "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
     // ---------- Filtro de rango {hoy·7d·30d·∞} (Resumen/Modelos/Proyectos/Chats) ----------
@@ -70,7 +70,7 @@ PlasmoidItem {
     readonly property string cacheDir: {
         const raw = "" + StandardPaths.writableLocation(StandardPaths.GenericCacheLocation)
         const stripped = raw.startsWith("file://") ? raw.substring("file://".length) : raw
-        return stripped + "/claude-quota"
+        return stripped + "/claude-brain"
     }
 
     P5Support.DataSource {
@@ -195,7 +195,7 @@ PlasmoidItem {
     }
 
     // (B) "Mover a…" una sesión a otro slug: corre el helper node `session-move.js` vía `bash -lc`
-    // (PATH de login, mismo criterio que `claude`/`claude-quota-fetch`, ambos en ~/.local/bin). El
+    // (PATH de login, mismo criterio que `claude`/`claude-brain-fetch`, ambos en ~/.local/bin). El
     // helper escribe JSON a stdout SIEMPRE (ok:true | ok:false+error, con exit 1 en error) → parseamos
     // stdout pase lo que pase. ok → refreshSessions() (la lista refleja el move YA, rápido y sin red) +
     // forceRefresh() (reconcilia después los conteos por proyecto / agregación); !ok → depositamos el
@@ -315,7 +315,7 @@ PlasmoidItem {
                 root.updateMessage = "✓ actualizado (recarga el widget)"
                 root.updateAvailable = false
             } else {
-                root.updateMessage = "✗ error (revisa /tmp/claude-quota-update.log)"
+                root.updateMessage = "✗ error (revisa /tmp/claude-brain-update.log)"
             }
         }
     }
@@ -332,7 +332,7 @@ PlasmoidItem {
         catSource.connectSource("cat \"" + aliasDir + "/sesiones-alias.json\" 2>/dev/null")
     }
     function forceRefresh() {
-        refreshRunner.connectSource("systemctl --user start claude-quota.service")
+        refreshRunner.connectSource("systemctl --user start claude-brain.service")
     }
     // Refresh RÁPIDO de la lista de sesiones (sin red): corre SOLO sessions-extract.js y su stdout
     // repobla root.sessions vía sessionsExtractSource. Úsalo tras mover/renombrar una sesión para que
@@ -438,7 +438,7 @@ PlasmoidItem {
             // viejo (>60s), el % mostrado sería el de la ventana anterior hasta el próximo fetch.
             // Disparamos forceRefresh() para adelantarlo. Acotado por lastResetRefresh (≥60s) para
             // NO machacar systemctl/API cada tick de 10s; el piso anti-abuso de ~5 min lo aplica
-            // claude-quota.service por dentro (un forceRefresh de más ahí es no-op). Espeja el
+            // claude-brain.service por dentro (un forceRefresh de más ahí es no-op). Espeja el
             // `(anyResetPassed && age > 60)` de AppDelegate.swift.
             var age = root.snapshotAgeSec()
             if (root.anyResetPassed && age > 60 && (Date.now() - root.lastResetRefresh) > 60000) {
@@ -956,7 +956,7 @@ PlasmoidItem {
         var repo = root.updRepoPath
         var inner = "cd '" + repo + "' && git fetch origin --quiet && git merge --ff-only origin/main"
                   + " && bash '" + repo + "/install.sh'"
-        var cmd = "nohup bash -lc \"" + inner + "\" >/tmp/claude-quota-update.log 2>&1"
+        var cmd = "nohup bash -lc \"" + inner + "\" >/tmp/claude-brain-update.log 2>&1"
         updateRunSource.connectSource(cmd)
     }
 

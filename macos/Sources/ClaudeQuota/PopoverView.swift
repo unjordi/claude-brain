@@ -5,7 +5,7 @@ import SwiftUI
 /// Modelos / Proyectos), a 1px separator, and the tab content on the right.
 struct PopoverView: View {
     @ObservedObject var model: QuotaModel
-    /// Real fetch trigger (launches claude-quota-fetch, then reloads).
+    /// Real fetch trigger (launches claude-brain-fetch, then reloads).
     var onRefresh: () -> Void
 
     @State private var tab = 0

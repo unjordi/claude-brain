@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Build the release binary and assemble ClaudeQuota.app under build/.
+# Build the release binary and assemble Claude Brain Widget.app under build/.
 # Prints the absolute path to the assembled .app on success.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="Claude Quota"
+APP_NAME="Claude Brain Widget"
 APP="$ROOT/build/$APP_NAME.app"
 
 swift build -c release --package-path "$ROOT" >&2
