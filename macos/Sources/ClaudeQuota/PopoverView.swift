@@ -28,6 +28,12 @@ struct PopoverView: View {
     /// Rename en curso (c: proyecto vía clic-secundario / d: sesión), o nil. `renameText` es el campo.
     @State private var renameTarget: RenameTarget? = nil
     @State private var renameText: String = ""
+    /// (A) "Sugerir nombre" corriendo (shell-out a `claude -p`) / su error transitorio.
+    @State private var suggesting = false
+    @State private var suggestError: String? = nil
+    /// (B) Movimiento de sesión pendiente de confirmar / su error transitorio.
+    @State private var moveRequest: MoveRequest? = nil
+    @State private var moveError: String? = nil
     /// (e) Toggle "todas las máquinas": lee stats-global.json (sync) en vez del stats local.
     @State private var useGlobal = false
 
@@ -51,8 +57,9 @@ struct PopoverView: View {
         // cerebro le falta una pieza (🩹). Throttle 15 min en el chequeo de red.
         .task { await updater.checkIfStale() }
         .onAppear { brainState = BrainInspector.inspect() }
-        .alert(renameTarget?.kind == .session ? "Renombrar sesión" : "Renombrar proyecto",
-               isPresented: Binding(get: { renameTarget != nil },
+        // Rename de PROYECTO: .alert simple (sin summary ni botón async).
+        .alert("Renombrar proyecto",
+               isPresented: Binding(get: { renameTarget?.kind == .project },
                                     set: { if !$0 { renameTarget = nil } }),
                presenting: renameTarget) { t in
             TextField(t.current, text: $renameText)
@@ -60,13 +67,39 @@ struct PopoverView: View {
             Button("Restaurar original", role: .destructive) { renameText = ""; applyRename(t) }
             Button("Cancelar", role: .cancel) { renameTarget = nil }
         } message: { t in
-            Text(t.kind == .session
-                 ? "Nueva etiqueta para esta sesión. Vacío para restaurar la original."
-                 : "Nuevo nombre para “\(t.current)”. Vacío para restaurar el original.")
+            Text("Nuevo nombre para “\(t.current)”. Vacío para restaurar el original.")
         }
+        // (A) Rename de SESIÓN en hoja propia: muestra el contexto (summary) y el botón "Sugerir
+        // nombre" (async, mantiene el diálogo abierto — los botones de .alert lo cerrarían).
+        .sheet(isPresented: Binding(get: { renameTarget?.kind == .session },
+                                    set: { if !$0 { renameTarget = nil } })) {
+            if let t = renameTarget { sessionRenameSheet(t) }
+        }
+        // (B) Confirmación breve antes de reubicar el transcript (reversible, pero mueve archivos).
+        .confirmationDialog("¿Mover esta sesión a “\(moveRequest?.project ?? "")”?",
+                            isPresented: Binding(get: { moveRequest != nil },
+                                                 set: { if !$0 { moveRequest = nil } }),
+                            presenting: moveRequest) { req in
+            Button("Mover") { performMove(req) }
+            Button("Cancelar", role: .cancel) { moveRequest = nil }
+        } message: { req in
+            Text("Se reubica el transcript al proyecto “\(req.project)”. Es reversible: se respalda antes de mover.")
+        }
+        // (B) Error de un movimiento fallido (sin romper la UI).
+        .alert("No se pudo mover la sesión",
+               isPresented: Binding(get: { moveError != nil },
+                                    set: { if !$0 { moveError = nil } }),
+               presenting: moveError) { _ in
+            Button("OK", role: .cancel) { moveError = nil }
+        } message: { Text($0) }
     }
 
-    private func startRename(_ t: RenameTarget) { renameText = t.current; renameTarget = t }
+    private func startRename(_ t: RenameTarget) {
+        renameText = t.current
+        suggesting = false
+        suggestError = nil
+        renameTarget = t
+    }
 
     /// Escribe el alias y dispara un refetch — el fetch (proyectos) / sessions-extract (sesiones)
     /// releen los mapas y el widget se recarga con el nombre nuevo.
@@ -77,6 +110,108 @@ struct PopoverView: View {
         }
         renameTarget = nil
         onRefresh()
+    }
+
+    // MARK: - (A) Hoja de renombrar sesión (contexto + Sugerir nombre)
+
+    /// Diálogo de rename de SESIÓN: contexto de solo-lectura (summary), campo editable y el botón
+    /// "Sugerir nombre" (que consume tokens). El summary se busca en las sesiones cargadas por id.
+    @ViewBuilder
+    private func sessionRenameSheet(_ t: RenameTarget) -> some View {
+        let summary = model.sessions.first(where: { $0.id == t.key })?.summary
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Renombrar sesión").font(.headline)
+
+            if let summary, !summary.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("De qué trata (contexto)")
+                        .font(.caption2).foregroundStyle(label.opacity(0.5))
+                    Text(summary)
+                        .font(.caption).foregroundStyle(label.opacity(0.85))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(6)
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 6).fill(label.opacity(0.05)))
+            }
+
+            TextField("Nueva etiqueta", text: $renameText)
+                .textFieldStyle(.roundedBorder)
+
+            HStack(spacing: 8) {
+                Button(action: { suggestName(summary: summary) }) {
+                    HStack(spacing: 5) {
+                        if suggesting {
+                            ProgressView().controlSize(.small).scaleEffect(0.7)
+                                .frame(width: 12, height: 12)
+                        } else {
+                            Image(systemName: "sparkles")
+                        }
+                        Text(suggesting ? "Generando…" : "Sugerir nombre").font(.caption)
+                    }
+                }
+                .disabled(suggesting || (summary ?? "").isEmpty)
+                .help("Usa `claude -p` sobre el contexto para proponer un nombre. Consume tokens de tu cuenta.")
+
+                if let suggestError {
+                    Text(suggestError).font(.caption2)
+                        .foregroundStyle(Color(hex: "#dc3545")).lineLimit(2)
+                }
+                Spacer(minLength: 0)
+            }
+
+            Text("Vacío para restaurar la etiqueta original. «Sugerir nombre» consume tokens.")
+                .font(.caption2).foregroundStyle(label.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Button("Restaurar original", role: .destructive) { renameText = ""; applyRename(t) }
+                Spacer()
+                Button("Cancelar", role: .cancel) { renameTarget = nil }
+                Button("Guardar") { applyRename(t) }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(width: 380)
+    }
+
+    /// Lanza el shell-out a `claude -p` en background; al volver rellena el campo (editable, NO guarda).
+    private func suggestName(summary: String?) {
+        guard let summary, !summary.isEmpty else { return }
+        suggesting = true
+        suggestError = nil
+        Task {
+            do {
+                let name = try await model.suggestSessionName(summary: summary)
+                if !name.isEmpty { renameText = name }
+            } catch {
+                suggestError = error.localizedDescription
+            }
+            suggesting = false
+        }
+    }
+
+    // MARK: - (B) Mover una sesión a otro proyecto
+
+    /// Proyectos destino para "Mover a…": derivados de las sesiones ya cargadas — un destino por `cwd`
+    /// distinto, excluyendo el cwd actual de la sesión. Ordenados por nombre de proyecto.
+    private func moveDestinations(excluding s: Session) -> [(project: String, cwd: String)] {
+        var seen = Set<String>()
+        var out: [(project: String, cwd: String)] = []
+        for other in model.sessions where other.cwd != s.cwd {
+            if seen.insert(other.cwd).inserted { out.append((other.project, other.cwd)) }
+        }
+        return out.sorted { $0.project.localizedCaseInsensitiveCompare($1.project) == .orderedAscending }
+    }
+
+    /// Ejecuta el movimiento (tras confirmar) en background; si ok refresca, si no muestra el error.
+    private func performMove(_ req: MoveRequest) {
+        moveRequest = nil
+        Task {
+            let r = await model.moveSession(id: req.session.id, toCwd: req.cwd)
+            if r.ok { onRefresh() } else { moveError = r.error }
+        }
     }
 
     // MARK: - Rail
@@ -470,6 +605,16 @@ struct PopoverView: View {
             }
             if model.sessionAliased(s.id) {
                 Button("Restaurar original") { model.renameSession(s.id, to: ""); onRefresh() }
+            }
+            let dests = moveDestinations(excluding: s)
+            if !dests.isEmpty {
+                Menu("Mover a…") {
+                    ForEach(dests.indices, id: \.self) { i in
+                        Button(dests[i].project) {
+                            moveRequest = MoveRequest(session: s, project: dests[i].project, cwd: dests[i].cwd)
+                        }
+                    }
+                }
             }
         }
     }
@@ -1241,6 +1386,14 @@ private struct RenameTarget: Identifiable {
     let key: String        // (c) nombre mostrado del proyecto · (d) id de la sesión
     let current: String    // texto que se precarga en el campo
     var id: String { "\(key)" }
+}
+
+/// (B) Movimiento de sesión pendiente de confirmar: qué sesión y a qué proyecto/cwd destino.
+private struct MoveRequest: Identifiable {
+    let session: Session
+    let project: String
+    let cwd: String
+    var id: String { session.id + "→" + cwd }
 }
 
 /// Fila de uso agregada (modelo o proyecto) recalculada por rango: in/out/total/%.

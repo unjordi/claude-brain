@@ -93,19 +93,20 @@ if (Test-Path $brainSrc) {
     Write-Host "==> Aviso: no encontre brain/ en $brainSrc; el boton-curita no tendra instalador." -ForegroundColor Yellow
 }
 
-# Empaqueta los extractores de node (bin/*.js) JUNTO al exe (en <AppDir>\bin) para que el servicio
-# los pueda invocar. Producen chats.json / sessions.json (pestana Chats + "resumir" de Proyectos)
-# leyendo el cache local, igual que en mac/linux. Requisito: 'node' en el PATH (fail-open: sin node
-# no se generan y esas piezas quedan vacias). El servicio los busca en AppContext.BaseDirectory\bin.
+# Empaqueta los helpers de node (bin/*.js) JUNTO al exe (en <AppDir>\bin) para que el servicio
+# los pueda invocar. chats/sessions-extract producen chats.json / sessions.json (pestana Chats +
+# "resumir" de Proyectos) leyendo el cache local; session-move.js lo invoca la GUI al "Mover a...".
+# Igual que en mac/linux. Requisito: 'node' en el PATH (fail-open: sin node no se generan y esas
+# piezas quedan vacias). El servicio los busca en AppContext.BaseDirectory\bin.
 $binSrc = Join-Path $repoRoot 'bin'
 if (Test-Path $binSrc) {
     $binDst = Join-Path $dest 'bin'
     New-Item -ItemType Directory -Force -Path $binDst | Out-Null
-    foreach ($js in @('chats-extract.js', 'sessions-extract.js')) {
+    foreach ($js in @('chats-extract.js', 'sessions-extract.js', 'session-move.js')) {
         $srcJs = Join-Path $binSrc $js
         if (Test-Path $srcJs) { Copy-Item $srcJs (Join-Path $binDst $js) -Force }
     }
-    Write-Host "==> Extractores (chats/sessions) empaquetados en $binDst (requieren node)." -ForegroundColor Green
+    Write-Host "==> Helpers de node (chats/sessions/move) empaquetados en $binDst (requieren node)." -ForegroundColor Green
 } else {
     Write-Host "==> Aviso: no encontre bin/ en $binSrc; no habra chats.json/sessions.json." -ForegroundColor Yellow
 }

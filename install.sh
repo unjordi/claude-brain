@@ -112,11 +112,14 @@ ensure_path_local_bin
 echo "==> Installing fetch script -> $BIN_DEST"
 install -D -m 0755 "$BIN_SRC" "$BIN_DEST"
 
-# chats-extract.js / sessions-extract.js junto al fetch (el fetch los corre con node -> chats.json / sessions.json).
+# chats-extract.js / sessions-extract.js / session-move.js junto al fetch (el fetch corre los
+# extractores con node -> chats.json / sessions.json; session-move.js lo invoca la GUI al "Mover a…").
 CHATS_SRC="$ROOT/bin/chats-extract.js"
 [[ -f "$CHATS_SRC" ]] && install -D -m 0755 "$CHATS_SRC" "$(dirname "$BIN_DEST")/chats-extract.js"
 SESSIONS_SRC="$ROOT/bin/sessions-extract.js"
 [[ -f "$SESSIONS_SRC" ]] && install -D -m 0755 "$SESSIONS_SRC" "$(dirname "$BIN_DEST")/sessions-extract.js"
+SESSIONMOVE_SRC="$ROOT/bin/session-move.js"
+[[ -f "$SESSIONMOVE_SRC" ]] && install -D -m 0755 "$SESSIONMOVE_SRC" "$(dirname "$BIN_DEST")/session-move.js"
 
 if [[ ! -f "$LIMITS_DEFAULT" ]]; then
   echo "==> Seeding default limits at $LIMITS_DEFAULT"

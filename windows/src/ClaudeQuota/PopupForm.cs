@@ -1537,7 +1537,53 @@ public sealed class PopupForm : Form
         menu.Items.Add("Renombrar…", null, (_, _) => PromptRenameSession(s));
         if (QuotaService.SessionAliased(id))
             menu.Items.Add("Restaurar original", null, (_, _) => { QuotaService.RenameSession(id, ""); _onRefresh(); });
+
+        // (Feature B) "Mover a…": submenú con los OTROS proyectos conocidos (un cwd destino por
+        // proyecto, derivado de _svc.Sessions). Se excluye el proyecto actual de la sesión.
+        var targets = _svc.Sessions
+            .Where(o => !string.IsNullOrEmpty(o.Cwd) && o.Project != s.Project)
+            .GroupBy(o => o.Project)
+            .Select(g => (Project: g.Key ?? "(sin nombre)", Cwd: g.First().Cwd!))
+            .OrderBy(t => t.Project, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        if (targets.Count > 0)
+        {
+            var move = new ToolStripMenuItem("Mover a…");
+            foreach (var t in targets)
+            {
+                var (proj, cwd) = t;
+                move.DropDownItems.Add(proj, null, (_, _) => MoveSession(s, proj, cwd));
+            }
+            menu.Items.Add(move);
+        }
+
         ShowMenu(menu, loc);
+    }
+
+    /// (Feature B) Confirma y mueve la sesión al cwd destino vía QuotaService.MoveSessionAsync.
+    /// Async para no congelar la UI; refresca si ok, avisa el error si no. _modalOpen suprime el
+    /// auto-Hide del popup mientras están arriba los MessageBox.
+    private async void MoveSession(Session s, string projectLabel, string toCwd)
+    {
+        string id = s.Id ?? "";
+        if (id.Length == 0) return;
+
+        _modalOpen = true;
+        try
+        {
+            if (MessageBox.Show(this,
+                    $"¿Mover esta sesión a “{projectLabel}”?\n\nSe reubica el transcript a:\n{toCwd}",
+                    "Mover sesión", MessageBoxButtons.OKCancel, MessageBoxIcon.Question)
+                != DialogResult.OK) return;
+
+            var res = await _svc.MoveSessionAsync(id, toCwd);
+            if (res.Ok)
+                _onRefresh();
+            else
+                MessageBox.Show(this, $"No se pudo mover la sesión:\n{res.Error}",
+                    "Mover sesión", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally { _modalOpen = false; }
     }
 
     private void ShowMenu(ContextMenuStrip menu, Point loc)
@@ -1559,11 +1605,21 @@ public sealed class PopupForm : Form
     {
         string id = s.Id ?? "";
         if (id.Length == 0) return;
-        string? v = PromptRename("Renombrar sesión",
-            "Nueva etiqueta para esta sesión. Vacío para restaurar la original.", s.Label ?? "");
-        if (v == null) return;
-        QuotaService.RenameSession(id, v);
-        _onRefresh();
+        // (Feature A) La sesión sí lleva contexto (summary) + botón "Sugerir nombre"; el rename de
+        // proyecto no pasa esos argumentos, así que su diálogo se queda igual que antes.
+        _modalOpen = true;
+        try
+        {
+            string? v = RenameDialog.Show(this, "Renombrar sesión",
+                "Nueva etiqueta para esta sesión. Vacío para restaurar la original.",
+                s.Label ?? "",
+                s.Summary,
+                () => QuotaService.SuggestSessionNameAsync(s.Summary));
+            if (v == null) return;   // cancelado → sin cambios
+            QuotaService.RenameSession(id, v);
+            _onRefresh();
+        }
+        finally { _modalOpen = false; }
     }
 
     /// Abre el diálogo modal de renombrar, suprimiendo el auto-Hide del popup mientras está arriba.

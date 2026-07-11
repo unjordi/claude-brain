@@ -772,6 +772,115 @@ public sealed class QuotaService
         catch { /* fail-open: deja el archivo previo (o ninguno) */ }
     }
 
+    // ---- 2c. (Feature B) mover una sesión a otro proyecto/slug ---------------
+    //
+    // La foundation ya sabe reubicar el transcript: `node <AppDir>\bin\session-move.js
+    // <id> --to-cwd <cwdDestino>` imprime en stdout `{"ok":true,...}` (exit 0) o
+    // `{"ok":false,"error":...}` (exit 1). Reusamos el mismo patrón que RunExtractorAsync
+    // (node + <AppDir>\bin), pero capturamos stdout AUNQUE el exit sea ≠0 para poder
+    // mostrar el `error` de la foundation. Tras un ok, quien llama debe refrescar.
+
+    /// <summary>Resultado de MoveSessionAsync: éxito, o el mensaje de error a mostrar.</summary>
+    public sealed record MoveResult(bool Ok, string? Error);
+
+    /// <summary>Mueve la sesión <paramref name="id"/> al cwd destino corriendo session-move.js.
+    /// Devuelve ok/error parseado del JSON que imprime la foundation.</summary>
+    public async Task<MoveResult> MoveSessionAsync(string id, string toCwd)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return new MoveResult(false, "sesión inválida");
+        if (string.IsNullOrWhiteSpace(toCwd)) return new MoveResult(false, "destino inválido");
+        if (!OnPath("node")) return new MoveResult(false, "node no está en el PATH (necesario para mover)");
+
+        string script = Path.Combine(AppContext.BaseDirectory, "bin", "session-move.js");
+        if (!File.Exists(script)) return new MoveResult(false, "falta bin\\session-move.js junto al app");
+
+        string outp;
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "node",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add(script);
+            psi.ArgumentList.Add(id);
+            psi.ArgumentList.Add("--to-cwd");
+            psi.ArgumentList.Add(toCwd);
+            using var proc = Process.Start(psi);
+            if (proc == null) return new MoveResult(false, "no se pudo ejecutar node");
+            outp = await proc.StandardOutput.ReadToEndAsync();   // JSON tanto en ok como en error
+            await proc.WaitForExitAsync();
+        }
+        catch (Exception ex) { return new MoveResult(false, ex.Message); }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(outp);
+            var root = doc.RootElement;
+            bool ok = root.TryGetProperty("ok", out var okEl) && okEl.ValueKind == JsonValueKind.True;
+            if (ok) return new MoveResult(true, null);
+            string? err = root.TryGetProperty("error", out var eEl) && eEl.ValueKind == JsonValueKind.String
+                ? eEl.GetString() : null;
+            return new MoveResult(false, err ?? "no se pudo mover la sesión");
+        }
+        catch { return new MoveResult(false, "respuesta inesperada de session-move.js"); }
+    }
+
+    // ---- 2d. (Feature A) sugerir un nombre para la sesión vía `claude -p` -----
+    //
+    // Barato: manda SOLO el contexto (summary) y pide un nombre corto. Fail-open:
+    // sin CLI `claude` o si truena → null (el diálogo lo reporta sin romperse).
+
+    /// <summary>Corre `claude -p` con el contexto de la sesión y devuelve un nombre corto
+    /// (3-6 palabras, español, sin comillas) o null si no hay CLI / falla.</summary>
+    public static async Task<string?> SuggestSessionNameAsync(string? summary)
+    {
+        if (string.IsNullOrWhiteSpace(summary)) return null;
+        if (!OnPath("claude")) return null;
+
+        string prompt =
+            "A partir del siguiente contexto de una sesión de trabajo, propón un nombre corto de 3 a 6 " +
+            "palabras en español, sin comillas ni puntuación final. Devuelve SOLO el nombre.\n\n" +
+            "Contexto:\n" + summary;
+
+        string? outp = await RunClaudeAsync(prompt);
+        if (string.IsNullOrWhiteSpace(outp)) return null;
+
+        // Primera línea no vacía, sin comillas envolventes.
+        string name = outp.Trim()
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "";
+        name = name.Trim('"', '\'', '“', '”', '`').Trim();
+        return name.Length == 0 ? null : name;
+    }
+
+    /// <summary>`claude -p "&lt;prompt&gt;"` capturando stdout. ArgumentList (no string) para no depender
+    /// del quoting del shell — el prompt trae saltos de línea y posibles comillas.</summary>
+    private static async Task<string?> RunClaudeAsync(string prompt)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "claude",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("-p");
+            psi.ArgumentList.Add(prompt);
+            using var proc = Process.Start(psi);
+            if (proc == null) return null;
+            string stdout = await proc.StandardOutput.ReadToEndAsync();
+            await proc.WaitForExitAsync();
+            return proc.ExitCode == 0 ? stdout : null;
+        }
+        catch { return null; }
+    }
+
     // ---- 3. ccusage cost enrichment (optional) -----------------------------
 
     /// <summary>

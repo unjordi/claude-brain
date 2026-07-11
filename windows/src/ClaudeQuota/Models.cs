@@ -178,6 +178,10 @@ public sealed class Session
     [JsonPropertyName("id")]         public string? Id { get; set; }         // sessionId (= nombre del .jsonl)
     [JsonPropertyName("project")]    public string? Project { get; set; }
     [JsonPropertyName("cwd")]        public string? Cwd { get; set; }
+    [JsonPropertyName("slug")]       public string? Slug { get; set; }       // dir real bajo ~/.claude/projects/
     [JsonPropertyName("updated_at")] public string? UpdatedAt { get; set; }
     [JsonPropertyName("label")]      public string? Label { get; set; }
+    // Contexto derivado por sessions-extract.js (petición inicial, ≤280 chars); puede ser null.
+    // Alimenta el Label de contexto y el prompt de "Sugerir nombre" en RenameDialog.
+    [JsonPropertyName("summary")]    public string? Summary { get; set; }
 }

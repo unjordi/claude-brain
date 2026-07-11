@@ -94,11 +94,14 @@ echo "==> Installing fetch script -> $FETCH_DEST"
 install -d "$(dirname "$FETCH_DEST")"
 install -m 0755 "$FETCH_SRC" "$FETCH_DEST"
 
-# chats-extract.js / sessions-extract.js junto al fetch (el fetch los corre con node -> chats.json / sessions.json).
+# chats-extract.js / sessions-extract.js / session-move.js junto al fetch (el fetch corre los
+# extractores con node -> chats.json / sessions.json; session-move.js lo invoca la GUI al "Mover a…").
 CHATS_SRC="$ROOT/../bin/chats-extract.js"
 [[ -f "$CHATS_SRC" ]] && install -m 0755 "$CHATS_SRC" "$(dirname "$FETCH_DEST")/chats-extract.js"
 SESSIONS_SRC="$ROOT/../bin/sessions-extract.js"
 [[ -f "$SESSIONS_SRC" ]] && install -m 0755 "$SESSIONS_SRC" "$(dirname "$FETCH_DEST")/sessions-extract.js"
+SESSIONMOVE_SRC="$ROOT/../bin/session-move.js"
+[[ -f "$SESSIONMOVE_SRC" ]] && install -m 0755 "$SESSIONMOVE_SRC" "$(dirname "$FETCH_DEST")/session-move.js"
 
 # --- CLI `claude` + PATH (el widget MIDE a claude; sin él no hay qué medir) --------------------
 # Espeja la lógica de install.ps1 (fix #67, Windows): si `claude` no está en el PATH pero YA existe

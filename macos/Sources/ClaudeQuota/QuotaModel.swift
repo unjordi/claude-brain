@@ -157,14 +157,22 @@ struct ChatModelStat: Identifiable {
     var id: String { model }
 }
 
+/// Error de una operación de sesión con shell-out (sugerir nombre / mover), con mensaje legible.
+enum SessionOpError: LocalizedError {
+    case failed(String)
+    var errorDescription: String? { switch self { case .failed(let m): return m } }
+}
+
 /// Una sesión de Claude Code (para el dropdown de "resumir" en Proyectos). Se resume con
 /// `claude --resume <id>` en su `cwd`.
 struct Session: Codable, Identifiable {
     let id: String            // sessionId (= nombre del .jsonl)
     let project: String
     let cwd: String
+    let slug: String?         // dir real bajo ~/.claude/projects/ (para mover entre slugs)
     let updated_at: String?
     let label: String?
+    let summary: String?      // contexto derivado (petición inicial, ≤280 chars); puede venir null
 }
 
 // MARK: - Model
@@ -253,6 +261,84 @@ final class QuotaModel: ObservableObject {
         let m = aliasMap("proyectos-alias.json"); return m[shown] != nil || m.values.contains(shown)
     }
     func sessionAliased(_ id: String) -> Bool { aliasMap("sesiones-alias.json")[id] != nil }
+
+    // MARK: - Shell-out a los helpers node / al CLI claude (features de sesión)
+
+    /// Directorio donde viven EN RUNTIME los helpers node (`sessions-extract.js`, `session-move.js`)
+    /// y el CLI `claude`: el MISMO `~/.local/bin` donde el app instala y corre `claude-quota-fetch`
+    /// (ver AppDelegate.fetchScript) y desde donde el fetch resuelve sus `.js` vía `dirname "$0"`.
+    /// No se hardcodea la ruta del script aparte: se deriva de esta base, igual que el resto del app.
+    static var binDir: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin")
+    }
+
+    /// PATH enriquecido para los shell-outs: una app de GUI hereda un PATH mínimo (sin Homebrew ni
+    /// `~/.local/bin`), así que anteponemos donde viven `claude` y `node`. Mismo criterio que
+    /// AppDelegate.runFetch / PopoverView.healBrain.
+    private static var enrichedPATH: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let base = "\(home)/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        let existing = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        return existing.isEmpty ? base : base + ":" + existing
+    }
+
+    /// Corre un ejecutable capturando stdout+stderr con el PATH enriquecido. SÍNCRONO — invócalo
+    /// fuera del hilo principal. Devuelve (salida recortada, exit==0). Fail-safe: si no arranca,
+    /// ("", false).
+    private static func runCapturing(_ exe: String, _ args: [String]) -> (out: String, ok: Bool) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: exe)
+        p.arguments = args
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = enrichedPATH
+        p.environment = env
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = pipe
+        do { try p.run() } catch { return ("", false) }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()   // drena antes del wait (salida corta)
+        p.waitUntilExit()
+        let out = (String(data: data, encoding: .utf8) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (out, p.terminationStatus == 0)
+    }
+
+    /// (A) "Sugerir nombre": alimenta SOLO el `summary` a `claude -p` (prompt barato, sin transcript)
+    /// y pide un nombre corto de 3-6 palabras en español, sin comillas. CUESTA TOKENS. Lanza si
+    /// `claude` no está instalado / falla.
+    func suggestSessionName(summary: String) async throws -> String {
+        let prompt = "Propón un nombre corto de 3 a 6 palabras, en español, para una sesión de "
+            + "trabajo cuyo contexto inicial fue: «\(summary)». Responde SOLO con el nombre, sin "
+            + "comillas ni puntuación final ni explicación."
+        let r = await Task.detached { Self.runCapturing("/usr/bin/env", ["claude", "-p", prompt]) }.value
+        guard r.ok, !r.out.isEmpty else {
+            throw SessionOpError.failed(r.out.isEmpty
+                ? "claude no respondió (¿instalado y en el PATH?)"
+                : r.out)
+        }
+        // Toma la primera línea y quita comillas envolventes que a veces mete el modelo.
+        let firstLine = r.out.split(whereSeparator: \.isNewline).first.map(String.init) ?? r.out
+        return firstLine.trimmingCharacters(
+            in: CharacterSet(charactersIn: "\"'“”").union(.whitespacesAndNewlines))
+    }
+
+    /// (B) Mueve la sesión `id` al proyecto cuyo cwd es `toCwd`, vía `node session-move.js`. Parsea el
+    /// JSON de salida; devuelve (ok, mensajeDeError). En ok, el llamador dispara el refresh.
+    func moveSession(id: String, toCwd: String) async -> (ok: Bool, error: String) {
+        let script = Self.binDir.appendingPathComponent("session-move.js").path
+        let r = await Task.detached {
+            Self.runCapturing("/usr/bin/env", ["node", script, id, "--to-cwd", toCwd])
+        }.value
+        struct MoveResult: Decodable { let ok: Bool?; let error: String? }
+        if let data = r.out.data(using: .utf8),
+           let parsed = try? JSONDecoder().decode(MoveResult.self, from: data) {
+            return parsed.ok == true ? (true, "") : (false, parsed.error ?? "falló mover la sesión")
+        }
+        // No hubo JSON parseable: node no está / no arrancó el script.
+        return (false, r.out.isEmpty
+            ? "no pude ejecutar session-move.js (¿node instalado y el helper en \(Self.binDir.path)?)"
+            : r.out)
+    }
 
     /// Reload from disk. On read/parse failure of state.json we keep the last good
     /// snapshot (so a mid-write torn read doesn't blank the UI) but record the error.
