@@ -303,18 +303,22 @@ PlasmoidItem {
     function sessionAliased(id) { return sessAliasMap[id] !== undefined && sessAliasMap[id] !== null }
 
     // Estado del diálogo de renombrado (compartido por proyecto y sesión).
+    // OJO SCOPE (Plasma 6): el `fullRepresentation` se instancia como scope APARTE → `renameDialog` y
+    // `renameField` (que viven dentro) NO son visibles desde funciones del root. Por eso el root SOLO
+    // siembra propiedades; ABRIR/CERRAR el diálogo y leer el campo se hace desde el scope del MENÚ/DIÁLOGO
+    // (que sí los ve). renameProject/renameSession y estas props son del root → accesibles vía `root.`.
     property string renameKind: ""   // "project" | "session"
     property string renameKey: ""    // (c) nombre mostrado del proyecto · (d) id de la sesión
-    function startRename(kind, key, current) {
-        renameKind = kind; renameKey = key
-        renameField.text = current
-        renameDialog.open()
-        renameField.selectAll(); renameField.forceActiveFocus()
+    property string renameSeed: ""   // texto inicial; el diálogo lo carga en su onOpened (ahí está en scope)
+    // Solo prepara el estado; el .open() lo hace el menú (que SÍ ve renameDialog). NO toca renameDialog aquí.
+    function prepRename(kind, key, current) {
+        renameKind = kind; renameKey = key; renameSeed = current
     }
-    function applyRenameFromDialog() {
-        if (renameKind === "project") renameProject(renameKey, renameField.text)
-        else if (renameKind === "session") renameSession(renameKey, renameField.text)
-        renameDialog.close()
+    // Aplica el alias. newText lo pasa el handler del diálogo (donde renameField está en scope). El
+    // .close() lo hace el propio diálogo; aquí NO se toca renameDialog (root no lo ve).
+    function applyRename(newText) {
+        if (renameKind === "project") renameProject(renameKey, newText)
+        else if (renameKind === "session") renameSession(renameKey, newText)
     }
 
     // epoch ms del último forceRefresh disparado por un reset ya pasado (guard anti-bucle).
@@ -945,7 +949,8 @@ PlasmoidItem {
         spacing: 0
 
         // Diálogo de renombrado (compartido por proyecto y sesión). Se abre desde el menú de
-        // clic-secundario vía root.startRename(...). Vacío → "Restaurar original" (borra el alias).
+        // Se abre desde el menú de clic-secundario (root.prepRename siembra + renameDialog.open() en el
+        // scope del menú, que sí ve el diálogo). Vacío → "Restaurar original" (borra el alias).
         Kirigami.PromptDialog {
             id: renameDialog
             title: root.renameKind === "session" ? "Renombrar sesión" : "Renombrar proyecto"
@@ -953,11 +958,19 @@ PlasmoidItem {
                 ? "Nueva etiqueta para esta sesión. Vacío para restaurar la original."
                 : "Nuevo nombre para este proyecto. Vacío para restaurar el original."
             standardButtons: QQC2.Dialog.NoButton
+            // Al abrir, el contenido del diálogo ya está instanciado -> renameField SÍ existe aquí;
+            // cargamos el texto sembrado. (Antes se hacía desde startRename, donde renameField aún no
+            // existía -> ReferenceError que abortaba el open y por eso el diálogo nunca aparecía.)
+            onOpened: {
+                renameField.text = root.renameSeed
+                renameField.selectAll()
+                renameField.forceActiveFocus()
+            }
             customFooterActions: [
                 Kirigami.Action {
                     text: "Guardar"
                     icon.name: "dialog-ok-apply"
-                    onTriggered: root.applyRenameFromDialog()
+                    onTriggered: { root.applyRename(renameField.text); renameDialog.close() }
                 },
                 Kirigami.Action {
                     text: "Restaurar original"
@@ -965,7 +978,7 @@ PlasmoidItem {
                     visible: root.renameKind === "session"
                         ? root.sessionAliased(root.renameKey)
                         : root.projectAliased(root.renameKey)
-                    onTriggered: { renameField.text = ""; root.applyRenameFromDialog() }
+                    onTriggered: { root.applyRename(""); renameDialog.close() }
                 },
                 Kirigami.Action {
                     text: "Cancelar"
@@ -976,7 +989,7 @@ PlasmoidItem {
             PC3.TextField {
                 id: renameField
                 Layout.fillWidth: true
-                onAccepted: root.applyRenameFromDialog()
+                onAccepted: { root.applyRename(text); renameDialog.close() }
             }
         }
 
@@ -1240,7 +1253,8 @@ PlasmoidItem {
                                         id: projMenu
                                         QQC2.MenuItem {
                                             text: "Renombrar…"
-                                            onTriggered: root.startRename("project", projName, projName)
+                                            // prep en root + open en ESTE scope (el menú SÍ ve renameDialog).
+                                            onTriggered: { root.prepRename("project", projName, projName); renameDialog.open() }
                                         }
                                         QQC2.MenuItem {
                                             text: "Restaurar original"
@@ -1302,7 +1316,7 @@ PlasmoidItem {
                                                 id: sessMenu
                                                 QQC2.MenuItem {
                                                     text: "Renombrar…"
-                                                    onTriggered: root.startRename("session", modelData.id, modelData.label ? modelData.label : "")
+                                                    onTriggered: { root.prepRename("session", modelData.id, modelData.label ? modelData.label : ""); renameDialog.open() }
                                                 }
                                                 QQC2.MenuItem {
                                                     text: "Restaurar original"

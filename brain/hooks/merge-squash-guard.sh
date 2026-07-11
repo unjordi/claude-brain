@@ -27,19 +27,19 @@ printf '%s' "$cmd" | grep -qE '(^|[[:space:]])(--help|-h)([[:space:]]|$)' && exi
 SQUASH_RE='(--squash([[:space:]]|=|$)|(^|[[:space:]])-s([[:space:]]|$))'
 printf '%s' "$cmd" | grep -qE "$SQUASH_RE" && exit 0
 
-# EXENCIÓN DE RELEASE: un merge cuyo DESTINO es `main` es un RELEASE y va SIN squash (conserva la
-# historia de la ventana de develop). No es un "no puedes": main tiene otra regla. La CONFIRMACIÓN
-# explícita del release la exige el hook confirmar-merge-develop; aquí solo dejamos de imponer el
-# squash cuando el destino es main. Determinamos el destino consultando el MR/PR (glab/gh).
-# FAIL-SAFE: si NO podemos confirmar que el destino es main, mantenemos la exigencia de squash
-# (nunca exentamos a ciegas → una ramita→develop sin squash sigue bloqueada).
+# La obligatoriedad de --squash aplica SÓLO cuando el DESTINO es `develop` (1 commit limpio por slice).
+# Todo lo demás va LIBRE: `main` es RELEASE (conserva historia — JAMÁS se fuerza squash, así un squash
+# olvidado nunca aplasta el histórico de un release), y ramas personales/ramitas son el día a día (a tu
+# gusto). Determinamos el destino consultando el MR/PR (glab/gh).
+# FAIL-SAFE hacia esa prioridad: si NO podemos confirmar que el destino es `develop`, NO forzamos squash
+# (nunca arriesgamos aplastar un release por no poder resolver el destino).
+_destino=""
 if command -v jq >/dev/null 2>&1; then
   _repo=$(printf '%s' "$cmd" | grep -oE '(--repo|-R)[[:space:]=]+[^[:space:]]+' | grep -oE '[^[:space:]=]+$')
   # Robustez: si el comando no trae --repo, deriva el repo del remote del PROYECTO (CLAUDE_PROJECT_DIR),
   # no del cwd del hook (que puede no ser el repo → la consulta de destino fallaría y caería a fail-safe).
   [ -z "$_repo" ] && _repo=$(git -C "${CLAUDE_PROJECT_DIR:-.}" remote get-url origin 2>/dev/null | sed -E 's#^(git@[^:]+:|https?://[^/]+/)##; s#\.git$##')
   _mrid=$(printf '%s' "$cmd" | grep -oE '(mr[[:space:]]+(merge|accept)|pr[[:space:]]+merge)[[:space:]]+#?[0-9]+' | grep -oE '[0-9]+$')
-  _destino=""
   if [ -n "$_mrid" ]; then
     if printf '%s' "$cmd" | grep -qE 'glab[[:space:]]+mr'; then
       _destino=$(glab api "projects/:id/merge_requests/$_mrid" ${_repo:+-R "$_repo"} 2>/dev/null | jq -r '.target_branch // empty' 2>/dev/null)
@@ -47,9 +47,10 @@ if command -v jq >/dev/null 2>&1; then
       _destino=$(gh pr view "$_mrid" ${_repo:+-R "$_repo"} --json baseRefName -q .baseRefName 2>/dev/null)
     fi
   fi
-  [ "$_destino" = "main" ] && exit 0   # release a main → exento del squash (gated por confirmar-merge-develop)
 fi
+# SOLO `develop` obliga squash; el resto (main/personales/ramitas/desconocido) queda libre.
+[ "$_destino" = "develop" ] || exit 0
 
-jq -n --arg r "FLUJO DE GIT (ley interna): al integrar una ramita a develop se SQUASHEA a un solo commit. NO reintentes este merge sin squash. Rehazlo con: glab mr merge <id> --squash --squash-message \"\$(cat resumen.md)\" --auto-merge --remove-source-branch --yes  — donde resumen.md es un RESUMEN CURADO en prosa de lo que hizo el slice (el cambio neto y su porqué), NO el pegote de los commits granulares (fix/chore/hotfix de ida y vuelta). Ver skill cerrar-slice." \
+jq -n --arg r "FLUJO DE GIT (ley interna): integrar a develop SQUASHEA a UN commit limpio por slice. NO reintentes este merge sin squash. Rehazlo con: glab mr merge <id> --squash --squash-message \"\$(cat resumen.md)\" --remove-source-branch --yes  — donde resumen.md es un RESUMEN CURADO en prosa del slice (el cambio neto y su porqué), NO el pegote de commits granulares. NOTA: la obligación de squash es SOLO para develop — a main (release) va SIN squash (conserva historia) y tus ramas personales van a tu gusto. Ver skill cerrar-slice." \
   '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
 exit 0
