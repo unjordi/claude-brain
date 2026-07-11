@@ -7,6 +7,7 @@
 #   ./install.sh --no-gui      # alias of --no-plasmoid (skip the desktop widget)
 #   ./install.sh --no-brain    # skip the Claude-Code brain (hooks/norms); only daemon + GUI
 #   ./install.sh --no-claude-code # skip auto-installing the Claude Code CLI (the widget measures IT)
+#   ./install.sh --no-reload-shell # don't restart plasmashell at the end (default: restart to load changes)
 #
 # This is the MASTER installer for claude-brain: it lays down the shared Claude-Code brain
 # (global hooks, delegation-cost governance, skill, norms) AND the quota daemon + optional GUI.
@@ -30,14 +31,16 @@ SKIP_PLASMOID=0
 SKIP_CCUSAGE=0
 SKIP_BRAIN=0
 SKIP_CLAUDE_CODE=0
+RELOAD_SHELL=1
 for arg in "$@"; do
   case "$arg" in
-    --reinstall)      REINSTALL=1 ;;
-    --no-plasmoid)    SKIP_PLASMOID=1 ;;
-    --no-gui)         SKIP_PLASMOID=1 ;;
-    --no-brain)       SKIP_BRAIN=1 ;;
-    --no-ccusage)     SKIP_CCUSAGE=1 ;;
-    --no-claude-code) SKIP_CLAUDE_CODE=1 ;;
+    --reinstall)       REINSTALL=1 ;;
+    --no-plasmoid)     SKIP_PLASMOID=1 ;;
+    --no-gui)          SKIP_PLASMOID=1 ;;
+    --no-brain)        SKIP_BRAIN=1 ;;
+    --no-ccusage)      SKIP_CCUSAGE=1 ;;
+    --no-claude-code)  SKIP_CLAUDE_CODE=1 ;;
+    --no-reload-shell) RELOAD_SHELL=0 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
@@ -198,6 +201,20 @@ if [[ "$SKIP_PLASMOID" -eq 0 ]]; then
   fi
   rm -rf "$BRAIN_IN_PKG"   # limpia el árbol fuente tras empaquetar
   rm -f "$VERSION_IN_PKG"  # idem: version.json es temporal, no se versiona
+
+  # Recarga plasmashell para que tome el plasmoide nuevo: actualizar el PAQUETE no refresca la instancia
+  # viva. Guardado: solo si hay sesión gráfica y plasmashell corriendo (nada sobre SSH/headless);
+  # se salta con --no-reload-shell. Si no aplica, imprime el comando manual. El panel parpadea ~1s.
+  if [[ "$RELOAD_SHELL" -eq 1 ]] && command -v kquitapp6 >/dev/null 2>&1 \
+       && pgrep -x plasmashell >/dev/null 2>&1 && [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]]; then
+    echo "==> Recargando plasmashell para aplicar los cambios (el panel parpadeará un momento)..."
+    kquitapp6 plasmashell >/dev/null 2>&1 || true
+    sleep 1
+    ( kstart plasmashell >/dev/null 2>&1 & ) 2>/dev/null || ( plasmashell >/dev/null 2>&1 & ) || true
+  else
+    echo "==> Para ver los cambios, recarga plasmashell:  kquitapp6 plasmashell; kstart plasmashell"
+    echo "    (o:  just reload-plasmashell  ·  o cierra sesión y vuelve a entrar en Wayland)"
+  fi
 fi
 
 cat <<EOF
