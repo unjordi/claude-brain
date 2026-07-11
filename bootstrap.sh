@@ -8,6 +8,8 @@
 # / zypper), (2) clona o actualiza el repo, (3) corre ./install.sh (cerebro + daemon + widget).
 # Idempotente: re-correrlo solo actualiza. Flags para install.sh se pasan tal cual:
 #   curl -fsSL …/bootstrap.sh | bash -s -- --no-gui        # p.ej. solo cerebro + daemon
+# Para QA de una RAMA (p. ej. develop) en vez de la rama default, antepón CLAUDE_BRAIN_REF:
+#   curl -fsSL …/develop/bootstrap.sh | CLAUDE_BRAIN_REF=develop bash
 set -euo pipefail
 
 REPO_URL="https://github.com/unjordi/claude-brain"
@@ -48,11 +50,17 @@ else
 fi
 
 # ── (2) Clonar o actualizar ─────────────────────────────────────────────────
+# CLAUDE_BRAIN_REF (opcional): rama a instalar (p. ej. develop para QA). Si se define, tras
+# clonar/actualizar se hace checkout de esa rama igualando el remoto; sin ella, la rama default.
+REF="${CLAUDE_BRAIN_REF:-}"
 if [[ -d "$DIR/.git" ]]; then
-  say "actualizando el clon en $DIR"; git -C "$DIR" pull --ff-only
+  say "actualizando el clon en $DIR"; git -C "$DIR" fetch -q origin
+  if [[ -n "$REF" ]]; then git -C "$DIR" checkout -B "$REF" "origin/$REF"; else git -C "$DIR" pull --ff-only; fi
 else
   say "clonando en $DIR"; git clone "$REPO_URL" "$DIR"
+  [[ -n "$REF" ]] && { git -C "$DIR" fetch -q origin; git -C "$DIR" checkout -B "$REF" "origin/$REF"; }
 fi
+[[ -n "$REF" ]] && say "instalando la rama '$REF' (QA)"
 
 # ── (3) Instalar (cerebro + daemon + widget) ────────────────────────────────
 # Puerta por OS: macOS tiene su propio instalador (launchd + .app); el raíz es Linux/KDE

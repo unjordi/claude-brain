@@ -3,6 +3,9 @@
 #
 #   irm https://raw.githubusercontent.com/unjordi/claude-brain/main/bootstrap.ps1 | iex
 #
+# Para QA de una RAMA (p. ej. develop) en vez de la default, define CLAUDE_BRAIN_REF antes:
+#   $env:CLAUDE_BRAIN_REF='develop'; irm .../develop/bootstrap.ps1 | iex
+#
 # Hace: (1) instala con winget lo que falte (Git, .NET 10 SDK, jq, Node), (2) clona/actualiza el repo,
 # (3) instala el cerebro (hooks) + el widget de bandeja. Idempotente.
 $ErrorActionPreference = 'Stop'
@@ -44,8 +47,16 @@ if ($installedSomething) {
 }
 
 # -- (2) Clonar o actualizar --------------------------------------------------
-if (Test-Path "$dir\.git") { Say "actualizando $dir"; git -C $dir pull --ff-only }
-else { Say "clonando en $dir"; git clone $repo $dir }
+# CLAUDE_BRAIN_REF (opcional): rama a instalar (p. ej. develop para QA); sin ella, la default.
+$ref = $env:CLAUDE_BRAIN_REF
+if (Test-Path "$dir\.git") {
+  Say "actualizando $dir"; git -C $dir fetch -q origin
+  if ($ref) { git -C $dir checkout -B $ref "origin/$ref" } else { git -C $dir pull --ff-only }
+} else {
+  Say "clonando en $dir"; git clone $repo $dir
+  if ($ref) { git -C $dir fetch -q origin; git -C $dir checkout -B $ref "origin/$ref" }
+}
+if ($ref) { Say "instalando la rama '$ref' (QA)" }
 
 # -- (3) Instalar cerebro (hooks, via Git Bash + jq) + widget de bandeja (.NET) -
 Set-Location $dir
