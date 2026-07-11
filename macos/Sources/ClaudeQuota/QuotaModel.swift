@@ -310,7 +310,12 @@ final class QuotaModel: ObservableObject {
         let prompt = "Propón un nombre corto de 3 a 6 palabras, en español, para una sesión de "
             + "trabajo cuyo contexto inicial fue: «\(summary)». Responde SOLO con el nombre, sin "
             + "comillas ni puntuación final ni explicación."
-        let r = await Task.detached { Self.runCapturing("/usr/bin/env", ["claude", "-p", prompt]) }.value
+        // --no-session-persistence: `claude -p` ES una sesión de Claude Code y por defecto la
+        // guarda en disco (cwd=/ al lanzarla desde la GUI → aparecía un proyecto fantasma "/" que
+        // consumía cuota). Con esta bandera la sugerencia NO deja rastro.
+        let r = await Task.detached {
+            Self.runCapturing("/usr/bin/env", ["claude", "-p", "--no-session-persistence", prompt])
+        }.value
         guard r.ok, !r.out.isEmpty else {
             throw SessionOpError.failed(r.out.isEmpty
                 ? "claude no respondió (¿instalado y en el PATH?)"
@@ -338,6 +343,19 @@ final class QuotaModel: ObservableObject {
         return (false, r.out.isEmpty
             ? "no pude ejecutar session-move.js (¿node instalado y el helper en \(Self.binDir.path)?)"
             : r.out)
+    }
+
+    /// Regenera la lista de sesiones YA: corre SOLO `sessions-extract.js` (rápido, sin red) y publica
+    /// el resultado. Úsalo tras mover/renombrar una sesión para que la lista refleje el cambio al
+    /// instante, SIN esperar al fetch completo (lento, con red, y guardado a "uno a la vez" → por eso
+    /// mover no se reflejaba). El fetch periódico reconcilia stats/tokens después. Fail-safe: si no hay
+    /// JSON parseable, no toca `sessions`.
+    func refreshSessions() async {
+        let script = Self.binDir.appendingPathComponent("sessions-extract.js").path
+        let r = await Task.detached { Self.runCapturing("/usr/bin/env", ["node", script]) }.value
+        guard r.ok, let data = r.out.data(using: .utf8),
+              let s = try? JSONDecoder().decode([Session].self, from: data) else { return }
+        await MainActor.run { self.sessions = s }
     }
 
     /// Reload from disk. On read/parse failure of state.json we keep the last good

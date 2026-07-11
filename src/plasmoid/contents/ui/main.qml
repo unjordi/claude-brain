@@ -45,6 +45,10 @@ PlasmoidItem {
     // o ~/.claude, resuelta por el shell al leer/escribir (aliasDir).
     property var projAliasMap: ({})
     property var sessAliasMap: ({})
+    // ¿La última escritura de alias fue de una SESIÓN? La fija writeAliasMap por el nombre de archivo y
+    // la lee writeAliasSource para decidir el refresh: sesión → rápido (sessions-extract.js), proyecto
+    // → fetch completo (afecta la agregación de tokens). Espeja el applyRename kind-aware del macOS.
+    property bool lastAliasWasSession: false
     // Expresión de shell para la base de los mapas (idéntica a claude-quota-fetch / sessions-extract.js).
     readonly property string aliasDir: "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
@@ -123,14 +127,41 @@ PlasmoidItem {
     }
 
     // Escritura de los mapas de alias (proyectos-alias.json / sesiones-alias.json). Reusa el engine
-    // "executable" (igual que catSource lee con `cat`). Al TERMINAR la escritura dispara forceRefresh()
-    // — así el refetch relee el archivo YA escrito (evita la carrera write-vs-refetch). Espeja el
-    // `writeMap` + `onRefresh()` de PopoverView.swift.
+    // "executable" (igual que catSource lee con `cat`). Al TERMINAR la escritura dispara el refresh
+    // — así el refetch relee el archivo YA escrito (evita la carrera write-vs-refetch). El refresh es
+    // KIND-AWARE (espeja el applyRename de PopoverView.swift): renombrar una SESIÓN solo cambia su
+    // etiqueta → refresh RÁPIDO (solo sessions-extract.js, sin red); renombrar un PROYECTO afecta la
+    // agregación de tokens → fetch completo. lastAliasWasSession lo fija writeAliasMap por el archivo.
     P5Support.DataSource {
         id: writeAliasSource
         engine: "executable"
         connectedSources: []
-        onNewData: function(source, data) { disconnectSource(source); root.forceRefresh() }
+        onNewData: function(source, data) {
+            disconnectSource(source)
+            if (root.lastAliasWasSession) root.refreshSessions()
+            else root.forceRefresh()
+        }
+    }
+
+    // Refresh RÁPIDO de la lista de sesiones: corre SOLO `sessions-extract.js` (sin red) y vuelca su
+    // stdout (JSON array [{id,project,cwd,updated_at,label}]) a root.sessions. Es el MISMO helper que el
+    // fetch corre para poblar sessions.json, pero aquí lo invocamos directo (via `bash -lc`, PATH de
+    // login donde install.sh lo deja junto al fetch — igual que session-move.js/claude) SIN pasar por el
+    // fetch completo (lento, con red, "uno a la vez"). Espeja QuotaModel.refreshSessions() del macOS.
+    // Fail-safe: sin JSON de array parseable NO toca root.sessions (deja la lista previa).
+    P5Support.DataSource {
+        id: sessionsExtractSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            disconnectSource(source)
+            if (data["exit code"] === 0 && data.stdout) {
+                try {
+                    var arr = JSON.parse(data.stdout)
+                    if (Array.isArray(arr)) root.sessions = arr
+                } catch (e) { /* fail-safe: deja la lista previa */ }
+            }
+        }
     }
 
     // Lanzador de terminal para "resumir" una sesión de Claude Code (pestaña Proyectos). Corre el
@@ -166,8 +197,9 @@ PlasmoidItem {
     // (B) "Mover a…" una sesión a otro slug: corre el helper node `session-move.js` vía `bash -lc`
     // (PATH de login, mismo criterio que `claude`/`claude-quota-fetch`, ambos en ~/.local/bin). El
     // helper escribe JSON a stdout SIEMPRE (ok:true | ok:false+error, con exit 1 en error) → parseamos
-    // stdout pase lo que pase. ok → forceRefresh() (regenera sessions.json y relee); !ok → depositamos
-    // el error y un Connections de fullRepresentation abre el diálogo de aviso (scope gotcha de Plasma 6).
+    // stdout pase lo que pase. ok → refreshSessions() (la lista refleja el move YA, rápido y sin red) +
+    // forceRefresh() (reconcilia después los conteos por proyecto / agregación); !ok → depositamos el
+    // error y un Connections de fullRepresentation abre el diálogo de aviso (scope gotcha de Plasma 6).
     P5Support.DataSource {
         id: sessionMoveSource
         engine: "executable"
@@ -178,7 +210,8 @@ PlasmoidItem {
             var res = null
             if (data.stdout) { try { res = JSON.parse(data.stdout) } catch (e) {} }
             if (res && res.ok) {
-                root.forceRefresh()
+                root.refreshSessions()   // instantáneo: la lista refleja el move YA (sin red)
+                root.forceRefresh()      // reconcilia conteos por proyecto / agregación después
             } else {
                 root.sessionMoveError = (res && res.error) ? res.error
                     : "no se pudo mover la sesión (rc=" + data["exit code"] + ")"
@@ -301,6 +334,13 @@ PlasmoidItem {
     function forceRefresh() {
         refreshRunner.connectSource("systemctl --user start claude-quota.service")
     }
+    // Refresh RÁPIDO de la lista de sesiones (sin red): corre SOLO sessions-extract.js y su stdout
+    // repobla root.sessions vía sessionsExtractSource. Úsalo tras mover/renombrar una sesión para que
+    // la lista refleje el cambio al instante, SIN esperar al fetch completo (que se descarta si ya hay
+    // uno en vuelo → por eso mover no se reflejaba). Espeja QuotaModel.refreshSessions() del macOS.
+    function refreshSessions() {
+        sessionsExtractSource.connectSource("bash -lc " + shq("sessions-extract.js"))
+    }
 
     // ---------- Renombrado por clic-secundario (espeja QuotaModel.swift) ----------
     // Serializa un mapa {clave:valor} con LLAVES ORDENADAS + pretty (2 espacios) → diff limpio si el
@@ -312,6 +352,10 @@ PlasmoidItem {
     // Escribe el mapa en <aliasDir>/<file> y, al terminar, refetch. Contenido single-quoted y escapado
     // ('->'\'') para blindar cualquier carácter; `printf '%s'` NO interpreta % ni \ del argumento.
     function writeAliasMap(file, map) {
+        // Gobierna el refresh KIND-AWARE de writeAliasSource: sesiones-alias.json → sesión (rápido),
+        // proyectos-alias.json → proyecto (fetch completo). Se fija aquí, el ÚNICO embudo de escritura
+        // (así también cubre el "Restaurar original" directo, que no pasa por prepRename/renameKind).
+        root.lastAliasWasSession = (("" + file).indexOf("sesiones-alias") !== -1)
         var json = serializeAliasMap(map)
         var esc = json.replace(/'/g, "'\\''")
         var cmd = "mkdir -p \"" + aliasDir + "\" && printf '%s' '" + esc + "' > \"" + aliasDir + "/" + file + "\""
@@ -699,6 +743,9 @@ PlasmoidItem {
 
     // (A) Pide a `claude -p` un nombre corto para la sesión, SOLO a partir del summary (prompt barato).
     // `bash -lc` para heredar el PATH de login donde vive `claude` (misma resolución que resumeSession).
+    // `--no-session-persistence`: `claude -p` ES una sesión de Claude Code y por defecto la guarda en
+    // disco; lanzada desde la GUI queda con cwd=/ → aparecía un proyecto fantasma "/" que consumía
+    // cuota. Con la bandera la sugerencia NO deja rastro (solo aplica con --print). Espeja QuotaModel.swift.
     // No guarda: el resultado cae en renameField (editable) vía el Connections de fullRepresentation.
     function suggestName() {
         var ctx = ("" + root.renameSummary).trim()
@@ -708,7 +755,7 @@ PlasmoidItem {
         var prompt = "Genera un nombre corto (de 3 a 6 palabras) en español para esta sesión de Claude Code, "
                    + "a partir de su contexto. Responde SOLO con el nombre, sin comillas ni puntuación final.\n\n"
                    + "Contexto: " + ctx
-        var inner = "claude -p " + shq(prompt)
+        var inner = "claude -p --no-session-persistence " + shq(prompt)
         var cmd = "bash -lc " + shq(inner)
         suggestSource.connectSource(cmd)
     }

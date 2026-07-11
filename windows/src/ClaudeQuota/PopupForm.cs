@@ -1578,7 +1578,13 @@ public sealed class PopupForm : Form
 
             var res = await _svc.MoveSessionAsync(id, toCwd);
             if (res.Ok)
-                _onRefresh();
+            {
+                // Regenera SOLO la lista de sesiones YA (rápido, sin red) y repinta al instante — no
+                // esperes al fetch completo, que es lento y antes hacía que "Mover a…" no se reflejara.
+                await _svc.RefreshSessionsAsync();
+                RefreshData();
+                _onRefresh();   // el fetch periódico reconcilia stats/tokens después
+            }
             else
                 MessageBox.Show(this, $"No se pudo mover la sesión:\n{res.Error}",
                     "Mover sesión", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -1601,7 +1607,7 @@ public sealed class PopupForm : Form
         _onRefresh();
     }
 
-    private void PromptRenameSession(Session s)
+    private async void PromptRenameSession(Session s)
     {
         string id = s.Id ?? "";
         if (id.Length == 0) return;
@@ -1617,6 +1623,10 @@ public sealed class PopupForm : Form
                 () => QuotaService.SuggestSessionNameAsync(s.Summary));
             if (v == null) return;   // cancelado → sin cambios
             QuotaService.RenameSession(id, v);
+            // Regenera SOLO la lista de sesiones YA (rápido, sin red) y repinta al instante para que la
+            // etiqueta nueva se vea sin esperar al fetch completo. El fetch periódico reconcilia después.
+            await _svc.RefreshSessionsAsync();
+            RefreshData();
             _onRefresh();
         }
         finally { _modalOpen = false; }

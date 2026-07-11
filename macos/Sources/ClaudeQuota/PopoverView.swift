@@ -105,11 +105,14 @@ struct PopoverView: View {
     /// releen los mapas y el widget se recarga con el nombre nuevo.
     private func applyRename(_ t: RenameTarget) {
         switch t.kind {
-        case .project: model.renameProject(t.key, to: renameText)
-        case .session: model.renameSession(t.key, to: renameText)
+        case .project:
+            model.renameProject(t.key, to: renameText)
+            onRefresh()                                    // afecta la agregación → fetch completo
+        case .session:
+            model.renameSession(t.key, to: renameText)
+            Task { await model.refreshSessions() }         // etiqueta al instante (sin esperar al fetch)
         }
         renameTarget = nil
-        onRefresh()
     }
 
     // MARK: - (A) Hoja de renombrar sesión (contexto + Sugerir nombre)
@@ -210,7 +213,7 @@ struct PopoverView: View {
         moveRequest = nil
         Task {
             let r = await model.moveSession(id: req.session.id, toCwd: req.cwd)
-            if r.ok { onRefresh() } else { moveError = r.error }
+            if r.ok { await model.refreshSessions(); onRefresh() } else { moveError = r.error }
         }
     }
 

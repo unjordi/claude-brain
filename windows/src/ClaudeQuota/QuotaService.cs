@@ -829,6 +829,25 @@ public sealed class QuotaService
         catch { return new MoveResult(false, "respuesta inesperada de session-move.js"); }
     }
 
+    /// <summary>Regenera la lista de sesiones YA: corre SOLO `sessions-extract.js` (rápido, sin red),
+    /// reescribe sessions.json y publica el resultado en <see cref="Sessions"/>. Úsalo tras mover o
+    /// renombrar una sesión para que la lista refleje el cambio AL INSTANTE, sin esperar al fetch
+    /// completo (lento, con red, y que solo regenera sessions.json de pasada → por eso mover/renombrar
+    /// no se reflejaba). El fetch periódico reconcilia stats/tokens después. Fail-safe: si no hay JSON
+    /// parseable (sin node / sin el helper / error), deja la lista anterior intacta.</summary>
+    public async Task RefreshSessionsAsync()
+    {
+        if (!OnPath("node")) return;   // sin node no se puede regenerar (igual que el fetch)
+        await RunExtractorAsync("sessions-extract.js", SessionsFile);
+        try
+        {
+            if (File.Exists(SessionsFile) &&
+                JsonSerializer.Deserialize<List<Session>>(File.ReadAllText(SessionsFile)) is { } s)
+                Sessions = s;
+        }
+        catch { /* fail-safe: deja la lista anterior */ }
+    }
+
     // ---- 2d. (Feature A) sugerir un nombre para la sesión vía `claude -p` -----
     //
     // Barato: manda SOLO el contexto (summary) y pide un nombre corto. Fail-open:
@@ -871,6 +890,10 @@ public sealed class QuotaService
                 CreateNoWindow = true,
             };
             psi.ArgumentList.Add("-p");
+            // --no-session-persistence: `claude -p` ES una sesión de Claude Code y por defecto la
+            // guarda en disco (cwd=/ al lanzarla desde la GUI → aparecía un proyecto fantasma "/" que
+            // consumía cuota). Con esta bandera la sugerencia NO deja rastro. (Solo aplica con --print.)
+            psi.ArgumentList.Add("--no-session-persistence");
             psi.ArgumentList.Add(prompt);
             using var proc = Process.Start(psi);
             if (proc == null) return null;
