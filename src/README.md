@@ -29,7 +29,9 @@ cd claude-brain
 ./install.sh --no-brain      # daemon + widget (sin cerebro)
 ```
 
-Luego en Plasma: clic derecho en el panel → **Agregar o administrar widgets…** → busca
+El instalador **recarga plasmashell al terminar** (para que tome el plasmoide nuevo — actualizar el
+paquete no refresca la instancia viva); el panel parpadea ~1 s. Sáltalo con `--no-reload-shell` (p. ej.
+por SSH/headless). Luego en Plasma: clic derecho en el panel → **Agregar o administrar widgets…** → busca
 **"Claude Brain Widget"** → arrástralo al panel.
 
 **Prerrequisitos:** KDE Plasma 6, `jq` (normalización JSON), y `npm` para instalar `ccusage` (el
