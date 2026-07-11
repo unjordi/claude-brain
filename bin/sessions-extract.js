@@ -32,7 +32,13 @@ function sessionAliases() {
 }
 
 // Lee el prefijo del transcript (basta con los primeros bytes) y saca el cwd + el primer mensaje
-// de usuario (etiqueta). Las primeras líneas (mode/permission/file-history) traen cwd=null.
+// de usuario. Las primeras líneas (mode/permission/file-history) traen cwd=null.
+//   label   = primer mensaje de usuario recortado a 80 chars (para el listado).
+//   summary = ese mismo mensaje inicial más largo (280 chars) — es el "de qué trata la sesión"
+//             que el diálogo de renombrar muestra como contexto. Este Claude Code NO escribe
+//             resúmenes server-generados en el .jsonl, así que se DERIVA de la petición inicial
+//             (la señal más útil para nombrar). El botón "Sugerir nombre" de la GUI es aparte
+//             (opt-in, cuesta tokens: hace shell-out a `claude -p`), no vive aquí.
 function meta(file) {
   let txt = '';
   try {
@@ -41,14 +47,14 @@ function meta(file) {
     const n = fs.readSync(fd, buf, 0, buf.length, 0);
     fs.closeSync(fd);
     txt = buf.toString('utf8', 0, n);
-  } catch (_) { return { cwd: null, label: null }; }
+  } catch (_) { return { cwd: null, label: null, summary: null }; }
 
-  let cwd = null, label = null;
+  let cwd = null, firstUser = null;
   for (const line of txt.split('\n')) {
     if (!line.trim()) continue;
     let o; try { o = JSON.parse(line); } catch (_) { continue; }   // la última línea puede venir cortada
     if (!cwd && typeof o.cwd === 'string' && o.cwd) cwd = o.cwd;
-    if (!label && o.type === 'user' && o.message) {
+    if (!firstUser && o.type === 'user' && o.message) {
       const c = o.message.content;
       let t = null;
       if (typeof c === 'string') t = c;
@@ -56,11 +62,15 @@ function meta(file) {
         const x = c.find(e => e && e.type === 'text' && typeof e.text === 'string');
         t = x ? x.text : null;
       }
-      if (t) { t = t.replace(/\s+/g, ' ').trim(); if (t) label = t.slice(0, 80); }
+      if (t) { t = t.replace(/\s+/g, ' ').trim(); if (t) firstUser = t; }
     }
-    if (cwd && label) break;
+    if (cwd && firstUser) break;
   }
-  return { cwd, label };
+  return {
+    cwd,
+    label: firstUser ? firstUser.slice(0, 80) : null,
+    summary: firstUser ? firstUser.slice(0, 280) : null,
+  };
 }
 
 function main() {
@@ -82,15 +92,17 @@ function main() {
     } catch (_) { continue; }
     files.sort((a, b) => b.m - a.m);
     for (const { f, m } of files.slice(0, PER_PROJECT)) {
-      const { cwd, label } = meta(path.join(sdir, f));
+      const { cwd, label, summary } = meta(path.join(sdir, f));
       const realCwd = cwd || slug.replace(/^-/, '/').replace(/-/g, '/');   // fallback lossy si no hubo cwd
       const id = f.replace(/\.jsonl$/, '');
       out.push({
         id,
         project: path.basename(realCwd) || slug,
         cwd: realCwd,
+        slug,                                          // dir real bajo projects/ (para mover entre slugs)
         updated_at: new Date(m).toISOString(),
-        label: aliases[id] || label || '(sesión)',   // el alias del widget gana sobre la etiqueta derivada
+        label: aliases[id] || label || '(sesión)',     // el alias del widget gana sobre la etiqueta derivada
+        summary: summary || null,                      // contexto del contenido para el diálogo de renombrar
       });
     }
   }
