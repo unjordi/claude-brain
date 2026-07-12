@@ -99,6 +99,12 @@ need jq
 if [[ "$SKIP_APP" -eq 0 ]]; then
   need swift
 fi
+# rsvg-convert (librsvg): rasteriza el SVG del ícono (app + login item del daemon). Opcional pero
+# recomendado; sin él, el ícono no se (re)genera y queda el genérico.
+if ! command -v rsvg-convert >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then echo "==> Instalando librsvg (para el ícono de Claude Brain)"; brew install librsvg || true
+  else echo "warn: falta rsvg-convert (brew install librsvg) — el ícono no se (re)generará"; fi
+fi
 
 echo "==> Ensuring ccusage is available"
 if command -v ccusage >/dev/null 2>&1; then
@@ -130,6 +136,18 @@ SESSIONS_SRC="$ROOT/../bin/sessions-extract.js"
 [[ -f "$SESSIONS_SRC" ]] && install -m 0755 "$SESSIONS_SRC" "$(dirname "$FETCH_DEST")/sessions-extract.js"
 SESSIONMOVE_SRC="$ROOT/../bin/session-move.js"
 [[ -f "$SESSIONMOVE_SRC" ]] && install -m 0755 "$SESSIONMOVE_SRC" "$(dirname "$FETCH_DEST")/session-move.js"
+
+# Ícono del daemon en "Elementos de inicio": claude-brain-fetch es un script pelón → macOS le pone el
+# genérico "exec". Le incrustamos el ícono de Claude Brain como ícono CUSTOM del archivo vía
+# NSWorkspace.setIcon (set-icon.swift), reusando AppIcon.icns (trae la variante chica nítida en 16/32).
+# Fail-safe: sin swift/rsvg o sin icns, se salta (el daemon corre igual, solo sin ícono bonito).
+ICNS="$ROOT/build/AppIcon.icns"
+[[ -f "$ICNS" ]] || bash "$ROOT/make-icon.sh" >/dev/null 2>&1 || true
+if [[ -f "$ICNS" && -f "$ROOT/set-icon.swift" ]] && command -v swift >/dev/null 2>&1; then
+  if swift "$ROOT/set-icon.swift" "$ICNS" "$FETCH_DEST" 2>/dev/null; then
+    echo "    ícono de Claude Brain incrustado en el daemon (login item)"
+  fi
+fi
 
 # --- CLI `claude` + PATH (el widget MIDE a claude; sin él no hay qué medir) --------------------
 # Espeja la lógica de install.ps1 (fix #67, Windows): si `claude` no está en el PATH pero YA existe

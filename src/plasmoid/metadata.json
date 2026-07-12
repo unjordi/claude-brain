@@ -12,7 +12,7 @@
         ],
         "Category": "System Information",
         "Description": "Muestra el uso de tu sesión (5 h) y el límite semanal de Claude",
-        "Icon": "speedometer",
+        "Icon": "claude-brain",
         "Id": "io.github.unjordi.claude-quota-widget",
         "License": "MIT",
         "Name": "Claude Brain Widget",
