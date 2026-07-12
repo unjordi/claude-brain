@@ -47,7 +47,8 @@ fi
 # ── (a) Copiar hooks de tier global + la lib compartida ──
 GLOBAL_HOOKS="git-branch-guard.sh merge-squash-guard.sh confirmar-merge-develop.sh recordar-dashboard.sh \
               secret-scan.sh rama-vieja.sh limite-gasto.sh \
-              delegacion-gate.sh delegacion-registrar.sh delegacion-comun.sh"
+              delegacion-gate.sh delegacion-registrar.sh delegacion-reporte.sh delegacion-comun.sh \
+              limpiar-worktrees.sh"
 for h in $GLOBAL_HOOKS; do
   if [ -f "$SRC_HOOKS/$h" ]; then
     cp -f "$SRC_HOOKS/$h" "$HOOKS_DIR/$h"
@@ -86,13 +87,18 @@ register_hook PreToolUse  Bash 'bash "$HOME/.claude/hooks/rama-vieja.sh"'       
 register_hook PreToolUse  Task 'bash "$HOME/.claude/hooks/limite-gasto.sh"'        'limite-gasto'
 register_hook PreToolUse  Task 'bash "$HOME/.claude/hooks/delegacion-gate.sh"'     'delegacion-gate'
 register_hook PostToolUse Task 'bash "$HOME/.claude/hooks/delegacion-registrar.sh"' 'delegacion-registrar'
+register_hook PostToolUse Task 'bash "$HOME/.claude/hooks/delegacion-reporte.sh"'   'delegacion-reporte'
 echo "ok: hooks cableados en $GSET (git-branch-guard, merge-squash-guard, confirmar-merge-develop, recordar-dashboard, secret-scan, rama-vieja, limite-gasto, delegacion-gate/registrar)"
 
-# ── (c) Skill genérica cerrar-slice ──
-if [ -d "$SRC_SKILLS/cerrar-slice" ]; then
-  mkdir -p "$SKILLS_DIR/cerrar-slice"
-  cp -f "$SRC_SKILLS/cerrar-slice/SKILL.md" "$SKILLS_DIR/cerrar-slice/SKILL.md"
-  echo "ok: skill cerrar-slice instalada en $SKILLS_DIR/cerrar-slice"
+# ── (c) Skills genéricas del cerebro (cerrar-slice, orquestar-fanout, …) ──
+if [ -d "$SRC_SKILLS" ]; then
+  for sk in "$SRC_SKILLS"/*/; do
+    [ -f "$sk/SKILL.md" ] || continue
+    name="$(basename "$sk")"
+    mkdir -p "$SKILLS_DIR/$name"
+    cp -f "$sk/SKILL.md" "$SKILLS_DIR/$name/SKILL.md"
+    echo "ok: skill $name instalada en $SKILLS_DIR/$name"
+  done
 fi
 
 # ── (d) Dashboard del cerebro en la memoria GLOBAL (slug del HOME) si falta ──

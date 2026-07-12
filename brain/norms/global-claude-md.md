@@ -92,4 +92,15 @@ para el usuario. Con volumen paralelizable, el default es **fan-out + supervisi�
 (Respeta el gate de costo — esto es sobre el ESTILO de trabajo, no sobre saltarse el consentimiento.)
 **Señal de que te desviaste:** llevas rato implementando en serie y el usuario tuvo que pedirte que
 volvieras a delegar.
+
+**Reporte sin niñera + estado sin redundancia (skill `orquestar-fanout`).** Al orquestar, NO monitorees
+a los agentes a mano ni actualices el estado tú al final: el cierre de CADA agente es AUTOMÁTICO —
+appendas su avance a `bitacora.md` (append-only, merge=union) y actualizas el ítem en `estado-proyecto.md`
+(el BACKLOG VIVO = fuente de verdad, "aquí empiezas siempre"). **Dos archivos, roles claros, cero
+redundancia:** bitácora = *qué pasó* (aquí appendan los agentes); estado-proyecto = *qué sigue* (lo cura
+el orquestador). El mismo dato NO se escribe en 3 lados; el estado "actual" se DERIVA. La lista de
+TodoWrite es SCRATCH de sesión — el backlog DURABLE es estado-proyecto.md. Lo recuerda el hook
+`delegacion-reporte` (PostToolUse/Task); los worktrees zombies los barre `limpiar-worktrees.sh` (borra
+los de ramas mergeadas, deja los vivos anotando su pendiente en la bitácora). **Señal de que te
+desviaste:** el usuario tuvo que PEDIRTE que actualizaras bitácora/estado, o se acumularon worktrees zombies.
 <!-- END claude-brain -->
