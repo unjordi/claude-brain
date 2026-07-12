@@ -39,7 +39,7 @@ clasificar_delegacion() {
     claude)
       # snapshot de cuota FRESCO (< 30 min); dentro de ventana (pct < umbral) → incluido; si no → metered
       local snap="" c
-      for c in "${XDG_CACHE_HOME:-$HOME/.cache}/claude-quota/state.json" "$HOME/Library/Caches/claude-brain/state.json"; do
+      for c in "${XDG_CACHE_HOME:-$HOME/.cache}/claude-brain/state.json" "$HOME/Library/Caches/claude-brain/state.json"; do
         [ -f "$c" ] && { snap="$c"; break; }
       done
       if [ -n "$snap" ] && [ -z "$(find "$snap" -mmin +30 2>/dev/null)" ]; then
@@ -75,7 +75,7 @@ fmt_tokens() {
 linea_cuota() {
   command -v jq >/dev/null 2>&1 || return 0
   local snap="" c
-  for c in "${XDG_CACHE_HOME:-$HOME/.cache}/claude-quota/state.json" "$HOME/Library/Caches/claude-brain/state.json"; do
+  for c in "${XDG_CACHE_HOME:-$HOME/.cache}/claude-brain/state.json" "$HOME/Library/Caches/claude-brain/state.json"; do
     [ -f "$c" ] && { snap="$c"; break; }
   done
   [ -n "$snap" ] || return 0
