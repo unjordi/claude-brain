@@ -42,7 +42,7 @@ a `npx -y ccusage@latest` en cada corrida, ~7 s más lento).
 
 El daemon es un `systemd --user` timer que **impone un piso de refresco de 5 min** (`OnUnitActiveSec=5min`,
 `Persistent=true`) — la API de Anthropic avisa si sondeas de más, así que el timer es la única fuente
-de cadencia. El plasmoide es vista pura: lee `~/.cache/claude-quota/state.json` cada 10 s y renderiza.
+de cadencia. El plasmoide es vista pura: lee `~/.cache/claude-brain/state.json` cada 10 s y renderiza.
 
 ## Ajustar los caps del fallback (solo importa offline)
 
@@ -94,7 +94,7 @@ con lo que se mostraba antes del filtro.
 A la derecha del footer de rango de **Resumen / Modelos / Proyectos** aparece —**solo si hay sync
 activo**— un par de píldoras: **🖥 esta máquina** (default) y **☁️ todas** (con el número de máquinas
 si hay más de una). Al elegir ☁️ los recomputes de rango (tarjetas, tablas y gráficas) leen de
-`~/.cache/claude-quota/stats-global.json` en vez del `stats.json` local — la vista **combinada de
+`~/.cache/claude-brain/stats-global.json` en vez del `stats.json` local — la vista **combinada de
 todas tus máquinas** que produce el bloque *(e) Sync* del fetch al fusionar los snapshots depositados
 en la carpeta de nube. **Conteo de sesiones, Chats, heatmap, Racha y Hora pico se quedan siempre
 locales.** Si no existe `stats-global.json` (sync apagado) el toggle no se muestra (fail-open), y no
@@ -102,7 +102,7 @@ aparece en **Chats**.
 
 ## La pestaña "Chats" (solo si hay conversaciones locales)
 
-Lee `~/.cache/claude-quota/chats.json` (lo produce el fetch con `chats-extract.js`, leyendo el caché
+Lee `~/.cache/claude-brain/chats.json` (lo produce el fetch con `chats-extract.js`, leyendo el caché
 local del app de escritorio de Claude **sin red ni cookies**). Muestra el desglose por modelo
 (swatch + modelo + conteo + %) y la lista de recientes (título + badge de modelo + fecha relativa);
 al pasar el cursor sobre un chat, su resumen sale en el pie. Es **read-only** (no abre el chat: no
@@ -119,7 +119,7 @@ just refresh  # fuerza un fetch ya e imprime el resultado
 
 - **Píldora gris con `…`** — el caché aún no se escribe; el primer fetch tarda mientras `ccusage` arranca en frío.
 - **`error: cat rc=1`** — el fetch tronó (`journalctl --user -u claude-quota.service`); normalmente falta `jq`/`ccusage`.
-- **Porcentajes lejos de `/usage`** — `jq .basis ~/.cache/claude-quota/state.json`: `"cost"` = el endpoint OAuth no es alcanzable (¿credenciales? ¿en línea?) y estás en el fallback; `"oauth"` = viene de Anthropic y debe coincidir.
+- **Porcentajes lejos de `/usage`** — `jq .basis ~/.cache/claude-brain/state.json`: `"cost"` = el endpoint OAuth no es alcanzable (¿credenciales? ¿en línea?) y estás en el fallback; `"oauth"` = viene de Anthropic y debe coincidir.
 - **Widget en blanco en el panel** — reinicia plasmashell una vez: `just reload-plasmashell`.
 
 ## Desarrollo

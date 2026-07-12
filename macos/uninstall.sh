@@ -10,12 +10,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BRAIN_UNINSTALLER="$ROOT/../brain/uninstall-brain.sh"
 
-LABEL="io.github.unjordi.claude-quota"
-FETCH_DEST="$HOME/.local/bin/claude-quota-fetch"
+LABEL="io.github.unjordi.claude-brain"
+FETCH_DEST="$HOME/.local/bin/claude-brain-fetch"
 PLIST_DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
-APP_DEST="$HOME/Applications/Claude Quota.app"
+APP_DEST="$HOME/Applications/Claude Brain Widget.app"
 CONFIG_DIR="$HOME/.config/claude-quota"
-CACHE_DIR="$HOME/Library/Caches/claude-quota"
+CACHE_DIR="$HOME/Library/Caches/claude-brain"
 
 PURGE=0
 SKIP_BRAIN=0
@@ -37,8 +37,8 @@ if [[ "$SKIP_BRAIN" -eq 0 ]]; then
 fi
 
 echo "==> Stopping app"
-osascript -e 'tell application "Claude Quota" to quit' 2>/dev/null || true
-pkill -f "Claude Quota.app/Contents/MacOS/ClaudeQuota" 2>/dev/null || true
+osascript -e 'tell application "Claude Brain Widget" to quit' 2>/dev/null || true
+pkill -f "Claude Brain Widget.app/Contents/MacOS/ClaudeQuota" 2>/dev/null || true
 
 echo "==> Unloading launchd agent"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true

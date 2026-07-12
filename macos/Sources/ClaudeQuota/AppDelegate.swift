@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // the 5-minute polling floor is preserved.
     private let staleThreshold: Double = 330  // 5.5 min
     private lazy var fetchScript = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".local/bin/claude-quota-fetch").path
+        .appendingPathComponent(".local/bin/claude-brain-fetch").path
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)

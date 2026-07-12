@@ -50,7 +50,7 @@ tab rail on the left:
 - **Modelos** — a stacked bar chart of daily token usage colored per model,
   plus a table with in/out tokens and % share per model.
 - The rail's bottom buttons: **refresh** (kicks off a real fetch via
-  `~/.local/bin/claude-quota-fetch`, not just a cache re-read) and **quit**.
+  `~/.local/bin/claude-brain-fetch`, not just a cache re-read) and **quit**.
 
 ## How it works
 
@@ -58,14 +58,14 @@ Three pieces, intentionally separated — the same shape as the Linux port:
 
 ```
 ┌────────────────────────────────┐
-│ 1. claude-quota-fetch          │ bash + jq + curl (OAuth) + ccusage
+│ 1. claude-brain-fetch          │ bash + jq + curl (OAuth) + ccusage
 │    runs every 5 min via        │     ↓ writes
-│    a launchd LaunchAgent        │ ~/Library/Caches/claude-quota/state.json
-│                                  │ ~/Library/Caches/claude-quota/stats.json
+│    a launchd LaunchAgent        │ ~/Library/Caches/claude-brain/state.json
+│                                  │ ~/Library/Caches/claude-brain/stats.json
 └────────────────────────────────┘            ↑ reads
                                               │ (every 10s)
 ┌────────────────────────────────┐            │
-│ 2. ClaudeQuota.app (Swift)     │────────────┘
+│ 2. Claude Brain Widget.app     │────────────┘
 │    NSStatusItem 2-row indicator│
 │    + 3-tab SwiftUI popover     │
 └────────────────────────────────┘
@@ -151,7 +151,7 @@ Or with [just](https://github.com/casey/just):
 just install
 ```
 
-This builds `Claude Quota.app` into `~/Applications`, installs the fetch script
+This builds `Claude Brain Widget.app` into `~/Applications`, installs the fetch script
 and launchd agent, primes the cache with one run, and launches the app. Look for
 the `5h` / `7d` indicator in your menu bar.
 
@@ -170,7 +170,7 @@ reload the agent:
 # e.g. popover shows "$16" on the 5-hour bar and /usage says 36% →
 #   FIVE_HOUR_CAP_USD = 16 / 0.36 ≈ 45
 $EDITOR ~/.config/claude-quota/limits.env
-launchctl kickstart -k gui/$(id -u)/io.github.unjordi.claude-quota
+launchctl kickstart -k gui/$(id -u)/io.github.unjordi.claude-brain
 ```
 
 Rough starting points (eyeballed against `/usage` on Max 20x — your mileage will
@@ -186,7 +186,7 @@ vary with how cache-heavy your sessions are):
 
 ```sh
 just build      # compile the release binary
-just app        # assemble Claude Quota.app under build/
+just app        # assemble Claude Brain Widget.app under build/
 just run        # run the just-built binary in the foreground (logs to terminal)
 just reload     # rebuild + reinstall + relaunch after editing Swift sources
 just refresh    # force one fetch cycle now and print state.json
@@ -204,18 +204,18 @@ binary, `make-app.sh` wraps it in a `.app` bundle with an `LSUIElement` Info.pli
 - **Indicator rows show `…`** — the cache file hasn't been written yet. Run
   `just refresh`; the first `ccusage` run can take a few seconds to cold-start.
 - **Indicator rows show `!`** — the app can't read `state.json`. Check the
-  fetch agent: `cat /tmp/claude-quota.err.log`.
+  fetch agent: `cat /tmp/claude-brain.err.log`.
 - **No indicator at all** — confirm the app is running
-  (`pgrep -lf ClaudeQuota`); if not, `open "~/Applications/Claude Quota.app"`.
+  (`pgrep -lf ClaudeQuota`); if not, `open "~/Applications/Claude Brain Widget.app"`.
 - **Percentages way off from `/usage`** — check `jq .basis` on
-  `~/Library/Caches/claude-quota/state.json`. If it says `"cost"`, the OAuth
+  `~/Library/Caches/claude-brain/state.json`. If it says `"cost"`, the OAuth
   endpoint isn't reachable (are Claude Code credentials in your Keychain? are
   you online?) and you're on the calibrated fallback — see above. If it says
   `"oauth"`, the numbers come straight from Anthropic and should match.
 - **Resumen/Modelos tabs empty or stale** — those come from `stats.json`, not
   `state.json`. Check it exists and is fresh:
-  `jq .updated_at ~/Library/Caches/claude-quota/stats.json`. It's written by
-  the same `claude-quota-fetch` run but is best-effort (missing `ccusage` or
+  `jq .updated_at ~/Library/Caches/claude-brain/stats.json`. It's written by
+  the same `claude-brain-fetch` run but is best-effort (missing `ccusage` or
   an empty `~/.claude/projects` just leaves it absent, without failing the
   limits fetch).
 

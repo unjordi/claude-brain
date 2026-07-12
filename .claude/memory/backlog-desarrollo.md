@@ -20,7 +20,7 @@ tuvo y lo perdió, no debería desechar a lo wey."* → tres estados, no dos:
 - **Tuvo OAuth y lo perdió, VIEJO** (fuera de ventana → el número ya no significa) → degradar, pero aun así
   decir "último real: X% a las HH:MM, no puedo refrescar", nunca un 0% con cara de verdad.
 
-**El patrón ya existe a medias:** líneas 42‑50 de `src/bin/claude-quota-fetch` YA cargan hacia adelante el
+**El patrón ya existe a medias:** líneas 42‑50 de `src/bin/claude-brain-fetch` YA cargan hacia adelante el
 `resets_at` real del último OAuth cuando cae a fallback (un "próximo lunes" adivinado estaría mal). Solo hay
 que **extender ese mismo mecanismo a los porcentajes** (y a `cost_usd`/`tokens`), con el timestamp de staleness.
 
@@ -33,7 +33,7 @@ que **extender ese mismo mecanismo a los porcentajes** (y a `cost_usd`/`tokens`)
 3. **Marcar visualmente** el modo stale/fallback en las 3 GUIs (⚠ / "estimado local" / "último real HH:MM")
    en vez de un número confiado. Un 0% confiado tapando un 98% real es la trampa de UX que hay que matar.
 
-**Dónde toca:** `src/bin/claude-quota-fetch` + `macos/bin/claude-quota-fetch` (la lógica de basis + carry-forward);
+**Dónde toca:** `src/bin/claude-brain-fetch` + `macos/bin/claude-brain-fetch` (la lógica de basis + carry-forward);
 Windows `QuotaService` (misma lógica en C#); el badge de estado en las 3 GUIs (Swift/QML/WinForms). **No urge**
 (el caso se auto-cura al refrescar el token), pero es correctez de datos: el widget no debe mentir con cara de verdad.
 
@@ -73,34 +73,9 @@ retomar una máquina, se quiere un "reconciliar todo" de un clic.
 - **Dónde toca:** `BrainInspector`/`healBrain` de la pestaña Cerebro (macOS `PopoverView.swift`, Linux
   `main.qml`, Windows `PopupForm.cs`), + una pasada nueva que itere slugs→repos.
 
-## [2026-07-11] Contexto al renombrar una sesión (+ sugerir nombre)
-**Qué (unjordi, 2026-07-11):** al abrir "Renombrar sesión" es **difícil saber qué nombre poner** — el
-diálogo solo trae la etiqueta actual (el 1er mensaje). Ofrecer contexto del CONTENIDO de la sesión:
-(a) mostrar el **resumen** que ya trae (viene en inglés — el que server-genera claude.ai/el app), y
-(b) un **botoncito "Sugerir nombre"** que —AVISANDO que cuesta tokens— genere un nombre corto del contenido.
-**Matices:** el resumen en inglés ya lo extrae `chats-extract.js` para chats, pero las SESIONES de Claude
-Code (`~/.claude/projects/<slug>/*.jsonl`) no traen resumen server-generado → habría que derivarlo del
-transcript (primeros/últimos mensajes) o llamar a un modelo (de ahí el "cuesta tokens" + botón opt-in).
-Decidir la fuente del resumen. **Dónde toca:** `sessions-extract.js` (exponer más contexto por sesión) +
-el diálogo de rename (mostrar resumen + botón sugerir) en las 3 GUIs. Emparenta con el rename ya hecho (c/d).
-
-## [2026-07-10] Mover sesiones entre slugs — CON TODO lo que conlleva
-**Qué:** desde Proyectos/Chats, **mover una sesión** de un slug a otro. unjordi (2026-07-11) lo quiere
-**completo**: no solo el `.jsonl`, sino **TODO lo que conlleva** — la **transcripción**, las **memorias
-específicas de esa sesión** (si las hay), y su **estadística de consumo de tokens** (que se re-atribuya al
-slug destino).
-
-**Por qué:** si arrancaste una sesión en el dir/slug equivocado (la lección "inicia la sesión DENTRO del
-repo"), queda archivada mal; re-archivarla debe llevarse TODO su rastro al slug correcto.
-
-**Matices / retos (decisión de diseño pendiente):**
-- `.jsonl` = `sessionId`; el **cwd vive DENTRO del transcript** y `claude --resume <id>` lo usa. Mover el
-  archivo re-agrupa en el widget PERO no cambia el cwd → el resume seguiría en el cwd original salvo que se
-  reescriba el cwd en el transcript (riesgoso: tocar el .jsonl de Claude Code).
-- **La estadística de tokens** la calcula ccusage por proyecto/slug leyendo los transcripts → al mover el
-  `.jsonl` al otro slug-dir, ccusage ya lo re-atribuye SOLO (no hay que tocar nada aparte); verificar.
-- **Memorias específicas de sesión:** hoy la memoria es por-REPO (`.claude/memory/`), no por-sesión; si se
-  quiere memoria por-sesión movible, es un concepto nuevo a definir.
-- **Alcance:** (a) mover archivo = re-categoriza en widget + re-atribuye tokens; (b) además reescribir cwd
-  para re-targetear `--resume`. Empezar por (a) con la advertencia; evaluar (b).
-- **Dónde toca:** `sessions-extract.js` + acción "mover a…" en la UI (3 GUIs).
+## HECHO (fuera del backlog) — 2026-07-11
+- **Contexto al renombrar sesión (+ "Sugerir nombre")** y **Mover sesión entre slugs** →
+  IMPLEMENTADOS en las 3 GUIs (#104/#106, en develop; `bin/sessions-extract.js` +summary/+slug y
+  `bin/session-move.js`). QA visual parcial de unjordi (macOS). Detalle en `claude-quota-widget.md`
+  (sección 2026-07-11) y bitácora del dashboard. Decisión del "cwd": el move SÍ reescribe el cwd
+  interno (con respaldo) para que `--resume` quede coherente; no hay "memorias por-sesión" que mover.

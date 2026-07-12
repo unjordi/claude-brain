@@ -125,7 +125,7 @@ mismos datos que `/usage`, en tu escritorio, desde cualquier lado. Las pestañas
 | ![Resumen](screenshots/resumen.png) | ![Límites](screenshots/limites.png) |
 | **Resumen** — sesiones, mensajes, tokens, rachas, hora pico, modelo favorito, costo API-equiv y el heatmap diario. | **Límites** — ventana de 5 h y semanal, caps por-modelo, y el **gasto real de bolsillo** (spend / overage). |
 | ![Modelos](screenshots/modelos.png) | ![Proyectos](screenshots/proyectos.png) |
-| **Modelos** — barras apiladas por día + una fila por modelo (tokens in/out, %). | **Proyectos** — barras apiladas por día + una fila por carpeta de proyecto (tokens in/out, %). |
+| **Modelos** — barras apiladas por día + una fila por modelo (tokens in/out, %). | **Proyectos** — barras apiladas por día + una fila por carpeta de proyecto (tokens in/out, %). Desde aquí **renombras** una sesión (con su contexto + un botón "Sugerir nombre") y la **mueves** a otro proyecto. |
 
 ## Cómo funciona
 
@@ -139,14 +139,14 @@ mismos datos que `/usage`, en tu escritorio, desde cualquier lado. Las pestañas
                  │ cerebro (install-brain.sh)       │ daemon + widget
                  ▼                                  ▼
   ┌───────────────────────────┐   ┌────────────────────────────────┐
-  │  ~/.claude   (EL CEREBRO)  │   │  claude-quota-fetch (daemon)   │
+  │  ~/.claude   (EL CEREBRO)  │   │  claude-brain-fetch (daemon)   │
   │  hooks/ · settings.json    │   │  systemd / launchd · piso 5 min │
   │  CLAUDE.md · skills/       │   │  bash + jq + curl(OAuth) +ccusage│
   └───────────▲───────────────┘   └────────────────┬───────────────┘
               │ refleja + cura 🩹                   │ escribe
               │  (install-brain.sh)                 ▼
               │                    ┌────────────────────────────────┐
-              │                    │  ~/.cache/claude-quota/         │
+              │                    │  ~/.cache/claude-brain/         │
               │                    │    state.json · stats.json      │
               │                    └────────────────┬───────────────┘
               │                                     │ lee cada 10 s

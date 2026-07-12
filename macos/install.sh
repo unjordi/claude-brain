@@ -15,16 +15,18 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-FETCH_SRC="$ROOT/bin/claude-quota-fetch"
-PLIST_SRC="$ROOT/launchd/io.github.unjordi.claude-quota.plist"
-LABEL="io.github.unjordi.claude-quota"
+FETCH_SRC="$ROOT/bin/claude-brain-fetch"
+PLIST_SRC="$ROOT/launchd/io.github.unjordi.claude-brain.plist"
+LABEL="io.github.unjordi.claude-brain"
 BRAIN_INSTALLER="$ROOT/../brain/install-brain.sh"
 
-FETCH_DEST="$HOME/.local/bin/claude-quota-fetch"
+FETCH_DEST="$HOME/.local/bin/claude-brain-fetch"
 PLIST_DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
+# El dir de config (~/.config/claude-quota) NO se renombra en el rebrand: ahí viven la
+# calibración (limits.env), el machine-id del sync y el account pin — dejarlo quieto los preserva.
 LIMITS_DEFAULT="$HOME/.config/claude-quota/limits.env"
 APPS_DIR="$HOME/Applications"
-STATE_FILE="$HOME/Library/Caches/claude-quota/state.json"
+STATE_FILE="$HOME/Library/Caches/claude-brain/state.json"
 
 SKIP_APP=0
 SKIP_CCUSAGE=0
@@ -41,11 +43,37 @@ for arg in "$@"; do
   esac
 done
 
+# --- Migración del nombre viejo (claude-quota -> claude-brain) ---------------------------------
+# Un reinstall NO debe dejar 2 daemons, 2 apps ni perder calibración. Idempotente y fail-safe:
+# si nada viejo existe, cada paso es un no-op silencioso. Corre ANTES de instalar lo nuevo.
+OLD_LABEL="io.github.unjordi.claude-quota"
+OLD_PLIST="$HOME/Library/LaunchAgents/$OLD_LABEL.plist"
+OLD_FETCH="$HOME/.local/bin/claude-quota-fetch"
+OLD_APP="$HOME/Applications/Claude Quota.app"
+OLD_CACHE="$HOME/Library/Caches/claude-quota"
+NEW_CACHE="$HOME/Library/Caches/claude-brain"
+echo "==> Migrando instalación previa (claude-quota -> claude-brain) si existe"
+# 1) Baja y elimina el LaunchAgent viejo (que no queden 2 daemons).
+launchctl bootout "gui/$(id -u)/$OLD_LABEL" 2>/dev/null || true
+launchctl unload "$OLD_PLIST" 2>/dev/null || true
+rm -f "$OLD_PLIST" "$OLD_FETCH"
+# 2) Cierra y borra la app vieja (que no queden 2 apps en la barra).
+osascript -e 'tell application "Claude Quota" to quit' 2>/dev/null || true
+pkill -f "Claude Quota.app/Contents/MacOS/ClaudeQuota" 2>/dev/null || true
+rm -rf "$OLD_APP"
+# 3) Migra el cache (state/stats/chats/sessions) al nombre nuevo si aún no existe. La calibración
+#    (limits.env, machine-id, account pin) vive en ~/.config/claude-quota, que NO se renombra, así
+#    que se preserva sola: solo el cache cambia de ruta.
+if [[ -d "$OLD_CACHE" && ! -d "$NEW_CACHE" ]]; then
+  echo "    migrando cache: $OLD_CACHE -> $NEW_CACHE"
+  mv "$OLD_CACHE" "$NEW_CACHE"
+fi
+
 # Asegura que ~/.local/bin (donde viven el fetch y, típicamente, el CLI `claude`) esté en el PATH,
 # en zsh Y bash (macOS default es zsh, pero no asumas). Idempotente por marcador; crea el rc si falta.
 # Lo aplica también a ESTE proceso para que los pasos siguientes vean lo recién instalado.
 ensure_path_local_bin() {
-  local marker="# claude-brain: ~/.local/bin en el PATH (claude, claude-quota-fetch)"
+  local marker="# claude-brain: ~/.local/bin en el PATH (claude, claude-brain-fetch)"
   local block
   printf -v block '\n%s\ncase ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac\n' "$marker"
   local f
@@ -70,6 +98,12 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "missing: $1" >&2; exit 1; };
 need jq
 if [[ "$SKIP_APP" -eq 0 ]]; then
   need swift
+fi
+# rsvg-convert (librsvg): rasteriza el SVG del ícono (app + login item del daemon). Opcional pero
+# recomendado; sin él, el ícono no se (re)genera y queda el genérico.
+if ! command -v rsvg-convert >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then echo "==> Instalando librsvg (para el ícono de Claude Brain)"; brew install librsvg || true
+  else echo "warn: falta rsvg-convert (brew install librsvg) — el ícono no se (re)generará"; fi
 fi
 
 echo "==> Ensuring ccusage is available"
@@ -103,6 +137,18 @@ SESSIONS_SRC="$ROOT/../bin/sessions-extract.js"
 SESSIONMOVE_SRC="$ROOT/../bin/session-move.js"
 [[ -f "$SESSIONMOVE_SRC" ]] && install -m 0755 "$SESSIONMOVE_SRC" "$(dirname "$FETCH_DEST")/session-move.js"
 
+# Ícono del daemon en "Elementos de inicio": claude-brain-fetch es un script pelón → macOS le pone el
+# genérico "exec". Le incrustamos el ícono de Claude Brain como ícono CUSTOM del archivo vía
+# NSWorkspace.setIcon (set-icon.swift), reusando AppIcon.icns (trae la variante chica nítida en 16/32).
+# Fail-safe: sin swift/rsvg o sin icns, se salta (el daemon corre igual, solo sin ícono bonito).
+ICNS="$ROOT/build/AppIcon.icns"
+bash "$ROOT/make-icon.sh" >/dev/null 2>&1 || true   # regenera SIEMPRE desde el SVG (no reusar un .icns rancio)
+if [[ -f "$ICNS" && -f "$ROOT/set-icon.swift" ]] && command -v swift >/dev/null 2>&1; then
+  if swift "$ROOT/set-icon.swift" "$ICNS" "$FETCH_DEST" 2>/dev/null; then
+    echo "    ícono de Claude Brain incrustado en el daemon (login item)"
+  fi
+fi
+
 # --- CLI `claude` + PATH (el widget MIDE a claude; sin él no hay qué medir) --------------------
 # Espeja la lógica de install.ps1 (fix #67, Windows): si `claude` no está en el PATH pero YA existe
 # en ~/.local/bin (caso real de Felipe), solo hay que exponer el PATH; si no existe, se instala con
@@ -130,7 +176,7 @@ if [[ ! -f "$LIMITS_DEFAULT" ]]; then
 # the OAuth token is available the widget reads the exact /usage percentages
 # and these caps are ignored.
 # After editing, reload the agent:
-#   launchctl kickstart -k gui/$(id -u)/io.github.unjordi.claude-quota
+#   launchctl kickstart -k gui/$(id -u)/io.github.unjordi.claude-brain
 #
 # Basis is API-EQUIVALENT COST (in USD), not raw tokens — cache-read tokens
 # dominate raw counts and Anthropic weights them ~0.1x. Calibrate:
@@ -166,7 +212,7 @@ if [[ -f "$STATE_FILE" ]]; then
   echo "    state.json written:"
   jq -c '{status, five: .five_hour.percent, wk: .weekly.percent}' "$STATE_FILE" | sed 's/^/    /'
 else
-  echo "    (no state.json yet — check /tmp/claude-quota.err.log)"
+  echo "    (no state.json yet — check /tmp/claude-brain.err.log)"
 fi
 
 if [[ "$SKIP_APP" -eq 0 ]]; then
@@ -195,6 +241,6 @@ Next steps:
 
 Debug:
   launchctl print gui/$(id -u)/$LABEL | grep -E 'state|last exit'
-  cat /tmp/claude-quota.err.log
+  cat /tmp/claude-brain.err.log
   jq . "$STATE_FILE"
 EOF

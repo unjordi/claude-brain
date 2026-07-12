@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#34343c"/><stop offset="1" stop-color="#24242a"/>
+    </linearGradient>
+    <linearGradient id="cream" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F1EBE1"/><stop offset="1" stop-color="#D8CDBD"/>
+    </linearGradient>
+    <linearGradient id="spark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#EC9A72"/><stop offset="1" stop-color="#C6603C"/>
+    </linearGradient>
+    <path id="pL" d="M0,-9 C 9,-48 6,-92 0,-116 C -6,-92 -9,-48 0,-9 Z"/>
+    <path id="pS" d="M0,-9 C 8,-38 5,-62 0,-78 C -5,-62 -8,-38 0,-9 Z"/>
+  </defs>
+
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#bg)"/>
+
+  <g transform="translate(512,540)" fill="url(#cream)" stroke="#B7A992" stroke-width="7" stroke-linejoin="round">
+    <path d="M 0,-190 C -70,-215 -150,-190 -185,-135 C -240,-150 -300,-105 -292,-40
+      C -335,-10 -335,60 -292,92 C -305,150 -255,205 -190,196 C -150,245 -60,250 0,215
+      C 60,250 150,245 190,196 C 255,205 305,150 292,92 C 335,60 335,-10 292,-40
+      C 300,-105 240,-150 185,-135 C 150,-190 70,-215 0,-190 Z"/>
+  </g>
+  <g transform="translate(512,540)" fill="none" stroke="#B7A992" stroke-width="9" stroke-linecap="round" opacity="0.9">
+    <path d="M0,-190 L0,215"/>
+    <path d="M-155,-115 C -115,-65 -180,-25 -125,15 C -180,60 -115,115 -155,165"/>
+    <path d="M155,-115 C 115,-65 180,-25 125,15 C 180,60 115,115 155,165"/>
+    <path d="M-215,10 C -175,40 -230,80 -190,120"/>
+    <path d="M215,10 C 175,40 230,80 190,120"/>
+  </g>
+
+  <!-- chispa de Claude: rayos delgados alternando largo/corto -->
+  <g transform="translate(512,520)">
+    <g fill="url(#spark)">
+      <use href="#pL" transform="rotate(0)"/>   <use href="#pS" transform="rotate(30)"/>
+      <use href="#pL" transform="rotate(60)"/>  <use href="#pS" transform="rotate(90)"/>
+      <use href="#pL" transform="rotate(120)"/> <use href="#pS" transform="rotate(150)"/>
+      <use href="#pL" transform="rotate(180)"/> <use href="#pS" transform="rotate(210)"/>
+      <use href="#pL" transform="rotate(240)"/> <use href="#pS" transform="rotate(270)"/>
+      <use href="#pL" transform="rotate(300)"/> <use href="#pS" transform="rotate(330)"/>
+    </g>
+    <circle r="15" fill="#F1EBE1"/>
+  </g>
+</svg>

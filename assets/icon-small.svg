@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#34343c"/><stop offset="1" stop-color="#24242a"/>
+    </linearGradient>
+    <linearGradient id="spark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F0A47C"/><stop offset="1" stop-color="#C6603C"/>
+    </linearGradient>
+    <!-- rayo grueso para que lea a 16px -->
+    <path id="r" d="M0,-30 C 40,-150 26,-300 0,-380 C -26,-300 -40,-150 0,-30 Z"/>
+  </defs>
+
+  <rect x="60" y="60" width="904" height="904" rx="200" ry="200" fill="url(#bg)"/>
+
+  <!-- cerebro simple GRANDE (sin surcos finos): silueta crema + cisura central + trazo grueso -->
+  <g transform="translate(512,512) scale(1.28)" fill="#EDE6DA" stroke="#8f8069" stroke-width="14" stroke-linejoin="round">
+    <path d="M 0,-190 C -70,-215 -150,-190 -185,-135 C -240,-150 -300,-105 -292,-40
+      C -335,-10 -335,60 -292,92 C -305,150 -255,205 -190,196 C -150,245 -60,250 0,215
+      C 60,250 150,245 190,196 C 255,205 305,150 292,92 C 335,60 335,-10 292,-40
+      C 300,-105 240,-150 185,-135 C 150,-190 70,-215 0,-190 Z"/>
+  </g>
+  <g transform="translate(512,512) scale(1.28)" fill="none" stroke="#8f8069" stroke-width="16" stroke-linecap="round">
+    <path d="M0,-188 L0,213"/>
+  </g>
+
+  <!-- chispa de Claude gruesa (8 rayos) -->
+  <g transform="translate(512,470)">
+    <g fill="url(#spark)">
+      <use href="#r" transform="rotate(0)"/>   <use href="#r" transform="rotate(45)"/>
+      <use href="#r" transform="rotate(90)"/>  <use href="#r" transform="rotate(135)"/>
+      <use href="#r" transform="rotate(180)"/> <use href="#r" transform="rotate(225)"/>
+      <use href="#r" transform="rotate(270)"/> <use href="#r" transform="rotate(315)"/>
+    </g>
+    <circle r="46" fill="#EDE6DA"/>
+  </g>
+</svg>

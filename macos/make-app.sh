@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# Build the release binary and assemble ClaudeQuota.app under build/.
+# Build the release binary and assemble Claude Brain Widget.app under build/.
 # Prints the absolute path to the assembled .app on success.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="Claude Quota"
+APP_NAME="Claude Brain Widget"
 APP="$ROOT/build/$APP_NAME.app"
 
 swift build -c release --package-path "$ROOT" >&2
 BIN="$(swift build -c release --package-path "$ROOT" --show-bin-path)/ClaudeQuota"
 
-# Generate the app icon (build/AppIcon.icns) if it isn't there yet. Cheap, so
-# regenerate when missing; delete build/AppIcon.icns to force a rebuild.
+# Regenera SIEMPRE el ícono desde el SVG (assets/icon.svg). Es barato (rsvg) y CRÍTICO: si solo se
+# regenerara "cuando falta", un build/AppIcon.icns rancio (p. ej. el medidor de una versión anterior)
+# se quedaría pegado y se instalaría el ícono viejo — bug real del rebrand a Claude Brain. Si make-icon
+# falla (sin rsvg) y hay un .icns previo, se usa ese; si no hay ninguno, se aborta abajo.
 ICNS="$ROOT/build/AppIcon.icns"
-if [[ ! -f "$ICNS" ]]; then
-    "$ROOT/make-icon.sh" >&2
-fi
+"$ROOT/make-icon.sh" >&2 || [[ -f "$ICNS" ]] || { echo "make-app: no pude generar el ícono y no hay uno previo" >&2; exit 1; }
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

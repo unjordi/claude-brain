@@ -1,43 +1,34 @@
 #!/usr/bin/env bash
 # Fetches Claude Code 5-hour and weekly usage and writes a normalized JSON
-# snapshot to ~/Library/Caches/claude-quota/state.json.
+# snapshot to ~/.cache/claude-brain/state.json.
 #
 # Primary source: Anthropic's OAuth usage endpoint — the same data `/usage`
 # shows inside Claude Code, read with the OAuth token Claude Code already
-# stores (macOS Keychain, or ~/.claude/.credentials.json). This gives the
-# EXACT utilization percentages and reset times for your plan; no calibration.
+# stores in ~/.claude/.credentials.json. This gives the EXACT utilization
+# percentages and reset times for your plan; no calibration.
 #
 # Fallback (offline / no credentials): ccusage cost-basis estimation against
 # the *_CAP_USD calibration constants below. ccusage is also still used to
 # enrich the snapshot with API-equivalent $ figures when available.
 #
-# macOS port of the Linux fetch script: uses BSD `date` (-v adjustments)
-# and the native Caches location. The launchd agent enforces the 5-minute
-# refresh floor; this script just does one fetch per invocation.
+# Override defaults by exporting in ~/.config/claude-quota/limits.env
+# (the systemd unit sources it).
 
 set -euo pipefail
-
-# Source per-user caps if present (override the defaults below).
-LIMITS_FILE="${CLAUDE_QUOTA_LIMITS:-$HOME/.config/claude-quota/limits.env}"
-if [[ -f "$LIMITS_FILE" ]]; then
-  set -a
-  # shellcheck source=/dev/null
-  . "$LIMITS_FILE"
-  set +a
-fi
 
 # FALLBACK calibration only — used when the OAuth endpoint is unreachable.
 # Basis = API-equivalent *cost*, not raw tokens (cache-read tokens dominate
 # raw counts and are weighted ~0.1x by Anthropic's limits). Calibrate against
-# /usage: CAP = ($ shown in popover) / (/usage fraction). Defaults: Max-20x.
+# /usage: CAP = ($ shown in popup) / (/usage fraction). Defaults: Max-20x.
 FIVE_HOUR_CAP_USD="${FIVE_HOUR_CAP_USD:-150}"
 WEEKLY_CAP_USD="${WEEKLY_CAP_USD:-9000}"
 WARN_PCT="${WARN_PCT:-60}"
 CRIT_PCT="${CRIT_PCT:-85}"
 
-CACHE_DIR="$HOME/Library/Caches/claude-quota"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude-brain"
 # Config de Claude Code: honra CLAUDE_CONFIG_DIR (si está, el .claude vive ahí), si no ~/.claude.
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+# ~/.claude.json (cuenta + nombres de proyecto): bajo CLAUDE_CONFIG_DIR si vive ahí, si no en ~.
 if [[ -n "${CLAUDE_CONFIG_DIR:-}" && -r "$CLAUDE_CONFIG_DIR/.claude.json" ]]; then
   CLAUDE_JSON="$CLAUDE_CONFIG_DIR/.claude.json"
 else
@@ -72,17 +63,11 @@ write_error() {
 
 # --- Primary: the OAuth usage endpoint /usage itself reads -------------------
 
-# Claude Code's OAuth token: macOS Keychain first, then the credentials file.
 oauth_token() {
   # CLAUDE_CODE_OAUTH_TOKEN (token de larga vida de `claude setup-token`) gana si está presente.
   [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && { printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN"; return 0; }
-  local creds=""
-  creds="$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)"
-  if [[ -z "$creds" && -r "$CLAUDE_DIR/.credentials.json" ]]; then
-    creds="$(<"$CLAUDE_DIR/.credentials.json")"
-  fi
-  [[ -n "$creds" ]] || return 1
-  jq -er '.claudeAiOauth.accessToken // empty' <<<"$creds"
+  [[ -r "$CLAUDE_DIR/.credentials.json" ]] || return 1
+  jq -er '.claudeAiOauth.accessToken // empty' "$CLAUDE_DIR/.credentials.json"
 }
 
 # The account email (display only), from Claude Code's own local config —
@@ -145,8 +130,7 @@ BLOCKS_JSON=""
 WEEKLY_JSON=""
 if [[ -n "$CCUSAGE" ]]; then
   BLOCKS_JSON="$(ccusage_json blocks --json --active)"
-  # BSD date: 8 days ago, compact YYYYMMDD.
-  SINCE="$(date -u -v-8d +%Y%m%d)"
+  SINCE="$(date -u -d '8 days ago' +%Y%m%d)"
   WEEKLY_JSON="$(ccusage_json weekly --json --since "$SINCE")"
   # Discard anything that isn't valid JSON so jq --argjson can't blow up.
   jq -e . <<<"$BLOCKS_JSON" >/dev/null 2>&1 || BLOCKS_JSON=""
@@ -162,11 +146,10 @@ NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # ccusage groups weeks Monday-start; compute this week's Monday so we pick the
 # CURRENT week bucket (the array is oldest-first, so [0] is last week).
 DOW="$(date -u +%u)"  # 1=Mon..7=Sun
-CURRENT_MONDAY="$(date -u -v-$((DOW - 1))d +%Y-%m-%d)"
+CURRENT_MONDAY="$(date -u -d "$((DOW - 1)) days ago" +%Y-%m-%d)"
 # Fallback weekly reset when the OAuth endpoint (which knows the real rolling
-# reset) is unavailable. On Monday this yields the *next* one (7 days ahead).
-DAYS_AHEAD=$(( 8 - DOW ))
-NEXT_MONDAY="$(date -u -v+"${DAYS_AHEAD}"d -v0H -v0M -v0S +%Y-%m-%dT%H:%M:%SZ)"
+# reset) is unavailable.
+NEXT_MONDAY="$(date -u -d "next Monday 00:00:00" +%Y-%m-%dT%H:%M:%SZ)"
 
 # Discard carried-forward resets once they've actually passed (ISO-8601 "Z"
 # timestamps sort lexically, so a plain string compare works here).
@@ -282,7 +265,6 @@ fi
 if [[ -n "$DAILY_JSON" ]]; then
   # --- Fase 2: sesiones, mensajes y hora pico desde transcripts crudos --------
   # grep/awk (NO jq) porque ~/.claude/projects puede pesar cientos de MB.
-  # BSD grep (macOS) soporta -r/-c/-h/-o/-E/--include igual que GNU grep.
   PROJ="$CLAUDE_DIR/projects"
   SESSIONS=0; MESSAGES=0; PEAK_HOUR=-1; DAY_MSG_JSON="{}"
   if [[ -d "$PROJ" ]]; then
@@ -357,10 +339,10 @@ if [[ -n "$DAILY_JSON" ]]; then
           return sprintf("%04d-%02d-%02d", ny, nm, nd)
         }
         {
-          # Claude Code logs one jsonl line per CONTENT BLOCK of an assistant
-          # turn (thinking/tool_use/text), each repeating the SAME message.id
-          # and the SAME cumulative usage — dedupe by id or a multi-block reply
-          # triples its token count.
+          # Claude Code logs one jsonl line per CONTENT BLOCK de un turno del
+          # asistente (thinking/tool_use/text), cada uno repitiendo el MISMO
+          # message.id y el MISMO usage acumulado — sin dedupe, una respuesta
+          # multi-bloque triplica el conteo de tokens.
           if (match($0, /"id":"msg_[A-Za-z0-9]+"/)) { id = substr($0, RSTART, RLENGTH) } else next
           if (id in seen) next
           seen[id] = 1
@@ -506,36 +488,32 @@ if command -v node >/dev/null 2>&1 && [[ -f "$SESSIONS_EXTRACT" ]]; then
 fi
 
 # --- (e) Sync entre máquinas vía carpeta de nube -----------------------------------------------
-# OPT-IN: se activa solo si SYNC_DIR (en limits.env) o CLAUDE_QUOTA_SYNC_DIR está puesto — así ninguna
-# máquina sube nada sin que lo actives. Valor "auto" autodetecta Google Drive. Cada máquina escribe su
-# snapshot <host>.json en la carpeta (que tu nube ya replica), lee los de TODAS las de la MISMA cuenta y
-# fusiona -> stats-global.json (lo consume el toggle "todas" del widget). Fail-open en cada paso.
+# OPT-IN: solo si SYNC_DIR (limits.env) o CLAUDE_QUOTA_SYNC_DIR está puesto. "auto" autodetecta Google
+# Drive. En Linux no hay cliente oficial de Drive (rclone/insync/ocamlfuse montan en rutas variables),
+# así que "auto" prueba unas comunes; lo robusto es poner la ruta explícita. Espeja el fetch de macOS.
 resolve_sync_dir() {
   local v="${CLAUDE_QUOTA_SYNC_DIR:-${SYNC_DIR:-}}"
-  [[ -z "$v" ]] && return                         # no configurado -> off
+  [[ -z "$v" ]] && return
   if [[ "$v" != "auto" ]]; then printf '%s' "$v"; return; fi
-  local d                                          # auto: Google Drive por OS (mac CloudStorage, o clásico)
-  for d in "$HOME/Library/CloudStorage/GoogleDrive-"*/"Mi unidad" \
-           "$HOME/Library/CloudStorage/GoogleDrive-"*/"My Drive" \
-           "$HOME/Google Drive" "$HOME/Mi unidad" "$HOME/GoogleDrive"; do
+  local d
+  for d in "$HOME/GoogleDrive" "$HOME/google-drive" "$HOME/Google Drive" "$HOME/Insync"/*/"Google Drive" "$HOME/Mi unidad"; do
     [[ -d "$d" ]] && { printf '%s/claude-brain-sync' "$d"; return; }
   done
 }
 SYNC_DIR_RESOLVED="$(resolve_sync_dir || true)"
 if [[ -n "${SYNC_DIR_RESOLVED:-}" && -f "$CACHE_DIR/stats.json" ]] && mkdir -p "$SYNC_DIR_RESOLVED" 2>/dev/null; then
-  # machine-id ESTABLE: el snapshot se nombra por este id, NO por el hostname (macOS lo cambia por
-  # red/bonjour -> la misma Mac generaba varios snapshots y el merge multiplicaba). Se genera 1 vez y
-  # se guarda; sobrevive a cambios de hostname. El nombre bonito (ComputerName) viaja como dato aparte.
-  MID_FILE="$(dirname "$LIMITS_FILE")/machine-id"
+  # machine-id ESTABLE: el snapshot se nombra por este id, NO por el hostname (evita que una máquina
+  # que cambia de nombre genere varios snapshots y el merge multiplique). En Linux systemd existe
+  # /etc/machine-id (muy estable); si no, se genera un uuid y se persiste. El nombre bonito va aparte.
+  MID_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/claude-brain/machine-id"
   MACHINE_ID="$(cat "$MID_FILE" 2>/dev/null || true)"
   if [[ -z "$MACHINE_ID" ]]; then
-    MACHINE_ID="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+    MACHINE_ID="$(cat /etc/machine-id 2>/dev/null || uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
     [[ -z "$MACHINE_ID" ]] && MACHINE_ID="$(hostname -s 2>/dev/null || echo host)"
     mkdir -p "$(dirname "$MID_FILE")" 2>/dev/null && printf '%s\n' "$MACHINE_ID" > "$MID_FILE" 2>/dev/null || true
   fi
-  MACHINE_NAME="$(scutil --get ComputerName 2>/dev/null || hostname -s 2>/dev/null || echo "$MACHINE_ID")"
+  MACHINE_NAME="$(hostnamectl --static 2>/dev/null || hostname 2>/dev/null || echo "$MACHINE_ID")"
   ACCT="$(jq -r '.account_uuid // .account_email // "default"' "$STATE_FILE" 2>/dev/null || echo default)"
-  # snapshot propio = stats.json + metadatos de máquina/cuenta (escritura atómica). Filename = machine-id.
   SNAP_TMP="$SYNC_DIR_RESOLVED/.$MACHINE_ID.json.tmp"
   if jq --arg id "$MACHINE_ID" --arg name "$MACHINE_NAME" --arg ts "$NOW_ISO" --arg acct "$ACCT" \
         '{machine_id:$id, machine:$name, updated_at:$ts, account:$acct, stats:.}' "$CACHE_DIR/stats.json" > "$SNAP_TMP" 2>/dev/null; then
@@ -543,7 +521,6 @@ if [[ -n "${SYNC_DIR_RESOLVED:-}" && -f "$CACHE_DIR/stats.json" ]] && mkdir -p "
   else
     rm -f "$SNAP_TMP"
   fi
-  # merge de todos los snapshots de la MISMA cuenta -> stats-global.json (suma por día/modelo/proyecto).
   GLOBAL_TMP="$CACHE_DIR/stats-global.json.tmp"
   if jq -s --arg acct "$ACCT" --arg ts "$NOW_ISO" '
       map(select(.account == $acct)) as $snaps

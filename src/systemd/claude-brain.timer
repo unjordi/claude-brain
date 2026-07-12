@@ -10,7 +10,7 @@ OnBootSec=30s
 OnUnitActiveSec=5min
 AccuracySec=15s
 Persistent=true
-Unit=claude-quota.service
+Unit=claude-brain.service
 
 [Install]
 WantedBy=timers.target

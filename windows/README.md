@@ -36,7 +36,7 @@ and renders the same three-tab breakdown.
 
 ## Why a rewrite (not a port of the fetch script)
 
-Linux and macOS run a bash `claude-quota-fetch` script on a systemd/launchd timer
+Linux and macOS run a bash `claude-brain-fetch` script on a systemd/launchd timer
 that writes a cache file the UI reads. Windows has no bash/jq/curl by default, so
 the always-running tray app **does the fetch itself in C#** every 5 minutes:
 
@@ -49,7 +49,7 @@ the always-running tray app **does the fetch itself in C#** every 5 minutes:
 │               │      ~/.claude/projects/*.jsonl │     sessions, msgs, peak hour
 │               └─ 3. ccusage       (if on PATH)  │  → API-equivalent $
 │                        ↓ writes                 │
-│   %LOCALAPPDATA%\claude-quota\{state,stats}.json │  ← same schema as Linux/mac
+│   %LOCALAPPDATA%\claude-brain\{state,stats}.json │  ← same schema as Linux/mac
 │                        ↓ reads (every 10s tick)  │
 │              tray icon + tooltip + popup         │
 └───────────────────────────────────────────────┘
@@ -84,7 +84,7 @@ each fetch runs them with `node` (fail-open: no Node / no script / an error just
 leaves the file absent, so the Chats tab hides and the resume list stays empty).
 `chats-extract.js` reads the desktop app's local IndexedDB (no network);
 `sessions-extract.js` lists `~/.claude/projects/<slug>/*.jsonl`. They write into
-`%LOCALAPPDATA%\claude-quota` alongside `state.json`/`stats.json`.
+`%LOCALAPPDATA%\claude-brain` alongside `state.json`/`stats.json`.
 
 The `$` values are **API-equivalent** cost (what pay-per-token would have cost),
 labeled "(API equiv local)" — a "how much is my subscription saving me?" signal,
@@ -170,7 +170,7 @@ a 60 s resetea el banner y avisa. Requiere `git` + `pwsh`/`powershell` en el PAT
 Claude Code and the Claude desktop app can share a single OS credential slot, so a
 re-login on either can silently switch which account the widget reads. To catch
 that, **pin the expected account**: right-click the tray icon → **Fijar esta
-cuenta** (writes the active account's UUID to `%LOCALAPPDATA%\claude-quota\account`).
+cuenta** (writes the active account's UUID to `%LOCALAPPDATA%\claude-brain\account`).
 If the active account ever differs from the pinned one, the footer turns red with a
 `⚠ … no es la cuenta fijada` warning and the tooltip shows `⚠ otra cuenta`.
 **Quitar cuenta fijada** removes the pin. The file may hold a UUID or an email.
@@ -186,7 +186,7 @@ your machines already share (Google Drive, etc.). Turn it on by setting the sync
 folder in **one** of two ways (the env var wins):
 
 - Env var `CLAUDE_QUOTA_SYNC_DIR`, or
-- a plain-text file `%LOCALAPPDATA%\claude-quota\sync-dir` (same config style as the
+- a plain-text file `%LOCALAPPDATA%\claude-brain\sync-dir` (same config style as the
   account pin).
 
 The value is either an **explicit path** to the shared folder, or the literal
@@ -196,14 +196,14 @@ The value is either an **explicit path** to the shared folder, or the literal
 `claude-brain-sync` subfolder. An explicit path is used **verbatim** (no subfolder
 appended), so several machines must point at the *same* folder. Empty/unset = off.
 
-How it works (mirrors the mac/linux `claude-quota-fetch` bash+jq exactly, so the
+How it works (mirrors the mac/linux `claude-brain-fetch` bash+jq exactly, so the
 files are interchangeable across platforms):
 
 1. After each fetch, this machine writes its own snapshot `<hostname>.json` =
    `{ machine, updated_at, account, stats }` into the sync folder (atomic write).
 2. It reads every `*.json` there, keeps only those whose `account` matches this
    machine's (uuid, else email, else `default`), and merges them by day/model/
-   project into `%LOCALAPPDATA%\claude-quota\stats-global.json`.
+   project into `%LOCALAPPDATA%\claude-brain\stats-global.json`.
 
 The combined view drives a toggle in the footer of **Resumen / Modelos / Proyectos**:
 **🖥 this machine** vs **☁️ all** (the ☁️ pill shows the machine count when >1). The
@@ -215,7 +215,7 @@ file, or a broken snapshot just leaves the last good state and hides the toggle.
 
 ```powershell
 pwsh -File uninstall.ps1             # stop, remove autostart, delete app + cache
-pwsh -File uninstall.ps1 -KeepCache  # keep %LOCALAPPDATA%\claude-quota
+pwsh -File uninstall.ps1 -KeepCache  # keep %LOCALAPPDATA%\claude-brain
 ```
 
 Your Claude Code credentials and transcripts are never touched.

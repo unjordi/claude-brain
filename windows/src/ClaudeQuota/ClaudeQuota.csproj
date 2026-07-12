@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    Claude Quota — Windows tray port.
+    Claude Brain Widget — Windows tray port.
     Self-contained WinForms app: no bash/jq/curl needed. It reads the OAuth
     token from %USERPROFILE%\.claude\.credentials.json, calls the same
     /usage endpoint the other ports use, parses the local transcripts for the

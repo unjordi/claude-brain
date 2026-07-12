@@ -67,13 +67,13 @@ test-brain:
 
 # Lint shell scripts (requires shellcheck)
 lint:
-    shellcheck install.sh uninstall.sh src/bin/claude-quota-fetch
+    shellcheck install.sh uninstall.sh src/bin/claude-brain-fetch
 
 # Force one fetch cycle now (via systemd) and print the result
 refresh:
     systemctl --user start claude-quota.service
     sleep 1
-    jq . ~/.cache/claude-quota/state.json
+    jq . ~/.cache/claude-brain/state.json
 
 # Show timer status + last few journal entries
 status:
