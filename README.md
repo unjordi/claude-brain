@@ -72,8 +72,8 @@ El cerebro se ordena por *dureza*: arriba lo que te **bloquea** sin negociar; ab
 ├─ 🚧 git-branch-guard         push/merge a develop·main → denegado
 ├─ 🔗 merge-squash-guard       MR a develop sin --squash → denegado
 ├─ 🕵️  secret-scan             commit/push con un secreto → denegado
-├─ 💸 delegacion-gate          reclutar agente con costo → pide tu OK
-├─ 🛑 limite-gasto             gasto sobre el techo → freno duro
+├─ 💸 delegacion-gate          delegar al llegar al 90% de tu ventana 5h → pide tu OK
+├─ 🛑 limite-gasto             sin ventana 5h Y sin overage (ambos agotados) → freno duro
 └─ 📁 por-repo · viajan en el .claude de cada repo
    ├─ ✋ confirmar-merge-develop  merge sin tu OK → denegado
    └─ ✅ dod-verificar            Def. of Done (ver Norma 🎯 DoD) sin build+tests+memoria → denegado
