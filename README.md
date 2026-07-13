@@ -81,6 +81,7 @@ El cerebro se ordena por *dureza*: arriba lo que te **bloquea** sin negociar; ab
 🔔 Automático — inyectan / recuerdan (no bloquean)
 ├─ 📊 recordar-dashboard       en el push recuerda dashboard + doc=realidad (README/docs) — cierre del slice
 ├─ 🕰️  rama-vieja              avisa si la ramita arrastra base vieja
+├─ 🌳 proteger-arbol           git destructivo que orfanaría commits sin pushear → avisa (fan-out: usa worktree aislado)
 ├─ 📝 delegacion-registrar     materializa el "pregunta una sola vez"
 ├─ 📮 delegacion-reporte       al terminar un agente: recuerda registrar avance + limpiar su worktree
 └─ 📁 por-repo · viajan en el .claude de cada repo
@@ -100,7 +101,7 @@ El cerebro se ordena por *dureza*: arriba lo que te **bloquea** sin negociar; ab
 
 Los hooks **por-repo** son fuente en [`brain/hooks/`](brain/hooks/) que cada repo copia a su propio
 `.claude/` y cablea en su `settings.json` — se cargan solo cuando una sesión *inicia* en ese repo. El
-cerebro **se autoprueba**: [`brain/test-brain.sh`](brain/test-brain.sh) corre 56 checks contra un
+cerebro **se autoprueba**: [`brain/test-brain.sh`](brain/test-brain.sh) corre 62 checks contra un
 `$HOME` aislado, y la CI repite `bash -n` + `jq empty` + `shellcheck` en cada push. Tras un fan-out,
 el helper [`limpiar-worktrees.sh`](brain/hooks/limpiar-worktrees.sh) barre los worktrees de ramas ya
 mergeadas y deja anotado en la bitácora el pendiente de los que sigan vivos.

@@ -169,6 +169,37 @@ rm -rf "$SCANREPO"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
+echo "== (b3) proteger-arbol: avisa si un git destructivo orfanaría commits sin pushear =="
+PABARE="$(mktemp -d "${TMPDIR:-/tmp}/brain-pa.XXXXXX")/remote.git"
+PAREPO="$(mktemp -d "${TMPDIR:-/tmp}/brain-pa.XXXXXX")/wt"
+git init --bare -q "$PABARE" >/dev/null 2>&1
+git clone -q "$PABARE" "$PAREPO" >/dev/null 2>&1
+git -C "$PAREPO" config user.email t@t >/dev/null 2>&1
+git -C "$PAREPO" config user.name  tester >/dev/null 2>&1
+printf 'base\n' > "$PAREPO/a.txt"; git -C "$PAREPO" add a.txt >/dev/null 2>&1
+git -C "$PAREPO" commit -q -m base >/dev/null 2>&1
+git -C "$PAREPO" push -q origin HEAD >/dev/null 2>&1
+git -C "$PAREPO" branch --set-upstream-to=origin/"$(git -C "$PAREPO" rev-parse --abbrev-ref HEAD)" >/dev/null 2>&1
+pa() { printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$1\"}}" \
+       | CLAUDE_PROJECT_DIR="$PAREPO" bash "$HOOKS/proteger-arbol.sh"; }
+# sin commits en riesgo (todo pusheado) → reset --hard silencioso
+o="$(pa 'git reset --hard HEAD')"
+[ -z "$o" ] && ok "proteger-arbol: reset sin commits en riesgo → silencio" || bad "proteger-arbol avisó sin riesgo; got: $o"
+# ahora 1 commit local SIN pushear → en riesgo
+printf 'local\n' >> "$PAREPO/a.txt"; git -C "$PAREPO" add a.txt >/dev/null 2>&1
+git -C "$PAREPO" commit -q -m local >/dev/null 2>&1
+o="$(pa 'git reset --hard HEAD~1')"
+printf '%s' "$o" | grep -q 'ORFANAR' && ok "proteger-arbol: reset --hard con commit sin pushear → AVISA" || bad "proteger-arbol NO avisó con commit en riesgo; got: $o"
+# comando no-destructivo → silencio aunque haya riesgo
+o="$(pa 'git status')"
+[ -z "$o" ] && ok "proteger-arbol: comando no-destructivo → silencio" || bad "proteger-arbol reaccionó a no-destructivo; got: $o"
+# 'git reset' entrecomillado (dato de un grep) → silencio
+o="$(pa "grep -r 'git reset --hard' .")"
+[ -z "$o" ] && ok "proteger-arbol: 'git reset' entrecomillado (dato) → silencio" || bad "proteger-arbol matcheó texto entrecomillado; got: $o"
+rm -rf "$PABARE" "$PAREPO"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
 echo "== (c) idempotencia: install-brain.sh 2× contra el \$HOME falso =="
 FAKEHOME2="$(mktemp -d "${TMPDIR:-/tmp}/brain-inst.XXXXXX")"
 HOME="$FAKEHOME2" bash "$INSTALLER" >/dev/null 2>&1
@@ -176,7 +207,7 @@ HOME="$FAKEHOME2" bash "$INSTALLER" >/dev/null 2>&1
 GSET2="$FAKEHOME2/.claude/settings.json"
 GCLAUDE2="$FAKEHOME2/.claude/CLAUDE.md"
 
-for pat in git-branch-guard merge-squash-guard recordar-dashboard delegacion-gate delegacion-registrar; do
+for pat in git-branch-guard merge-squash-guard recordar-dashboard proteger-arbol delegacion-gate delegacion-registrar; do
   n="$(jq --arg p "$pat" '[.hooks[]?[]? | select(([.hooks[]?.command]|join(" "))|test($p))] | length' "$GSET2" 2>/dev/null)"
   if [ "$n" = "1" ]; then ok "settings.json: $pat cableado 1× (idempotente)"; else bad "settings.json: $pat aparece ${n:-?}× (esperaba 1)"; fi
 done

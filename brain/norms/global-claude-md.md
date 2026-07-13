@@ -93,6 +93,12 @@ para el usuario. Con volumen paralelizable, el default es **fan-out + supervisi�
 **Señal de que te desviaste:** llevas rato implementando en serie y el usuario tuvo que pedirte que
 volvieras a delegar.
 
+**Aislamiento (regla dura).** Todo agente de fan-out que MUTE archivos o COMMITEE corre en un **worktree
+AISLADO** (`isolation: "worktree"`), NUNCA en el árbol de trabajo compartido/principal — ese es solo del
+orquestador/humano. Un agente que corre `git reset`/`checkout`/`rebase` en el árbol compartido puede
+orfanar los commits del orquestador (lección real de cps 2026-07). Si un ítem no se puede aislar, lo hace
+el orquestador. Lo respalda el guard `proteger-arbol`.
+
 **Reporte sin niñera + estado sin redundancia (skill `orquestar-fanout`).** Al orquestar, NO monitorees
 a los agentes a mano ni actualices el estado tú al final: el cierre de CADA agente es AUTOMÁTICO —
 appendas su avance **al FINAL** de `bitacora.md` (con `>>`, no con un Edit) y actualizas el ítem en `estado-proyecto.md`
