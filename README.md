@@ -106,6 +106,23 @@ cerebro **se autoprueba**: [`brain/test-brain.sh`](brain/test-brain.sh) corre 68
 el helper [`limpiar-worktrees.sh`](brain/hooks/limpiar-worktrees.sh) barre los worktrees de ramas ya
 mergeadas y deja anotado en la bitácora el pendiente de los que sigan vivos.
 
+### 🗺️ El mapa del cerebro — fuente de verdad visual
+
+[`docs/mapa-flujos.dot`](docs/mapa-flujos.dot) es el **mapa único** del cerebro: los flowcharts de
+decisión de cada hook (⓪ ciclo de sesión · ① integrar · ② comando git · ③ push-nudges · ④ dod-verificar
+↔ ⑤ cerrar-slice · ⑥ delegar · ⑦ orquestar-fanout), **fieles a la lógica real de los `.sh`**, más las
+📜 **normas** que hacen cumplir (el cimiento), la referencia de lib/skill, y la leyenda con este mismo
+árbol. Cada flujo apunta a la norma/skill que invoca (📜/💡) y viceversa.
+
+Es **doc de record** (norma *doc = realidad*): si cambia un hook/norma/skill —alta, baja o cambio de
+lógica— se actualiza `mapa-flujos.dot` **en la misma tanda**, igual que este árbol y el conteo de
+checks de `test-brain.sh`.
+
+- **Ver / regenerar la imagen:** `dot -Tpng docs/mapa-flujos.dot -o docs/mapa-flujos.png` (requiere Graphviz).
+- **Exportar a yEd** (editable, conservando forma/color/etiquetas y agrupando por flujo):
+  `python3 bin/dot2yed.py docs/mapa-flujos.dot docs/mapa-flujos.graphml` — reusa las posiciones y estilos
+  que calcula Graphviz; en yEd se acomoda por flujo. El `.graphml` es artefacto **regenerable** (no se versiona).
+
 ## Lo que lo hace vivo — se refleja, se cura, se actualiza
 
 El widget no dibuja un póster estático: **lee tu `~/.claude` real** y actúa sobre lo que encuentra.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # proteger-arbol.sh — PreToolUse/Bash: AVISA (NO bloquea) antes de un git DESTRUCTIVO que podría
-# ORFANAR commits sin pushear en el árbol de trabajo actual. Antídoto al caso REAL de cps (2026-07):
+# ORFANAR commits sin pushear en el árbol de trabajo actual. Antídoto al un caso REAL (2026-07):
 # un agente de fan-out se metió al árbol de trabajo COMPARTIDO y reseteó HEAD, dejando huérfano un
 # commit del orquestador (la fuente quedó a medias y el build compiló eso; se recuperó por cherry-pick).
 # Solo avisa cuando REALMENTE hay commits en riesgo (bajo ruido). Fail-open. Ignora comandos
@@ -32,6 +32,6 @@ gd=$(git -C "$root" rev-parse --git-dir 2>/dev/null)
 gcd=$(git -C "$root" rev-parse --git-common-dir 2>/dev/null)
 if [ "$gd" = "$gcd" ]; then arbol="PRINCIPAL (compartido)"; else arbol="un worktree aislado"; fi
 
-msg="AVISO (proteger-arbol): este git destructivo puede ORFANAR $n commit(s) sin pushear en el árbol $arbol. Si eres un AGENTE de fan-out: NO operes el árbol COMPARTIDO — trabaja en tu worktree aislado (isolation: worktree); si necesitas rebobinar, que lo haga el orquestador. Si es intencional (rebobinar a propósito) y ya lo pensaste, ignora este aviso. Lección cps 2026-07: un agente reseteó HEAD en el árbol principal y orfanó un commit del orquestador."
+msg="AVISO (proteger-arbol): este git destructivo puede ORFANAR $n commit(s) sin pushear en el árbol $arbol. Si eres un AGENTE de fan-out: NO operes el árbol COMPARTIDO — trabaja en tu worktree aislado (isolation: worktree); si necesitas rebobinar, que lo haga el orquestador. Si es intencional (rebobinar a propósito) y ya lo pensaste, ignora este aviso. Lección real (2026-07): un agente reseteó HEAD en el árbol principal y orfanó un commit del orquestador."
 jq -n --arg m "$msg" '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$m}}'
 exit 0

@@ -51,6 +51,12 @@ fi
 # SOLO `develop` obliga squash; el resto (main/personales/ramitas/desconocido) queda libre.
 [ "$_destino" = "develop" ] || exit 0
 
-jq -n --arg r "FLUJO DE GIT (ley interna): integrar a develop SQUASHEA a UN commit limpio por slice. NO reintentes este merge sin squash. Rehazlo con: glab mr merge <id> --squash --squash-message \"\$(cat resumen.md)\" --remove-source-branch --yes  — donde resumen.md es un RESUMEN CURADO en prosa del slice (el cambio neto y su porqué), NO el pegote de commits granulares. NOTA: la obligación de squash es SOLO para develop — a main (release) va SIN squash (conserva historia) y tus ramas personales van a tu gusto. Ver skill cerrar-slice." \
+# El mensaje cita la herramienta REAL del repo (gh vs glab), no siempre glab (P5).
+if printf '%s' "$cmd" | grep -qE 'gh[[:space:]]+pr'; then
+  _rehaz='gh pr merge <id> --squash --subject "<título curado>" --body "$(cat resumen.md)"'
+else
+  _rehaz='glab mr merge <id> --squash --squash-message "$(cat resumen.md)" --remove-source-branch --yes'
+fi
+jq -n --arg r "FLUJO DE GIT (ley interna): integrar a develop SQUASHEA a UN commit limpio por slice. NO reintentes este merge sin squash. Rehazlo con: $_rehaz  — donde el mensaje es un RESUMEN CURADO en prosa del slice (el cambio neto y su porqué), NO el pegote de commits granulares. NOTA: la obligación de squash es SOLO para develop — a main (release) va SIN squash (conserva historia) y tus ramas personales van a tu gusto. Ver skill cerrar-slice." \
   '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
 exit 0

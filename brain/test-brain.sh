@@ -217,6 +217,9 @@ is_block "$(dod 'Lo dejé en preview, con tu OK lo cierro.' "$EDITR")" && bad "d
 is_block "$(dod 'Quedó idéntico al mockup, se ve tal cual.' "$EDITR")" && ok "dod B2: claim visual sin browser-tool → bloquea (a ciegas)" || bad "dod B2 NO bloqueó claim visual a ciegas"
 o="$(dod 'En Chrome se ve como el mockup.' "$BROWSERT")"; is_block "$o" && bad "dod B2 bloqueó con browser-tool presente; got: $o" || ok "dod B2: claim visual + browser-tool → no bloquea"
 is_block "$(dod 'Quedó listo; validaste el QA visual y diste el ok.' "$EDITR")" && bad "dod bloqueó con (1) confirmación del usuario" || ok "dod: con (1) confirmación citada del usuario → no bloquea"
+# P1 (precisión): una PREGUNTA no es un cierre, aunque traiga léxico de cierre → NO dispara
+is_block "$(dod '¿ya quedó terminado el módulo?' "$EDITR")" && bad "dod P1: bloqueó una PREGUNTA (falso positivo del UUID)" || ok "dod P1: pregunta con léxico de cierre → no bloquea"
+is_block "$(dod 'Terminé el fix. ¿Lo cierro y abro el MR?' "$EDITR")" && bad "dod P1: bloqueó una oferta que termina preguntando" || ok "dod P1: mensaje que termina en pregunta → no bloquea"
 rm -f "$DODTX"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -268,7 +271,7 @@ rm -rf "$FAKEHOME3"
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "== (d) los .ps1 son ASCII puro (Windows PowerShell 5.1 lee un .ps1 sin BOM como ANSI, no UTF-8, =="
-echo "==     y un no-ASCII -acento, em-dash, emoji- le rompe la tokenización. Caso real: Windows de Liora) =="
+echo "==     y un no-ASCII -acento, em-dash, emoji- le rompe la tokenización. caso real: un Windows ajeno) =="
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 if command -v perl >/dev/null 2>&1; then
   # perl (no grep): determinista e igual en GNU/BSD/ugrep/Git-Bash. Sale 1 si hay algún byte >0x7F.

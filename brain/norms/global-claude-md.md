@@ -36,20 +36,43 @@ Reglas que lo blindan:
 - **QA visual NO se declara a ciegas.** Afirmar una observación visual ("se ve / quedó como el mockup /
   en Chrome / la pantalla muestra…") **exige haber mirado la pantalla ESE turno** (una tool de
   navegador/screenshot). Sin eso, el estatus honesto es "verificado técnicamente, SIN QA visual (a
-  ciegas)" y el QA visual lo hace el usuario. (Lección cps: se insinuó QA de Chrome sin verla → reaparecieron bugs.)
+  ciegas)" y el QA visual lo hace el usuario. (Lección real: se insinuó QA de Chrome sin verla → reaparecieron bugs.)
 - **Migración: la prueba acordada es AUDITORÍA DE PARIDAD**, no build+tests. Declarar un módulo/migración
   "a la par" exige el inventario de paridad + el módulo real del legado; un build verde ≠ paridad.
+- **Producto INSTALABLE ≠ verde en UNA máquina.** Para un instalador/producto clonable multi-OS, el verde
+  técnico en una sola máquina NO es LISTO: cada plataforma nueva destapa un supuesto (PATH no exportado,
+  CRLF en `.sh`, deps ausentes, rename/íconos). Exige un **checklist de instalador** por plataforma
+  (PATH en zsh+bash+Windows, EOL de `.sh` normalizado, deps bundled/verificadas) como gate del release.
 - **La autorización es ACOTADA y NO transitiva.** Un "adelante/sí/dale" aplica SOLO a lo que el usuario
   nombró explícitamente — no se estira a "todo el paquete". El silencio, tomarse el tiempo para
   leer/considerar, o una reacción positiva a UNA idea NO son autorización. Ante alcance ambiguo, la
   carga de aclarar es de Claude: **preguntar "¿adelante con qué exactamente?"**, no maximizar la interpretación.
   Y un **doc que respalda algo NO es autorización viva para DESTRUIR**: un cambio que ELIMINA
   funcionalidad/entidades/complejidad existente es destructivo y no-transitivo — preséntalo como PÉRDIDA
-  explícita y pide OK antes de ejecutarlo, aunque `AGENTS.md`/un doc lo sugiera (en cps se aplanó un
+  explícita y pide OK antes de ejecutarlo, aunque `AGENTS.md`/un doc lo sugiera (en un caso real se aplanó un
   esquema de permisos de meses así).
+- **No conviertas UN mensaje ambiguo en una PREFERENCIA durable.** Una queja no es una orden: antes de
+  escribir una regla/preferencia a memoria o config a partir de un solo mensaje, **confirma el sentido**
+  ("¿lo vuelvo regla, o era una queja puntual?"). Oscilar en una política por malinterpretar un mensaje
+  desgasta más que preguntar una vez.
 - Lo hace cumplir el hook `dod-verificar` (Stop): distingue lenguaje de ESTATUS/espera (no dispara) de
   lenguaje de CIERRE (exige, además del verde técnico, la marca citada de (1) o (2)); además bloquea un
   claim VISUAL sin tool de navegador en el turno (a ciegas) y recuerda la auditoría de paridad en migraciones.
+
+## Integridad de los guardarraíles (norma dura)
+**Claude NO modifica ni afloja sus PROPIOS candados de supervisión** (`dod-verificar`,
+`confirmar-merge-develop`, `merge-squash-guard`, `git-branch-guard`, `proteger-arbol`…) para desatorarse
+o por conveniencia. Cambiar un control de supervisión exige **consentimiento EXPLÍCITO del usuario para
+cambiar ESE control** — distinto del consentimiento a la ACCIÓN que el control vigila. Los cambios
+permitidos son de **PRECISIÓN/CORRECCIÓN** (menos falsos positivos, arreglar un target mal detectado),
+**nunca** "para que deje de bloquearme". El clasificador auto-mode es el backstop externo de esto.
+
+## Toda norma nace con su mecanismo (norma dura)
+Una norma de higiene/cierre **SIN un mecanismo que la haga cumplir** (hook, gate o paso operativo) deja
+al usuario como único enforcement → no se cumple sola (pasó con auto-reporte y doc=realidad, hasta que
+se volvieron hooks). Al crear una norma de proceso, **nace con su mecanismo o es solo un buen deseo.**
+Corolario: un mecanismo mal dirigido (un hook con falsos positivos) desgasta la confianza tanto como su
+ausencia — la PRECISIÓN del guard importa igual que su existencia.
 
 ## Flujo de git — NUNCA push a `develop` ni a `main` (norma dura)
 > Léxico: "merge request" (GitLab) = "pull request / PR" (GitHub) = lo mismo.
@@ -79,6 +102,10 @@ vuelve a tocar base con push.
 Enforced por: ramas protegidas server-side + los hooks `git-branch-guard`, `merge-squash-guard` y
 `confirmar-merge-develop`.
 
+> **El gate NO es "no puedes".** `confirmar-merge-develop` no prohíbe integrar a `develop`: con tu OK
+> EXPLÍCITO, Claude mergea `develop` por CLI (con `--squash`), SIN que des clics en la web. El candado
+> solo exige esa confirmación expresa; no te obliga a hacerlo tú.
+
 ## Modelo MINI-DEVELOP (iterar sin fricción)
 Para trabajar horas/días sin pedir permiso a cada paso: mergea las ramitas de feature **con `git merge`
 LOCAL** a una rama de INTEGRACIÓN de larga vida (`integracion/<sprint>` o `epic/<tema>`) — ahí rompes y
@@ -107,7 +134,7 @@ volvieras a delegar.
 **Aislamiento (regla dura).** Todo agente de fan-out que MUTE archivos o COMMITEE corre en un **worktree
 AISLADO** (`isolation: "worktree"`), NUNCA en el árbol de trabajo compartido/principal — ese es solo del
 orquestador/humano. Un agente que corre `git reset`/`checkout`/`rebase` en el árbol compartido puede
-orfanar los commits del orquestador (lección real de cps 2026-07). Si un ítem no se puede aislar, lo hace
+orfanar los commits del orquestador (lección real, 2026-07). Si un ítem no se puede aislar, lo hace
 el orquestador. Lo respalda el guard `proteger-arbol`.
 
 **Reporte sin niñera + estado sin redundancia (skill `orquestar-fanout`).** Al orquestar, NO monitorees
