@@ -32,13 +32,20 @@ Reglas que lo blindan:
   la confirmación.
 - **Léxico obligatorio** mientras no haya (1) o (2): "en preview", "a tu revisión", "verificado
   técnicamente", "pendiente de tu QA", "armado sin mergear". **Prohibido**: listo/terminado/funciona/
-  quedó/a la par/de punta a punta.
+  quedó/a la par/de punta a punta/**cerrado/terminamos/de trancazo/🏁🎉/✅-de-hecho**.
+- **QA visual NO se declara a ciegas.** Afirmar una observación visual ("se ve / quedó como el mockup /
+  en Chrome / la pantalla muestra…") **exige haber mirado la pantalla ESE turno** (una tool de
+  navegador/screenshot). Sin eso, el estatus honesto es "verificado técnicamente, SIN QA visual (a
+  ciegas)" y el QA visual lo hace el usuario. (Lección cps: se insinuó QA de Chrome sin verla → reaparecieron bugs.)
+- **Migración: la prueba acordada es AUDITORÍA DE PARIDAD**, no build+tests. Declarar un módulo/migración
+  "a la par" exige el inventario de paridad + el módulo real del legado; un build verde ≠ paridad.
 - **La autorización es ACOTADA y NO transitiva.** Un "adelante/sí/dale" aplica SOLO a lo que el usuario
   nombró explícitamente — no se estira a "todo el paquete". El silencio, tomarse el tiempo para
   leer/considerar, o una reacción positiva a UNA idea NO son autorización. Ante alcance ambiguo, la
   carga de aclarar es de Claude: **preguntar "¿adelante con qué exactamente?"**, no maximizar la interpretación.
 - Lo hace cumplir el hook `dod-verificar` (Stop): distingue lenguaje de ESTATUS/espera (no dispara) de
-  lenguaje de CIERRE (exige, además del verde técnico, la marca citada de (1) o (2)).
+  lenguaje de CIERRE (exige, además del verde técnico, la marca citada de (1) o (2)); además bloquea un
+  claim VISUAL sin tool de navegador en el turno (a ciegas) y recuerda la auditoría de paridad en migraciones.
 
 ## Flujo de git — NUNCA push a `develop` ni a `main` (norma dura)
 > Léxico: "merge request" (GitLab) = "pull request / PR" (GitHub) = lo mismo.
