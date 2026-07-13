@@ -24,7 +24,7 @@ pasos. Versión **genérica** (agnóstica de stack): sirve para cualquier proyec
   dinámico mal armado → 0 filas; todos pasaron build+tests y reventaron en vivo, incluso llegaron a producción).
 - **Cambio DESTRUCTIVO = pausa + OK.** Si el diff ELIMINA funcionalidad/entidades/tablas o mucho código,
   es destructivo y **NO transitivo** aunque un doc lo respalde: preséntalo al usuario como PÉRDIDA explícita
-  ("esto borra X que costó Y") y pide su OK ANTES de ejecutarlo/cerrarlo. (En cps se aplanó un esquema de
+  ("esto borra X que costó Y") y pide su OK ANTES de ejecutarlo/cerrarlo. (En un caso real se aplanó un esquema de
   permisos jerárquico de meses amparado en `AGENTS.md`, sin avisar que era una pérdida.)
 - Recuerda: **verde técnico ≠ LISTO.** Es *verificado técnicamente*: peldaño necesario, insuficiente
   para declarar LISTO (falta (1) confirmación funcional del usuario o (2) su autorización expresa).
@@ -35,7 +35,7 @@ Modelo de estado: **`estado-proyecto.md` = hub vivo** (dónde estamos + backlog 
 - `.claude/memory/estado-proyecto.md`: mueve el ítem a **HECHO** (commit+fecha al mergear); registra
   **DECISIONES**; lo descartado a propósito va en **FUERA POR DECISIÓN** (no en pendiente). **Estado
   BIDIRECCIONAL:** ni dejes "pendiente" algo que YA está hecho, ni marques "hecho" algo sin verificar —
-  la doc miente en ambos sentidos y cuesta auditorías (en cps el usuario forzó 3 por esto).
+  la doc miente en ambos sentidos y cuesta auditorías (en un caso real el usuario forzó 3 por esto).
 - **Appendea UNA línea al FINAL** de `.claude/memory/bitacora.md` (`- fecha · rama · quién · qué`)
   con `>>` (`printf '%s\n' '- …' >> bitacora.md`), **no** con un Edit que reescriba: el append-al-final
   es lo que deja que varias sesiones/agentes escriban la misma bitácora sin pisarse (dos `>>` no chocan;
@@ -47,7 +47,7 @@ Modelo de estado: **`estado-proyecto.md` = hub vivo** (dónde estamos + backlog 
   `grep` del nombre/valor viejo): una doc desincronizada YA es una doc que miente. **RELEE el
   ENCABEZADO/resumen de apertura del doc, no solo la línea que tocaste** — el "arriba" es lo primero que
   se lee; un encabezado stale ("Dos hitos cerrados") mientras el cuerpo ya avanzó es la trampa más común
-  (pasó en cps varias veces). Y si dos números/valores describen lo mismo (una badge y la prosa), que
+  (pasó en un caso real varias veces). Y si dos números/valores describen lo mismo (una badge y la prosa), que
   coincidan — desincronizados YA mienten.
 - **Dashboard GLOBAL** (`dashboard_cerebro.md`, memoria de ESTA máquina): **appendea** una línea al FINAL
   de su Bitácora con `>>` (no con un Edit) — así no chocas con las otras sesiones de Claude que tocan ese
@@ -90,7 +90,7 @@ Escríbelo como un **resumen curado en prosa**: título Conventional en español
 > (p. ej. en un grep o una descripción) → pásalo por variable/archivo, no en texto plano.
 > El candado server-side definitivo es proteger las ramas + `squash_option=always` (GitLab).
 >
-> Gotchas de commit (destilados de cps): el mensaje largo va por **heredoc** (`git commit -F -`) o un
+> Gotchas de commit (destilados de un caso real): el mensaje largo va por **heredoc** (`git commit -F -`) o un
 > archivo ÚNICO en `/tmp` — **NUNCA dentro del repo** (se cuela al árbol) ni reutilizando uno viejo
 > (commit con mensaje equivocado → `--amend`). Y **no encadenes `git commit`/`push` dentro de loops de
 > espera en background** (`pgrep`/`pkill`): se truncan y dejan el commit a medias — separa "esperar a que
@@ -112,7 +112,7 @@ vive en el **scratchpad de la sesión / `/tmp` / un worktree** — y eso **muere
 cerrar el worktree**. Si es semilla reusable (no scratch de exploración de un solo uso), **cópialo al
 repo** en esta misma tanda (p. ej. `scripts/<tema>/`) y **commitéalo**. Y si un doc o el backlog ya
 **referencia una ruta** de esas herramientas (`scripts/etl-ots/`…), **que esa ruta exista** — una
-referencia a un archivo que no está es otra doc que miente. (Regla destilada del catch de cps 2026-07:
+referencia a un archivo que no está es otra doc que miente. (Regla destilada de un catch real (2026-07):
 la maquinaria ETL vivía solo en el scratchpad y la sesión nueva no la encontraba.)
 
 Un hook puede *recordar* este paso, pero no *juzgar* si cosechaste bien (lección vs herramienta,

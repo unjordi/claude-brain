@@ -14,7 +14,7 @@
 #   (e) NORMAS globales inyectadas en ~/.claude/CLAUDE.md (bloque con marcador, solo si faltan).
 #
 # confirmar-merge-develop AHORA es GLOBAL (candado de merges a develop/main con OK explícito): antes
-# vivía solo por-repo y por eso faltaba donde el repo no lo traía (caso cps 2026-07-11) → promovido a
+# vivía solo por-repo y por eso faltaba donde el repo no lo traía (un caso real 2026-07-11) → promovido a
 # global para que aplique en TODA sesión/clon. NO instala globales los hooks REPO-SCOPED restantes
 # (sesion-inicio, precompact-volcar-estado, dod-verificar): esos viven en brain/hooks/ como FUENTE para
 # que cada repo los copie a su .claude/ y los cablee (se cargan solo si la sesión INICIA en el repo).

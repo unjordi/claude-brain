@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # limpiar-worktrees.sh — barre los worktrees de git de ESTE repo tras un fan-out: BORRA los de ramas
 # ya mergeadas (zombies) y DEJA los de ramas vivas/a-medias, anotando su pendiente en la bitácora para
-# quien lo retome. Antídoto a los worktrees zombies que se acumulan (caso cps: 29). SEGURO: nunca toca
+# quien lo retome. Antídoto a los worktrees zombies que se acumulan (un caso real: 29). SEGURO: nunca toca
 # el worktree principal; ante duda (offline, sin señal clara) CONSERVA.
 #   uso: limpiar-worktrees.sh [--dry-run]   (desde cualquier lugar del repo)
 #

@@ -29,16 +29,16 @@ default** y mata la redundancia de dónde vive el estado.
 COMPARTIDO/principal.** Spawnéalo con `isolation: "worktree"` (el Agent tool crea un worktree fresco) o
 dale tú un worktree disjunto. El árbol principal es SOLO del orquestador (o del humano). **Por qué muerde:**
 un agente que corre `git reset`/`checkout`/`rebase` en el árbol compartido puede **mover el HEAD y dejar
-huérfanos los commits del orquestador** → la fuente queda a medias y el build compila eso (lección REAL de
-cps, 2026-07: un agente de verificación se metió al árbol principal, reseteó HEAD y orfanó un commit; se
+huérfanos los commits del orquestador** → la fuente queda a medias y el build compila eso (lección REAL,
+2026-07: un agente de verificación se metió al árbol principal, reseteó HEAD y orfanó un commit; se
 recuperó por cherry-pick, pero casi se pierde). Si un ítem NO se puede aislar en su worktree, **lo hace el
 orquestador**, no un agente suelto en el árbol compartido. Lo respalda el guard `proteger-arbol` (avisa
 antes de un git destructivo que orfanaría commits sin pushear).
 
-## Con agentes ACTIVOS — reglas anti-desastre (destiladas de cps, 2026-07)
+## Con agentes ACTIVOS — reglas anti-desastre (destiladas de un caso real, 2026-07)
 - **El sub-agente es TERMINAL.** Su prompt DEBE decírselo: *"eres terminal — cuando tu turno acaba NADA
   tuyo sigue corriendo; NO puedes 'lanzar en background' ni esperar notificaciones. Ejecuta el trabajo
-  COMPLETO en ESTE turno."* (En cps un agente se despidió creyendo que dejó algo "corriendo en background"
+  COMPLETO en ESTE turno."* (En un caso real un agente se despidió creyendo que dejó algo "corriendo en background"
   — no había hecho nada, esperaba una notificación que jamás llegaría.)
 - **Verifica ANTES de creer.** El reporte de un agente NO es evidencia: el orquestador comprueba el
   resultado real (git status/worktree/archivo existe/compila) **read-only** antes de marcar el ítem hecho.
@@ -46,12 +46,24 @@ antes de un git destructivo que orfanaría commits sin pushear).
   puedes completarlo, dilo explícito"* (agentes devolvieron esqueletos en vez del trabajo real).
 - **NUNCA publiques/deployes desde el worktree de un agente.** Los worktrees NO heredan archivos
   gitignored (p. ej. `appsettings.json`) → un publish desde ahí sale con manifiesto inconsistente y
-  **rompe la app** (en cps tumbó el login del usuario). El deploy sale SIEMPRE del clon principal tras `git pull`.
+  **rompe la app** (en un caso real tumbó el login del usuario). El deploy sale SIEMPRE del clon principal tras `git pull`.
 - **Con agentes activos, el orquestador NO hace `git checkout`/build en el clon principal** (cruzaría la
   rama que un worktree tiene tomada — "is already used by worktree"). Usa tu propio worktree o espera.
 - **Mensajería con dirección explícita.** Encabeza los mensajes a un agente con `[DE: orquestador → PARA:
   agente X]` para que no confunda una instrucción-descendente con un reporte-ascendente (un agente prudente
   lee un mensaje ambiguo como posible inyección y se traba).
+- **PORTA, no REHAGAS** (migración/armonización). Si ya existe la fuente VIVA (el código de la app legada
+  / otra app / un proyecto de referencia), el agente la **cita y la LEE ANTES de escribir** y la ADAPTA.
+  **PROHIBIDO reconstruir desde cero** un componente que ya funciona (rehacerlo en vez de traer el que servía).
+  El prompt del agente lo dice explícito: *"PORTAR = copiar el artefacto que YA funciona y adaptarlo; cita
+  el archivo origen; si no existe fuente, dilo — no inventes"*.
+- **Emite un LATIDO de estado** mientras haya agentes EN VUELO — no quedes mudo. El usuario no debería
+  preguntar "¿sigues? ¿todo bien?": reporta avance periódico (qué agente va en qué), no solo el volcado a
+  bitácora al cerrar. Señal de desvío: el usuario preguntó "¿ping?".
+- **INICIA cada agente EN el repo destino; PROHIBIDO "cambia de folder" a media sesión.** Los hooks y el
+  `CLAUDE.md` de un repo se cargan SOLO al INICIAR la sesión/agente en él — mudarse a otro folder a mitad
+  NO los carga (el agente opera con las normas equivocadas). Si un agente debe trabajar otro repo, se
+  INICIA ahí. Recuerda esto si un agente corre en un cwd distinto al de su arranque.
 
 ## El flujo (lo que hace el orquestador)
 1. **Asigna:** saca del backlog (estado-proyecto.md) ítems **autocontenidos** (uno que un agente
@@ -81,6 +93,6 @@ antes de un git destructivo que orfanaría commits sin pushear).
 - ❌ Escribir el mismo pendiente en estado-proyecto Y bitácora Y un backlog aparte. → Un dato, un lugar.
 - ❌ Dejar worktrees zombies acumulándose. → `limpiar-worktrees.sh` al cerrar la ola.
 - ❌ Asignar ítems NO autocontenidos (que dependen de otro agente en vuelo). → Serialízalos o únelos.
-- ❌ Dejar que un agente mute/commitee en el árbol de trabajo COMPARTIDO (o corra `git reset`/`checkout`/`rebase` ahí). → Worktree AISLADO por agente, o lo hace el orquestador. Es lo que orfanó un commit en cps.
+- ❌ Dejar que un agente mute/commitee en el árbol de trabajo COMPARTIDO (o corra `git reset`/`checkout`/`rebase` ahí). → Worktree AISLADO por agente, o lo hace el orquestador. Es lo que orfanó un commit en un caso real.
 - ❌ Creer el reporte de un agente sin verificar el resultado real. → Comprueba read-only (git/archivo/compila) antes de marcar hecho; el agente pudo devolver un stub o "alucinar" trabajo en background.
 - ❌ Publicar/deployar desde el worktree de un agente (no hereda gitignored → rompe el deploy). → Del clon principal tras `git pull`.

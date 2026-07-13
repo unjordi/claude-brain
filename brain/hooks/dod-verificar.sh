@@ -50,6 +50,13 @@ last=$(printf '%s\n' "$turn" | jq -rs '[.[] | select((.message.role // .type)=="
 STATUS_RE='con tu (ok|visto|aprobaci)|dime si|dime c[oó]mo|dime qu[eé]|te aviso|te muestro|cuando .{0,40}(reporte|termine|cierre|entre|merge)|en preview|a tu (revisi|qa)|para tu (revisi|qa|visto)|pendiente de tu|sin mergear|armado sin merge|no (lo |la )?mergeo|no cierro|no declaro|espero (tu|a que|el)|revisamos (en la ma|juntos|al rato|cuando)|si (ya |te )?(qued|late|parece)|¿[^?]{0,120}\?|definici[oó]n de .?listo|qu[eé] entiendes por|palabra .?listo'
 printf '%s' "$last" | grep -qiE "$STATUS_RE" && exit 0
 
+# P1 (precisión, baja falsos positivos): si la ÚLTIMA línea con texto del mensaje del asistente TERMINA
+# en signo de interrogación, es una PREGUNTA, no un cierre → no dispares. (Mató un falso positivo real:
+# preguntar por un UUID disparaba el guard aunque NO se declaraba nada listo.) Acepta cierre de comilla/
+# paréntesis tras el "?". No afloja el candado: un CIERRE de verdad no termina preguntando.
+_lastline=$(printf '%s\n' "$last" | awk 'NF{l=$0} END{print l}')
+printf '%s' "$_lastline" | grep -qE '[?？][")»'"'"'”]*$' && exit 0
+
 # Marca de (1) confirmación de funcionalidad o (2) autorización expresa de cierre, CITADA en el mensaje.
 # (Se computa AQUÍ ARRIBA porque B2 también la usa: si el usuario ya confirmó, citar SU QA visual es
 # válido — no un claim a ciegas de Claude.)
@@ -58,12 +65,12 @@ printf '%s' "$last" | grep -qiE "$CONF_RE" && conf=si || conf=no
 
 # ── B2: ¿afirma una OBSERVACIÓN VISUAL sin haber mirado la pantalla en ESTE turno? (léxico ANCLADO a
 # mockup/pantalla/chrome/render/QA-visual — no un "se ve bien" casual). Si además NO corrió ninguna
-# tool de navegador/screenshot en el turno → lo declara A CIEGAS → BLOQUEA. (Lección cps: se insinuó
+# tool de navegador/screenshot en el turno → lo declara A CIEGAS → BLOQUEA. (Lección real: se insinuó
 # QA de Chrome sin ver la pantalla y reaparecieron bugs ya resueltos.) ──
 VISUAL_RE='(qued[oó]|se ve[n]?) (igual|como|tal cual|clavad|idéntic)[^.]{0,25}(mockup|dise[nñ]|legado|pantalla)|lo verifiqu[eé] (en chrome|en el navegador|visualmente|en pantalla)|en chrome (se ve|qued[oó]|funciona|jala|lo prob[eé]|ya)|la pantalla (muestra|se ve|qued)|hice .{0,12}qa visual|qa visual.{0,15}(ok|pas|hecho|verde|aprob|correct)|screenshot (muestra|confirma)|el render (se ve|qued[oó]|correct)|se ve (id[eé]ntic|tal cual|como el (mockup|legado|dise))'
 if [ "$conf" != si ] && printf '%s' "$last" | grep -qiE "$VISUAL_RE"; then
   if ! printf '%s' "$turn" | grep -qE 'mcp__claude-in-chrome__|"name":[[:space:]]*"computer"|read_page|tabs_context|tabs_create|gif_creator|browser_batch|screenshot'; then
-    vreason="DETENTE — afirmaste una OBSERVACIÓN VISUAL ('se ve/quedó como el mockup / en Chrome / la pantalla muestra…') pero en ESTE turno NO corriste NINGUNA tool de navegador/screenshot: lo estás declarando A CIEGAS. No uses léxico de QA visual sin haber mirado la pantalla. Estatus honesto: 'verificado técnicamente, SIN QA visual (a ciegas)' — el QA visual lo hace unjordi o una captura real. (Lección cps 2026-07: se insinuó QA de Chrome sin verla y reaparecieron bugs ya resueltos.)"
+    vreason="DETENTE — afirmaste una OBSERVACIÓN VISUAL ('se ve/quedó como el mockup / en Chrome / la pantalla muestra…') pero en ESTE turno NO corriste NINGUNA tool de navegador/screenshot: lo estás declarando A CIEGAS. No uses léxico de QA visual sin haber mirado la pantalla. Estatus honesto: 'verificado técnicamente, SIN QA visual (a ciegas)' — el QA visual lo hace el usuario o una captura real. (Lección real (2026-07): se insinuó QA de Chrome sin verla y reaparecieron bugs ya resueltos.)"
     jq -n --arg r "$vreason" '{decision:"block", reason:$r}'
     exit 0
   fi

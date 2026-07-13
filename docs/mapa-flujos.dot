@@ -70,9 +70,9 @@ digraph flujos {
     G1_IN  [shape=box color="#8A8A8A" fillcolor="#232323" fontcolor="#CFC8C0" penwidth=1.5 label="intento de integrar\n(git push · glab mr merge · gh pr merge)"];
     G1_D1  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔒\n🚧  git-branch-guard\n¿push DIRECTO\na develop/main?"];
     G1_DENY1 [color="#C0392B" label="🔴  DENY — no push a develop/main\nhaz ramita → MR (a main solo\nrelease del humano en la web)"];
-    G1_D2  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔒\n🔗  merge-squash-guard\n¿MR a develop\nSIN --squash?"];
+    G1_D2  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔒\n🔗  merge-squash-guard\n¿MR a develop\nSIN --squash?\n(mensaje tool-aware: gh o glab · P5)"];
     G1_DENY2 [color="#C0392B" label="🔴  DENY — a develop se SQUASHEA\n(1 commit limpio/slice); rehaz con\n--squash --squash-message. main EXENTO"];
-    G1_D3  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔒\n✋  confirmar-merge-develop\n¿repo COMPARTIDO y\nfalta OK expreso del usuario\npara ESTE cierre?"];
+    G1_D3  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔒\n✋  confirmar-merge-develop\n¿repo COMPARTIDO y\nfalta OK expreso del usuario\npara ESTE cierre?\n(busca tu OK en tus últimos 10 mensajes, no en líneas crudas · P17)"];
     G1_DENY3 [color="#C0392B" label="🔴  DENY — exige OK EXPRESO.\n«sigue/avanza» NO cuenta; a main pide\nOK SÚPER explícito (release). Itera en\nrama de integración con merge LOCAL"];
     G1_OK  [color="#7FB069" label="🟢  MERGE — develop: con --squash\nmain: release SIN squash\n📜 → 🌿 Flujo de git"];
 
@@ -171,7 +171,7 @@ digraph flujos {
     labeljust="l"; fontcolor="#C0392B"; fontsize=14; color="#C0392B"; style="rounded"; penwidth=1.6; margin=16;
 
     G2_IN  [shape=box color="#8A8A8A" fillcolor="#232323" fontcolor="#CFC8C0" penwidth=1.5 label="fin de turno (Stop)\nse mira el último mensaje del asistente"];
-    G2_D0  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔒\n✅  dod-verificar  (Stop)\n¿lenguaje de ESTATUS /\nespera / pregunta?\n(en preview, con tu OK, ¿…?)"];
+    G2_D0  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔒\n✅  dod-verificar  (Stop)\n¿lenguaje de ESTATUS /\nespera / pregunta?\n(en preview, con tu OK, ¿…?,\no el mensaje TERMINA en «?» → P1)"];
     G2_ESC [color="#7FB069" label="🟢  no dispara\n(no es un cierre)"];
     G2_D1  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿afirma QA VISUAL\n(mockup/Chrome/pantalla) SIN\ncorrer tool de navegador\neste turno, y sin (1)?"];
     G2_VIS [color="#C0392B" label="🔴  BLOCK — QA visual A CIEGAS.\nEstatus honesto: «verificado técnico,\nSIN QA visual»; lo mira el usuario"];
@@ -267,14 +267,14 @@ digraph flujos {
     labeljust="l"; fontcolor="#5B8DBF"; fontsize=14; color="#5B8DBF"; style="rounded"; penwidth=1.6; margin=16;
 
     OF_IN [shape=box color="#8A8A8A" fillcolor="#232323" fontcolor="#CFC8C0" penwidth=1.5 label="💡\ntrabajo PARALELIZABLE\n(varias piezas independientes)"];
-    OF_1  [color="#5B8DBF" penwidth=2.5 label="1 · 📋  Asigna del backlog\n(estado-proyecto.md = fuente de verdad;\nreparte archivos disjuntos por agente)\n📜 → 🎼 Orquesta"];
+    OF_1  [color="#5B8DBF" penwidth=2.5 label="1 · 📋  Asigna del backlog\n(estado-proyecto.md = fuente de verdad;\nreparte archivos disjuntos por agente)\ninicia el agente EN el repo destino (P6) · latido con agentes en vuelo (P4)\n📜 → 🎼 Orquesta"];
     OF_DAUTO [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿el ítem es AUTOCONTENIDO?\n(no depende de otro\nagente en vuelo)"];
     OF_SER [color="#E08E45" label="🟠  serialízalo o únelo\n(no lo delegues suelto)"];
     OF_DMUT [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿el agente MUTA\narchivos / commitea?"];
     OF_WT [color="#E08E45" label="🔔\n🌳  WORKTREE AISLADO (isolation: worktree)\nnunca el árbol compartido; si no se puede\naislar, lo hace el orquestador\n(proteger-arbol respalda)\n📜 → 🧱 Aislamiento de fan-out"];
     OF_DEPLOY [color="#E08E45" label="🟠  y NUNCA deployes desde ese worktree:\nno hereda gitignored → rompe el deploy.\nEl deploy sale del clon PRINCIPAL tras git pull"];
     OF_GATE [color="#C0392B" penwidth=2.5 label="🔒\n💸  delegacion-gate\nconsentimiento de costo (ver flujo ⑥)"];
-    OF_AG [color="#D97757" fillcolor="#2B2622" penwidth=2.5 label="🤖  agente TERMINAL — ejecuta el trabajo\nCOMPLETO en su turno (no background);\ndevuelve: qué hizo · línea-bitácora ·\npendiente · estado del worktree"];
+    OF_AG [color="#D97757" fillcolor="#2B2622" penwidth=2.5 label="🤖  agente TERMINAL — ejecuta el trabajo\nCOMPLETO en su turno (no background);\ndevuelve: qué hizo · línea-bitácora ·\npendiente · estado del worktree\nPORTA, no REHAGAS: cita+lee la fuente antes de escribir (P2)"];
     OF_DVER [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="orquestador VERIFICA read-only\n(git / archivo / compila):\n¿el resultado real existe?"];
     OF_NO [color="#C0392B" label="🔴  NO lo marques hecho\n(el reporte NO es evidencia: pudo\ndevolver un stub o alucinar «background»)"];
     OF_CIERRE [color="#5B8DBF" penwidth=2.5 label="cierre AUTOMÁTICO al terminar\n(lo recuerda 🔔 delegacion-reporte):\n🟢 APPENDA a bitácora.md (con «>>»)\n🟢 cierra el ítem en estado-proyecto.md"];
@@ -305,21 +305,22 @@ digraph flujos {
     label="📜 NORMAS · el cimiento   (el porqué; cada flujo de arriba las hace cumplir)";
     labeljust="l"; fontcolor="#7FB069"; fontsize=14; color="#7FB069"; style="rounded"; penwidth=1.6; margin=16;
     node [color="#7FB069" penwidth=2];
-    N_DOD  [label="📜\n🎯  Definición de LISTO\nverde técnico ≠ LISTO (build+tests+memoria es\nnecesario pero NO suficiente): falta (1) QA del\nusuario o (2) su OK expreso de cierre\n— hecho cumplir en ④ ⑤ ①"];
-    N_GIT  [label="📜\n🌿  Flujo de git\nramita → MR → develop (con squash); main es\nrelease-only; NUNCA push directo a develop/main\n— hecho cumplir en ① ②"];
+    N_DOD  [label="📜\n🎯  Definición de LISTO\nverde técnico ≠ LISTO (build+tests+memoria es\nnecesario pero NO suficiente): falta (1) QA del\nusuario o (2) su OK expreso de cierre\nproducto INSTALABLE: verde en 1 máquina ≠ LISTO (checklist multi-OS · P3)\n— hecho cumplir en ④ ⑤ ①"];
+    N_GIT  [label="📜\n🌿  Flujo de git\nramita → MR → develop (con squash); main es\nrelease-only; NUNCA push directo a develop/main\nel gate confirmar ≠ «no puedes»: con tu OK, Claude mergea por CLI (P7)\n— hecho cumplir en ① ②"];
     N_DOC  [label="📜\n🪞  doc = realidad\nal cambiar algo, su doc se actualiza en la MISMA\ntanda (README/memoria/dashboard/comentarios)\n— hecho cumplir en ③"];
     N_MINI [label="📜\n🌱  Modelo MINI-DEVELOP\nramitas → rama personal/integración por merge\nLOCAL (sin fricción); solo el MR a develop se gatea\n— habilitado en ①"];
     N_COST [label="📜\n💰  Consentimiento de costo de delegación\ndelegar cuesta por nivel: gratis (local) / incluido\n(ventana 5h) / metered (overage o API externa)\n— hecho cumplir en ⑥"];
     N_ORQ  [label="📜\n🎼  Orquesta: delega y quédate en el loop\ncon trabajo paralelizable: fan-out + supervisión\n(no grind serial); auto-reporte sin niñera\n— operacionalizada en ⑦"];
     N_AISL [label="📜\n🧱  Aislamiento de fan-out\ntodo agente que MUTA/commitea corre en worktree\nAISLADO, nunca en el árbol de trabajo compartido\n— hecho cumplir en ② ⑦"];
-    N_P0   [color="#D97757" penwidth=2.5 style="rounded,filled,dashed"
-            label="🛡\nP0 (PROPUESTA): Integridad de los guardarraíles\nClaude NO afloja sus propios candados de supervisión\npara desatorarse; cambiar un control exige el OK\nEXPLÍCITO a cambiar ESE control (≠ el OK a la acción)\n— protege dod-verificar ④ · confirmar/squash/branch ① · proteger-arbol ②"];
+    N_P0   [color="#D97757" penwidth=2.5 style="rounded,filled"
+            label="🛡\nIntegridad de los guardarraíles (P0 · activa)\nClaude NO afloja sus propios candados de supervisión\npara desatorarse; cambiar un control exige el OK\nEXPLÍCITO a cambiar ESE control (≠ el OK a la acción)\n— protege dod-verificar ④ · confirmar/squash/branch ① · proteger-arbol ②"];
+    N_MEC  [label="📜\n🧩  Toda norma nace con su mecanismo (P8)\nuna norma de higiene/cierre SIN hook/gate/paso operativo\n= el usuario es el enforcement → no se cumple sola"];
 
     N_P0 -> N_DOD [label="protege" style=dashed color="#D97757" fontcolor="#D97757" penwidth=1.4 constraint=false];
     N_P0 -> N_GIT [style=dashed color="#D97757" penwidth=1.4 constraint=false];
     // apila las normas en COLUMNA (invisible: solo rango) para que no se vayan a lo ancho
     edge [style=invis];
-    N_P0 -> N_DOD -> N_GIT -> N_DOC -> N_MINI -> N_COST -> N_ORQ -> N_AISL;
+    N_P0 -> N_DOD -> N_GIT -> N_DOC -> N_MINI -> N_COST -> N_ORQ -> N_AISL -> N_MEC;
     edge [style=solid];
   }
 
