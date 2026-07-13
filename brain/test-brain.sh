@@ -287,5 +287,36 @@ fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
+echo "== (e) sin referencias circulares NUEVAS entre elementos del cerebro =="
+# Allowlist de pares bidireccionales BENIGNOS conocidos (skill<->hook enforcement / lib<->consumidor /
+# hooks-hermanos). Un par NUEVO fuera de aqui = posible referencia circular -> revisalo (peor que una
+# contradiccion). El test COMPUTA los pares en cada corrida, no depende de contarlos a mano.
+CE_ALLOW="cerrar-slice|merge-squash-guard
+cerrar-slice|recordar-dashboard
+delegacion-comun|delegacion-gate
+delegacion-comun|delegacion-registrar
+delegacion-gate|limite-gasto
+delegacion-reporte|orquestar-fanout"
+ce_els=()
+for d in "$SCRIPT_DIR"/skills/*/; do [ -d "$d" ] && ce_els+=("$(basename "$d")"); done
+for h in "$HOOKS"/*.sh; do [ -e "$h" ] && ce_els+=("$(basename "$h" .sh)"); done
+ce_fileof() { if [ -f "$SCRIPT_DIR/skills/$1/SKILL.md" ]; then echo "$SCRIPT_DIR/skills/$1/SKILL.md"; elif [ -f "$HOOKS/$1.sh" ]; then echo "$HOOKS/$1.sh"; fi; }
+ce_new=0
+for x in "${ce_els[@]}"; do
+  fx="$(ce_fileof "$x")"; [ -z "$fx" ] && continue
+  for y in "${ce_els[@]}"; do
+    [[ "$x" < "$y" ]] || continue
+    fy="$(ce_fileof "$y")"; [ -z "$fy" ] && continue
+    if grep -qw "$y" "$fx" 2>/dev/null && grep -qw "$x" "$fy" 2>/dev/null; then
+      if ! printf '%s\n' "$CE_ALLOW" | grep -qxF "$x|$y"; then
+        bad "ref bidireccional NUEVA (¿circular?): $x <-> $y — revísala (o agrégala al allowlist si es benigna)"; ce_new=1
+      fi
+    fi
+  done
+done
+[ "$ce_new" = 0 ] && ok "sin referencias circulares nuevas (los 6 pares bidireccionales son los benignos conocidos)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
 echo "==> resultado: $PASS PASS · $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
