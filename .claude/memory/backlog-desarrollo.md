@@ -4,6 +4,87 @@
 > develop, squash). Al arrancar uno, muévelo a "en curso"; al cerrarlo con QA, bórralo de aquí y
 > deja la huella en `bitacora.md`. Ordenado por lo más reciente arriba.
 
+## [2026-07-12] Pain-points de los transcripts de plantilla/claude-brain (auditoría forense #2)
+**Método:** 3 agentes read-only barrieron 8 transcripts (~35.8k líneas) de los slugs plantilladotnet +
+claude-quota-widget, **incluida ESTA sesión**. Deduplicado contra la auditoría de cps (sección aparte) y
+contra lo YA arreglado hoy (dod-reina #121, gobernanza #122, gotchas !97, proteger-arbol #119, ruleset
+main=merge-commit, test anti-ciclos #123) y lo YA capturado (hedging/inventar-causas/desconfianza).
+Solo va lo **NUEVO**. `[HECHO]`=leído · `[INF]`=inferido. (Nota: puede chocar trivialmente al mergear con
+el MR de pain-points de cps —ambos insertan aquí arriba—; se resuelve conservando las dos secciones.)
+
+> **TRIAGE (unjordi, 2026-07-12):** **P1–P8 = READY** (aprobados para atacar). **P9–P16 = HELD**
+> (parqueados, pendientes de decisión — NO arrancar sin que unjordi los nombre).
+
+### 🔴 ALTA
+- **P1. `dod-verificar` da FALSOS POSITIVOS — y #121 pudo empeorarlo** [HECHO]. Disparó ~10× en una
+  sesión, ≥2 demostrablemente falsos (saltó cuando Claude solo PREGUNTABA por un UUID, sin declarar
+  cierre). **AUTO-CRÍTICA:** mi #121 (B1) AMPLIÓ el `CLAIM_RE` (agregó cerrado/🏁/✅) → puede subir la
+  tasa de falsos positivos que este hallazgo señala. Mitigado por el escape de STATUS_RE + gate de
+  código-tocado + conf, pero la precisión es baja. → **mejora:** no disparar si el último turno del
+  asistente es una PREGUNTA o no hay verbo de cierre en 1ª persona; **añadir a test-brain una suite de
+  frases (cierre vs estatus)** que fije la precisión y evite regresiones. Un guard con falsos positivos
+  pierde credibilidad. Casa: `dod-verificar` + test-brain.
+- **P2. Fan-out de migración REHACE en vez de PORTAR** [HECHO]. Agentes reconstruían componentes desde
+  cero en vez de traer el código VIVO de cps ("lo rehicieron", "no necesitas inventar, revisa cómo se
+  hizo en cps"). → regla dura en `aplicar-plantilla-a-proyecto` + prompt de fan-out: "PORTAR = copiar el
+  artefacto que YA funciona y adaptarlo; PROHIBIDO rehacer si existe fuente; **cita el archivo origen** y
+  léelo ANTES de escribir". Casa: skill aplicar-plantilla + contrato de agente en orquestar-fanout.
+- **P3. Instalador multi-OS: "releaseado" se rompió en CADA máquina nueva** [INF]. PATH no exportado,
+  CRLF en `.sh`, SDK ausente, ccusage fuera del PATH de systemd, rename roto en Linux, ícono genérico —
+  cada plataforma (Windows/Cachy/Mac ajeno) destapó un supuesto no cubierto. → para un producto
+  clonable/instalable, el verde técnico en UNA máquina NO es LISTO: **checklist de instalador** (PATH en
+  zsh+bash+Windows, normalizar EOL de `.sh`, deps bundled/verificadas) como gate antes de declarar un
+  release instalable. Casa: skill de release del widget / Definición de LISTO para "producto instalable".
+
+### 🟡 MEDIA
+- **P4. Heartbeat de orquestación** [HECHO]: con agentes en vuelo Claude quedaba mudo y el usuario hacía
+  "ping? ping?"/"todo bien?". → `orquestar-fanout`: emitir un latido de estado mientras hay agentes
+  corriendo (no solo el volcado a bitácora al cerrar). Señal de desvío: el usuario preguntó "¿sigues?".
+- **P5. `merge-squash-guard` en GitHub (`gh`): ¿detecta destino `main`?** [INF]. El guard citó `glab` en
+  un repo `gh` y el fail-safe conservador exigió squash a un release develop→main (que va SIN squash). →
+  **verificar** que la detección de target `main` funciona para `gh pr merge` (no solo glab); si no, el
+  fail-safe bloquea un release legítimo. Casa: `merge-squash-guard`.
+- **P6. Cross-repo: "cambia el folder a otro repo" → NO cargan hooks ni CLAUDE.md** [HECHO]. Lección vieja
+  (2026-07-04) que RESURGIÓ al delegar con "cambia de folder". → prohibir ese patrón en instrucciones de
+  delegación; INICIAR el agente en el repo destino; recordatorio si un agente opera en un cwd distinto al
+  de arranque. Casa: `orquestar-fanout` + posible guard.
+- **P7. No persistir una PREFERENCIA durable de UN mensaje ambiguo** [HECHO]. Claude guardó "los merges a
+  develop los hace unjordi" al revés de la queja real ("es queja, no orden"), y osciló 3× en la política.
+  → regla: no escribir preferencia durable a partir de un solo mensaje ambiguo sin confirmar el sentido;
+  + línea canónica en la norma: "el gate `confirmar-merge-develop` ≠ 'no puedes' — con OK explícito Claude
+  mergea develop por CLI+squash, SIN clics del usuario". Casa: norma + estilo.
+- **P8. Meta-patrón: una norma-prosa SIN hook = el usuario es el enforcement** [HECHO]. Pasó con
+  auto-reporte y doc=realidad (se arreglaron volviéndolos hooks #114/#116). → principio para el brain:
+  **toda norma de higiene/cierre nace con su mecanismo (hook/gate/paso operativo), o no se cumple sola.**
+  Corolario inverso (P1): un hook mal dirigido genera falsos positivos que desgastan la confianza.
+
+### ⏸ HELD — parqueados por unjordi (P9–P16, pendientes de decisión)
+- **P9. AGENTS.md se DEGRADÓ al templatizar** [HECHO]: el template quedó con <½ de las filas de cps/cenam
+  y perdió reglas GENÉRICAS (no solo el dominio). → al derivar un "template" de un concreto, distinguir
+  mecánicamente "dominio (quitar)" de "regla genérica (conservar)"; un diff PORTAR-vs-OK-EXCLUIDO como
+  método por defecto. Casa: skill de instanciar/templatizar.
+- 🟢 BAJA (gotchas / notas reutilizables):
+- **P10. Repos personales (GitHub) sin los hooks del template** → caen en el clasificador auto-mode
+  genérico → fricción recurrente en git (merge/borrado/config). → sembrar develop+hooks al tocarlos, o
+  documentar qué acciones esperar bloqueadas ahí. [HECHO]
+- **P11. Append-`>>` para bitácora/dashboard es norma pero NO se aplicó** (se usó Edit y chocó con "File
+  modified since read") → volverlo PASO OPERATIVO del cierre, no solo principio. [HECHO] (ya reforzado en
+  cerrar-slice; verificar que se siga).
+- **P12. Un agente nuevo (`~/.claude/agents/`) NO está disponible en la sesión que lo crea** — requiere
+  reiniciar sesión. [HECHO] Nota durable en entorno-maquina.
+- **P13. QA de no-regresión visual**: un fix de layout rompía otro ya arreglado ("ya estaba centradísimo,
+  ¿qué pasó?"). → tras tocar layout compartido, re-verificar los 2-3 ajustes previos del mismo componente. [INF]
+- **P14. Offline: smoke acordado** (cargar en línea → apagar webapi → recargar) como criterio antes de
+  declarar avance; no auto-verificable sin el navegador. [HECHO]
+- **P15. zsh: citar args con `?`/`*`/`-R`** (se globbearon/malinterpretaron). [HECHO] · **gh `--json`**: usar
+  campos verificados (`state`, no `merged`). [HECHO] · **guard bloquea su propio comando de prueba** por el
+  literal `glab mr merge` → que ignore literales en heredocs/strings de test. [HECHO]
+- **P16. Avisar cuando contenido que el usuario está viendo vive en una ramita SIN mergear** (el backlog
+  "desapareció" al volver a develop — no era pérdida, era el working tree rotando). [HECHO]
+
+**Ya-capturado/ya-arreglado (NO se re-agrega, solo se anota):** verde-técnico→LISTO (núcleo, dod-reina +
+norma); squash-a-main (ruleset main=merge-commit); doc=realidad (#116); auto-reporte (#114); overstep de
+autorización no-transitiva (ya en CLAUDE.md); hedging/inventar-causas/desconfianza (feedback en dashboard).
 ## [2026-07-12] Pain-points cosechados de los transcripts de cps (auditoría forense)
 **Método (con autorización expresa de unjordi):** 4 agentes read-only barrieron los 11 transcripts de
 cps (~35k líneas) por señales de falla (correcciones, reverts, huérfanos, FRENOs, reworks, bugs que el
