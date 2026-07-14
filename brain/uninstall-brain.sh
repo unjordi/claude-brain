@@ -32,7 +32,7 @@ echo "==> claude-brain: desinstalando cerebro global de $CLAUDE_DIR"
 
 # ── (a) Borrar los hooks de tier global + la lib compartida + la config de costo ──
 GLOBAL_HOOKS="git-branch-guard.sh merge-squash-guard.sh confirmar-merge-develop.sh recordar-dashboard.sh \
-              secret-scan.sh rama-vieja.sh proteger-arbol.sh limite-gasto.sh rehidratar-hilo.sh \
+              secret-scan.sh rama-vieja.sh proteger-arbol.sh limite-gasto.sh rehidratar-hilo.sh aviso-contexto.sh \
               delegacion-gate.sh delegacion-registrar.sh delegacion-reporte.sh delegacion-comun.sh \
               limpiar-worktrees.sh"
 for h in $GLOBAL_HOOKS; do
@@ -43,7 +43,7 @@ echo "ok: hooks globales + lib + config de costo eliminados de $HOOKS_DIR"
 
 # ── (b) Des-cablear del settings.json SOLO las entradas de esos hooks (idempotente, jq) ──
 # Patrón que casa el 'command' de las entradas que sembró el instalador (por basename del hook).
-BRAIN_PAT='git-branch-guard\.sh|merge-squash-guard\.sh|confirmar-merge-develop\.sh|recordar-dashboard\.sh|secret-scan\.sh|rama-vieja\.sh|proteger-arbol\.sh|limite-gasto\.sh|rehidratar-hilo\.sh|delegacion-gate\.sh|delegacion-registrar\.sh|delegacion-reporte\.sh'
+BRAIN_PAT='git-branch-guard\.sh|merge-squash-guard\.sh|confirmar-merge-develop\.sh|recordar-dashboard\.sh|secret-scan\.sh|rama-vieja\.sh|proteger-arbol\.sh|limite-gasto\.sh|rehidratar-hilo\.sh|aviso-contexto\.sh|delegacion-gate\.sh|delegacion-registrar\.sh|delegacion-reporte\.sh'
 if command -v jq >/dev/null 2>&1; then
   if [ -f "$GSET" ]; then
     tmp="$(mktemp)" || tmp=""

@@ -47,7 +47,7 @@ fi
 
 # ── (a) Copiar hooks de tier global + la lib compartida ──
 GLOBAL_HOOKS="git-branch-guard.sh merge-squash-guard.sh confirmar-merge-develop.sh recordar-dashboard.sh \
-              secret-scan.sh rama-vieja.sh proteger-arbol.sh limite-gasto.sh rehidratar-hilo.sh \
+              secret-scan.sh rama-vieja.sh proteger-arbol.sh limite-gasto.sh rehidratar-hilo.sh aviso-contexto.sh \
               delegacion-gate.sh delegacion-registrar.sh delegacion-reporte.sh delegacion-comun.sh \
               limpiar-worktrees.sh"
 for h in $GLOBAL_HOOKS; do
@@ -92,7 +92,9 @@ register_hook PostToolUse Task 'bash "$HOME/.claude/hooks/delegacion-registrar.s
 register_hook PostToolUse Task 'bash "$HOME/.claude/hooks/delegacion-reporte.sh"'   'delegacion-reporte'
 # SessionStart sin matcher (matcher vacío ⇒ se omite la clave ⇒ casa TODAS las fuentes: startup/resume/compact/clear)
 register_hook SessionStart '' 'bash "$HOME/.claude/hooks/rehidratar-hilo.sh"'       'rehidratar-hilo'
-echo "ok: hooks cableados en $GSET (git-branch-guard, merge-squash-guard, confirmar-merge-develop, recordar-dashboard, secret-scan, rama-vieja, proteger-arbol, limite-gasto, delegacion-gate/registrar, rehidratar-hilo)"
+# PostToolUse sin matcher (casa TODA tool) — watermark anti-auto-compact: avisa de compactar proactivo
+register_hook PostToolUse '' 'bash "$HOME/.claude/hooks/aviso-contexto.sh"'          'aviso-contexto'
+echo "ok: hooks cableados en $GSET (git-branch-guard, merge-squash-guard, confirmar-merge-develop, recordar-dashboard, secret-scan, rama-vieja, proteger-arbol, limite-gasto, delegacion-gate/registrar, rehidratar-hilo, aviso-contexto)"
 
 # ── (c) Skills genéricas del cerebro (cerrar-slice, orquestar-fanout, …) ──
 if [ -d "$SRC_SKILLS" ]; then

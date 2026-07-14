@@ -5,7 +5,9 @@
 # la orden de leer la memoria antes de tocar código o declarar nada terminado.
 # Antídoto a "se me va la onda al cambiar de sesión/compu o cuando el sprint es largo".
 # Vive en <repo>/.claude/hooks (viaja por git) y se cablea en <repo>/.claude/settings.json.
-# Genérico: sirve para cualquier stack (semilla plantillaRepoVacio).
+# Genérico: sirve para cualquier stack (semilla plantillaRepoVacio). El aviso de MIGRACIÓN/paridad
+# NO vive aquí (es dominio de la plantilla .NET, no del cerebro portable): va en el sesion-inicio
+# de la plantilla, no en esta versión genérica.
 set -u
 
 ROOT="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
@@ -36,12 +38,6 @@ for f in estado-proyecto estado-y-pendientes estado; do
     break
   fi
 done
-
-# Migración en curso: recordar el contrato de paridad y la app legada
-if [ -f "$ROOT/docs/inventario-paridad.md" ]; then
-  lines+=("")
-  lines+=("⚙️ MIGRACIÓN en curso: revisa docs/inventario-paridad.md (contrato de 'no perder nada') Y el módulo real de la app legada antes de dar cualquier módulo por migrado. No confíes en tu memoria del chat.")
-fi
 
 ctx=$(printf '%s\n' "${lines[@]}")
 
