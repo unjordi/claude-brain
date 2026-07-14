@@ -5,6 +5,9 @@
 #      doc (README, arbol del cerebro, memoria), recuerda actualizarla en la MISMA tanda. Antes esto
 #      era solo NORMA (dependia de disciplina y fallo: se olvido el README de un feature); aqui muerde.
 # Si no es git push, silencio. Fail-open. Ignora un 'git push' entrecomillado (dato de un grep/MR/test).
+# dedupe doble-cableado: si soy la copia del REPO y la copia GLOBAL existe, cedo (la global recuerda).
+# Evita el recordatorio DUPLICADO en cada push (la fricción #1). NO-debilitante: sigue recordando 1×.
+case "$0" in "$HOME/.claude/hooks/"*) : ;; *) [ -f "$HOME/.claude/hooks/$(basename "$0")" ] && exit 0 ;; esac
 cmd=$(jq -r '.tool_input.command // ""' 2>/dev/null)
 unquoted=$(printf '%s' "$cmd" | sed "s/'[^']*'//g; s/\"[^\"]*\"//g")
 printf '%s' "$unquoted" | grep -qE 'git[[:space:]]+push' || exit 0

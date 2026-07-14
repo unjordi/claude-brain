@@ -12,6 +12,10 @@
 #
 # Fail-open ante parseo (sin jq no bloquea). Vive en <repo>/.claude/hooks/ (viaja por git).
 
+# dedupe doble-cableado: si soy la copia del REPO y la copia GLOBAL existe, cedo (la global maneja
+# esta invocación) → evita disparo doble en máquina con el cerebro global; en un clon SIN bootstrap
+# (sin copia global) la del repo sí corre. NO-debilitante: sigue disparando 1× y denegando igual.
+case "$0" in "$HOME/.claude/hooks/"*) : ;; *) [ -f "$HOME/.claude/hooks/$(basename "$0")" ] && exit 0 ;; esac
 input=$(cat)
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -z "$cmd" ] && exit 0

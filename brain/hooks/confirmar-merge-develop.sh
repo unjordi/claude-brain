@@ -16,6 +16,10 @@
 # (no push directo a develop/main) + merge-squash-guard. `git merge` LOCAL a cualquier rama tampoco se
 # intercepta. Complementa a git-branch-guard y merge-squash-guard (exige --squash a develop). Fail-open sin jq.
 set -u
+# dedupe doble-cableado: si soy la copia del REPO y la copia GLOBAL existe, cedo (la global maneja
+# esta invocación) → evita disparo doble (y doble llamada de red) en máquina con el cerebro global;
+# en un clon SIN bootstrap la del repo sí corre. NO-debilitante: sigue exigiendo el OK igual.
+case "$0" in "$HOME/.claude/hooks/"*) : ;; *) [ -f "$HOME/.claude/hooks/$(basename "$0")" ] && exit 0 ;; esac
 input=$(cat 2>/dev/null || true)
 command -v jq >/dev/null 2>&1 || exit 0
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
