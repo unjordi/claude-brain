@@ -22,3 +22,5 @@ src/plasmoid/contents/version.json
 docs/mapa-flujos.graphml
 # El png del mapa es regenerable (dot -Tpng); el repo versiona .dot (fuente) + .svg (vista).
 docs/mapa-flujos.png
+# reporte de bug para Claude Code (worktree isolation): artefacto LOCAL de un solo uso (se fila externamente), NO se versiona en el brain compartible
+docs/bug-report-worktree-base.md
