@@ -9,7 +9,8 @@
 #       merge-squash-guard, confirmar-merge-develop, recordar-dashboard, secret-scan, rama-vieja,
 #       proteger-arbol (PreToolUse/Bash), delegacion-gate + limite-gasto (PreToolUse/Task),
 #       delegacion-registrar/reporte (PostToolUse/Task), rehidratar-hilo + aviso-contexto (SessionStart/
-#       PostToolUse) + delegacion-comun.sh y analizar-comando-git.sh (libs) + agentes-costo.json (config).
+#       PostToolUse) + libs `delegacion-comun.sh`, `analizar-comando-git.sh`, `detectar-secretos.sh`
+#       + agentes-costo.json (config). La lista EXACTA se deriva de brain/hooks/MANIFEST.
 #   (b) CABLEADO en ~/.claude/settings.json con "shell":"bash" (idempotente).
 #   (c) SKILLS genéricas (cerrar-slice, orquestar-fanout, checkpoint, rehidratar-hilo) en ~/.claude/skills/.
 #   (d) DASHBOARD del cerebro sembrado en la memoria GLOBAL (slug del HOME) si falta.

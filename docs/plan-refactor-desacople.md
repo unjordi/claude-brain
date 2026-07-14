@@ -172,16 +172,23 @@ tiene gemelo manual. El mapa se re-anota (badge "⚙ lib" donde aplique), no se 
       de red (**H5**) + `timeout` interno para que el proceso SIEMPRE termine y emita su decisión (hoy el timeout del hook lo mata y evade). *slice-2, en curso.*
 - [x] Guarda contra falso positivo de repo-path que termina en `/develop`|`/main` (**H11**). *slice-1, `d6b17e5` (`acg_sin_flag_repo`).*
 
+> **§D COMPLETO (2026-07-14):** `secret-scan` → wrapper sobre la lib nueva `detectar-secretos.sh`
+> (extracción de la lógica, patrón de 3 capas). Ver §D abajo tachado. test-brain 145/0.
+
 ### C · lib `definicion-de-listo.sh` (Fase 2) — H4, #1
 - [ ] STATUS_RE **claim-aware**: subordinar el escape de estatus a que NO haya claim de cierre co-ubicado →
       cierra **H4** («Listo, quedó terminado. Dime si reviso algo más.» hoy NO dispara).
 - [ ] Unificar la `dod` DÉBIL de la plantilla con la fuerte (bloqueo QA-visual-a-ciegas) sobre la MISMA lib (#1, confirmado por H2).
 
-### D · lib `detectar-secretos.sh` (Fase 3) — H7
-- [ ] Ampliar patrones: connection strings (`://user:pass@`, `Password=`), JWT, blobs base64 — hoy solo prefijos.
-- [ ] Decidir **fail-open vs fail-closed** para un guard de SEGURIDAD (hoy fail-open sin jq/git/rango).
-- [ ] Cablear `secret-scan` **también por-repo** (o documentar su dependencia del bootstrap) → **H7 = #4 como
-      P0 de seguridad**: un clon fresco de la plantilla NO tiene ningún escaneo de secretos.
+### D · lib `detectar-secretos.sh` (Fase 3) — H7  ✅ (2026-07-14)
+- [x] Ampliar patrones: **JWT** (`eyJ.eyJ.firma`), **connection strings** (`://user:pass@`), **`Password=`/`Pwd=`**
+      estilo .NET (valor real; excluye `${VAR}`/`%VAR%`). *Blobs base64 GENÉRICOS EXCLUIDOS a propósito: baja
+      precisión (disparan con hashes/UUIDs/minified) → contra la filosofía "precisión > exhaustividad".*
+- [x] **Decidido fail-open vs fail-closed:** fail-**OPEN** por default ante fallo de INFRA (sin git/no-repo/sin
+      rango) — bloquear todo commit por un problema de entorno es desproporcionado; es red de seguridad, no cárcel.
+      **`CLAUDE_SECRET_SCAN_STRICT=1`** opta por fail-**CLOSED** (deny si no puede escanear). Sin jq = fail-open
+      forzoso (el deny ES json/jq → no hay forma de bloquear limpio; limitación documentada, no elección).
+- [x] Cablear `secret-scan` **por-repo** → **ya hecho en §A** (tier `both` en el MANIFEST → viaja per-repo). **Cierra H7.**
 
 ### E · Pasada de MAPA (anotar, NO rehacer) — H8, H9, H10, colisiones
 - [ ] Mostrar que **②③④ son el MISMO evento** PreToolUse/Bash con N hooks en PARALELO (no secuencial);

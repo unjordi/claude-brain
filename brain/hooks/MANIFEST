@@ -25,6 +25,7 @@ confirmar-merge-develop  both    hook
 recordar-dashboard       both    hook
 secret-scan              both    hook
 analizar-comando-git     both    lib
+detectar-secretos        both    lib
 
 proteger-arbol           global  hook
 rama-vieja               global  hook

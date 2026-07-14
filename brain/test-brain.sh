@@ -261,8 +261,9 @@ SCANREPO="$(mktemp -d "${TMPDIR:-/tmp}/brain-scan.XXXXXX")"
 git -C "$SCANREPO" init -q >/dev/null 2>&1
 git -C "$SCANREPO" config user.email t@t >/dev/null 2>&1
 git -C "$SCANREPO" config user.name  tester >/dev/null 2>&1
+# HOME sin copia global de secret-scan → la dedupe doble-cableado no cede (corre la copia bajo prueba).
 scan() { printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$1\"}}" \
-         | CLAUDE_PROJECT_DIR="$SCANREPO" bash "$HOOKS/secret-scan.sh"; }
+         | HOME="$SCANREPO" CLAUDE_PROJECT_DIR="$SCANREPO" bash "$HOOKS/secret-scan.sh"; }
 # (1) llave AWS falsa staged → deny
 printf 'aws_key = AKIA1234567890ABCDEF\n' > "$SCANREPO/config.txt"
 git -C "$SCANREPO" add config.txt >/dev/null 2>&1
@@ -280,7 +281,31 @@ o="$(scan 'git commit -m x')"
 # (4) un no-git → silencio
 o="$(scan 'ls -la')"
 [ -z "$o" ] && ok "secret-scan ignora comandos no-git" || bad "secret-scan reaccionó a no-git; got: $o"
+# ── §D: patrones NUEVOS (JWT, connection string, Password=) vía la lib detectar-secretos ──
+reset_scan() { git -C "$SCANREPO" reset -q >/dev/null 2>&1; rm -f "$SCANREPO"/*.txt 2>/dev/null; }
+# (6) JWT
+reset_scan; printf 'jwt: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c\n' > "$SCANREPO/j.txt"
+git -C "$SCANREPO" add j.txt >/dev/null 2>&1; o="$(scan 'git commit -m x')"
+printf '%s' "$o" | grep -q '"deny"' && ok "secret-scan §D: JWT (eyJ.eyJ.firma) → deny" || bad "secret-scan §D: no bloqueó un JWT; got: $o"
+# (7) connection string con creds embebidas (user:pass@host)
+reset_scan; printf 'db = postgres://admin:s3cr3tp4ss@db.internal:5432/prod\n' > "$SCANREPO/c.txt"
+git -C "$SCANREPO" add c.txt >/dev/null 2>&1; o="$(scan 'git commit -m x')"
+printf '%s' "$o" | grep -q '"deny"' && ok "secret-scan §D: connstring user:pass@host → deny" || bad "secret-scan §D: no bloqueó creds en URL; got: $o"
+# (8) Password= estilo .NET con valor REAL → deny; con \$VAR de entorno → silencio (no es secreto en claro)
+reset_scan; printf 'conn = "Server=db;User Id=sa;Password=Sup3rSecret!;"\n' > "$SCANREPO/p.txt"
+git -C "$SCANREPO" add p.txt >/dev/null 2>&1; o="$(scan 'git commit -m x')"
+printf '%s' "$o" | grep -q '"deny"' && ok "secret-scan §D: Password=<valor real> → deny" || bad "secret-scan §D: no bloqueó Password= real; got: $o"
+reset_scan; printf 'conn = "Server=db;Password=${DB_PASS};"\n' > "$SCANREPO/e.txt"
+git -C "$SCANREPO" add e.txt >/dev/null 2>&1; o="$(scan 'git commit -m x')"
+[ -z "$o" ] && ok 'secret-scan §D: Password=${VAR} (ref de entorno) → silencio (sin falso positivo)' || bad "secret-scan §D: falso positivo con Password=\${VAR}; got: $o"
 rm -rf "$SCANREPO"
+# (9) §D fail-open vs fail-closed: en un NO-repo, default → fail-OPEN (silencio); STRICT=1 → fail-CLOSED (deny)
+NONGIT="$(mktemp -d "${TMPDIR:-/tmp}/brain-nogit.XXXXXX")"
+o="$(printf '%s' '{"tool_input":{"command":"git commit -m x"}}' | HOME="$NONGIT" CLAUDE_PROJECT_DIR="$NONGIT" bash "$HOOKS/secret-scan.sh")"
+[ -z "$o" ] && ok "secret-scan §D: no-repo + default → fail-OPEN (silencio)" || bad "secret-scan §D: default no fue fail-open en no-repo; got: $o"
+o="$(printf '%s' '{"tool_input":{"command":"git commit -m x"}}' | HOME="$NONGIT" CLAUDE_PROJECT_DIR="$NONGIT" CLAUDE_SECRET_SCAN_STRICT=1 bash "$HOOKS/secret-scan.sh")"
+printf '%s' "$o" | grep -q '"deny"' && ok "secret-scan §D: no-repo + STRICT=1 → fail-CLOSED (deny)" || bad "secret-scan §D: STRICT no bloqueó en no-repo; got: $o"
+rm -rf "$NONGIT"
 
 # (5) G5: PRIMER push de una rama NUEVA sin upstream → antes fail-open (no escaneaba); ahora escanea lo
 # que la rama AGREGA vs el merge-base con develop/main.
@@ -291,7 +316,7 @@ git -C "$G5REPO" config user.email t@t >/dev/null 2>&1
 git -C "$G5REPO" config user.name  tester >/dev/null 2>&1
 printf 'base limpia\n' > "$G5REPO/base.txt"; git -C "$G5REPO" add base.txt >/dev/null 2>&1; git -C "$G5REPO" commit -qm base >/dev/null 2>&1
 git -C "$G5REPO" branch develop >/dev/null 2>&1
-scan5() { printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$1\"}}" | CLAUDE_PROJECT_DIR="$G5REPO" bash "$HOOKS/secret-scan.sh"; }
+scan5() { printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$1\"}}" | HOME="$G5REPO" CLAUDE_PROJECT_DIR="$G5REPO" bash "$HOOKS/secret-scan.sh"; }
 git -C "$G5REPO" checkout -q -b feat/nueva >/dev/null 2>&1
 printf 'key = AKIA1234567890ABCDEF\n' > "$G5REPO/secreto.txt"; git -C "$G5REPO" add secreto.txt >/dev/null 2>&1; git -C "$G5REPO" commit -qm add >/dev/null 2>&1
 o="$(scan5 'git push -u origin feat/nueva')"
@@ -520,6 +545,7 @@ e="$(grep -c 'END claude-brain'   "$GCLAUDE2" 2>/dev/null || echo 0)"
 [ -f "$FAKEHOME2/.claude/hooks/aviso-contexto.sh" ]      && ok "hook aviso-contexto instalado"  || bad "falta hook aviso-contexto"
 [ -f "$FAKEHOME2/.claude/hooks/delegacion-comun.sh" ]    && ok "lib delegacion-comun.sh instalada" || bad "falta lib delegacion-comun.sh"
 [ -f "$FAKEHOME2/.claude/hooks/analizar-comando-git.sh" ] && ok "lib analizar-comando-git.sh instalada" || bad "falta lib analizar-comando-git.sh"
+[ -f "$FAKEHOME2/.claude/hooks/detectar-secretos.sh" ] && ok "lib detectar-secretos.sh instalada" || bad "falta lib detectar-secretos.sh"
 
 # Bonus: el desinstalador deja settings.json sin las entradas del cerebro y sin el bloque de normas
 if [ -f "$SCRIPT_DIR/uninstall-brain.sh" ]; then
@@ -577,6 +603,7 @@ CE_ALLOW="analizar-comando-git|git-branch-guard
 analizar-comando-git|merge-squash-guard
 analizar-comando-git|confirmar-merge-develop
 confirmar-merge-develop|merge-squash-guard
+detectar-secretos|secret-scan
 cerrar-slice|merge-squash-guard
 cerrar-slice|recordar-dashboard
 delegacion-comun|delegacion-gate

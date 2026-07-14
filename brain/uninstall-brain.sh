@@ -6,8 +6,9 @@
 # Quita GLOBAL (de ~/.claude):
 #   (a) los HOOKS de tier global que copió el instalador → git-branch-guard, merge-squash-guard,
 #       confirmar-merge-develop, recordar-dashboard, secret-scan, rama-vieja, proteger-arbol,
-#       limite-gasto, rehidratar-hilo, delegacion-gate/registrar/reporte, delegacion-comun y analizar-comando-git (libs),
-#       limpiar-worktrees (script) + ~/.claude/agentes-costo.json.
+#       limite-gasto, rehidratar-hilo, delegacion-gate/registrar/reporte, libs (delegacion-comun,
+#       analizar-comando-git, detectar-secretos), limpiar-worktrees (script) + ~/.claude/agentes-costo.json.
+#       La lista EXACTA se deriva de brain/hooks/MANIFEST (misma fuente que install-brain).
 #   (b) DES-CABLEA de ~/.claude/settings.json SOLO las entradas que apuntan a esos hooks (deja
 #       intactas las demás — usa jq); poda los arrays de evento que queden vacíos.
 #   (c) las SKILLS genéricas (cerrar-slice, orquestar-fanout, checkpoint, rehidratar-hilo) de ~/.claude/skills/.
