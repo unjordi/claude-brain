@@ -17,11 +17,11 @@ digraph flujos {
   edge [color="#D97757" fontcolor="#C9BFB4" fontname="Helvetica" fontsize=10 penwidth=1.3 arrowsize=0.8];
 
   LEG [shape=note fillcolor="#2B2622" color="#D97757" penwidth=2 fontcolor="#F2EDE6" fontname="Menlo" fontsize=11
-       label="🧠  claude-brain — MAPA ÚNICO del cerebro\l(flowcharts fieles a cada hook + las normas que hacen cumplir)\l\l◆ diamante = decisión (ramas sí/no) · ▭ caja = hook / paso\l🟢  pasa/permite · 🔴  DENY/bloquea · 🟠  ASK/AVISA\l📜 NORMA (el cimiento) — cada flujo apunta a la norma que sirve\l\lBadge de tipo (arriba de cada nodo):\l  🔒 hook FORZOSO (bloquea · deny)  ·  🔔 hook AUTOMÁTICO (inyecta/recuerda, NO bloquea)\l  💡 skill  ·  ⚙ lib  ·  📜 norma  ·  🛡 P0\l\l────────────────────────────────────────────────────────\lÁrbol del cerebro (pestaña «Cerebro» del widget):\l\l🔒 Hooks Forzosos — bloquean (deny) · no negociables\l├─ 🚧 git-branch-guard:  push/merge a develop·main → denegado\l├─ 🔗 merge-squash-guard:  MR a develop sin --squash → denegado\l├─ 🕵️ secret-scan:  commit/push con un secreto → denegado\l├─ 💸 delegacion-gate:  delegar al llegar al 90% de tu ventana 5h → pide tu OK\l├─ 🛑 limite-gasto:  sin ventana 5h Y sin overage (ambos agotados) → freno duro\l└─ 📁 por-repo (viajan en el .claude de cada repo):\l   ├─ ✋ confirmar-merge-develop:  merge sin tu OK → denegado\l   └─ ✅ dod-verificar:  cierre sin evidencia/OK → denegado; claim visual a ciegas también\l\l🔔 Automático — inyectan / recuerdan (no bloquean)\l├─ 📊 recordar-dashboard:  en el push recuerda dashboard + doc=realidad (README/docs)\l├─ 🕰️ rama-vieja:  avisa si la ramita arrastra base vieja\l├─ 🌳 proteger-arbol:  git destructivo que orfanaría commits sin pushear → avisa (fan-out: worktree aislado)\l├─ 📝 delegacion-registrar:  materializa el «pregunta una sola vez»\l├─ 📮 delegacion-reporte:  al terminar un agente: registra avance + limpia su worktree\l├─ 🧵 rehidratar-hilo:  reinyecta hilo-mental-actual.md al abrir/retomar/compactar (GLOBAL)\l└─ 📁 por-repo:\l   ├─ 🧭 sesion-inicio:  reinyecta rama + norma + memoria al abrir\l   └─ 💤 precompact-volcar-estado:  no-op honesto (PreCompact no puede inyectar; el volcado lo hace 💾 checkpoint)\l\l📜 Normas — reglas que Claude se autoimpone (CLAUDE.md)\l├─ 🎯 Definition of Done:  verde técnico ≠ Done/Listo; exige QA o un OK explícito\l├─ 🪞 Doc = realidad:  cambió algo → su doc se actualiza en la tanda\l├─ 🌿 Flujo de git:  ramita → MR → develop; main es release-only\l└─ 💰 Costo de delegación:  gratis / incluido / con costo, según tu cuota\l\l💡 Skills — opt-in, las invocas tú\l├─ 📦 cerrar-slice:  build+tests+memoria al día + MR con resumen curado\l├─ 💾 checkpoint:  vuelca el HILO a memoria para compactar sin perderlo (proactivo)\l└─ 🧵 orquestar-fanout:  fan-out sin niñera: asigna del backlog, auto-reporta y limpia\l"];
+       label="🧠  claude-brain — MAPA ÚNICO del cerebro\l(flowcharts fieles a cada hook + las normas que hacen cumplir)\l\l◆ diamante = decisión (ramas sí/no) · ▭ caja = hook / paso\l🟢  pasa/permite · 🔴  DENY/bloquea · 🟠  ASK/AVISA\l📜 NORMA (el cimiento) — cada flujo apunta a la norma que sirve\l\lBadge de tipo (arriba de cada nodo):\l  🔒 hook FORZOSO (bloquea · deny)  ·  🔔 hook AUTOMÁTICO (inyecta/recuerda, NO bloquea)\l  💡 skill  ·  ⚙ lib  ·  📜 norma  ·  🛡 P0\l\l────────────────────────────────────────────────────────\lÁrbol del cerebro (pestaña «Cerebro» del widget):\l\l🔒 Hooks Forzosos — bloquean (deny) · no negociables  (GLOBALES; los ★ ADEMÁS viajan por-repo, DEDUPLICADOS R1: la copia del repo cede si existe la global → 1×, no 2×)\l├─ ★🚧 git-branch-guard:  push/merge a develop·main → denegado\l├─ ★🔗 merge-squash-guard:  MR a develop CONFIRMADO sin --squash → denegado (SOLO develop · G4)\l├─ 🕵️ secret-scan:  commit/push con un secreto → denegado (incl. 1er push de rama nueva · G5)\l├─ ★✋ confirmar-merge-develop:  merge sin tu OK expreso → denegado (GLOBAL; gatea en repos con marca repo-compartido)\l├─ 💸 delegacion-gate:  delegar al 90% de tu ventana 5h → pide OK (fan-out: 1 ask por LOTE · G3)\l├─ 🛑 limite-gasto:  sin ventana 5h Y sin overage → freno duro (corre ANTES del gate · G6)\l└─ 📁 solo por-repo (viaja en el .claude del repo):\l   └─ ✅ dod-verificar:  cierre sin evidencia/OK → denegado; una pregunta NO salva un claim (G1); QA visual a ciegas también\l\l🔔 Automático — inyectan / recuerdan (no bloquean)\l├─ ★📊 recordar-dashboard:  en el push recuerda dashboard + doc=realidad (merge-base cae a origin/* en clon fresco · G8)\l├─ 🕰️ rama-vieja:  avisa si la ramita arrastra base vieja\l├─ 🌳 proteger-arbol:  git destructivo que orfanaría commits sin pushear → avisa (fan-out: worktree aislado)\l├─ 📝 delegacion-registrar:  materializa el «pregunta una sola vez»\l├─ 📮 delegacion-reporte:  al terminar un agente: registra avance + limpia su worktree\l├─ 🧵 rehidratar-hilo:  reinyecta hilo-mental-actual.md al abrir/retomar/compactar + GATE DE FRESCURA (GLOBAL)\l├─ 📈 aviso-contexto:  watermark — avisa «vuelca con checkpoint y compacta TÚ» antes del auto-compact (GLOBAL)\l└─ 📁 solo por-repo:\l   └─ 🧭 sesion-inicio:  reinyecta rama + norma + memoria al abrir/retomar/compactar\l\l📜 Normas — reglas que Claude se autoimpone (CLAUDE.md)\l├─ 🎯 Definition of Done:  verde técnico ≠ Done/Listo; exige QA o un OK explícito\l├─ 🪞 Doc = realidad:  cambió algo → su doc se actualiza en la tanda\l├─ 🌿 Flujo de git:  ramita → MR → develop; main es release-only\l└─ 💰 Costo de delegación:  gratis / incluido / con costo, según tu cuota\l\l💡 Skills — opt-in, las invocas tú\l├─ 📦 cerrar-slice:  build+tests+memoria al día + MR con resumen curado\l├─ 💾 checkpoint:  vuelca el HILO a memoria para compactar sin perderlo (proactivo)\l└─ 🧵 orquestar-fanout:  fan-out sin niñera: asigna del backlog, auto-reporta y limpia\l"];
 
   // ===================== ⓪ CICLO DE VIDA DE LA SESIÓN =====================
   subgraph cluster_f0 {
-    label="⓪ Ciclo de vida de la sesión   (bootstrap 1× · SessionStart: 🔔 rehidratar-hilo GLOBAL + 🔔 sesion-inicio por-repo · 💾 checkpoint vuelca el hilo · 🔔 precompact = no-op honesto)";
+    label="⓪ Ciclo de vida de la sesión   (bootstrap 1× · SessionStart: 🔔 rehidratar-hilo GLOBAL con gate de FRESCURA + 🔔 sesion-inicio por-repo · 💾 checkpoint vuelca el hilo · 🔔 aviso-contexto = watermark anti-auto-compact)";
     labeljust="l"; fontcolor="#5B8DBF"; fontsize=14; color="#5B8DBF"; style="rounded"; penwidth=1.6; margin=16;
 
     Z_OPEN [shape=box color="#8A8A8A" fillcolor="#232323" fontcolor="#CFC8C0" penwidth=1.5 label="abres Claude Code en un folder"];
@@ -35,34 +35,31 @@ digraph flujos {
     Z_PROTW [color="#E08E45" label="🟠  + aviso: rama PROTEGIDA →\nsaca una ramita feat/… desde develop"];
     Z_EST [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿existe\nestado-proyecto.md?"];
     Z_ESTW [color="#E08E45" label="🟠  + inyecta su Resumen\n(dónde quedó el avance)"];
-    Z_MIG [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿existe\ndocs/inventario-paridad.md?"];
-    Z_MIGW [color="#E08E45" label="🟠  + aviso MIGRACIÓN: revisa\nparidad + el módulo legado real"];
     Z_READY [color="#7FB069" label="🟢  contexto rehidratado → a trabajar\n(sin perder el hilo entre sesiones/compus)"];
 
+    Z_AVISO [color="#E08E45" label="🔔\n📈  aviso-contexto  (PostToolUse · GLOBAL · watermark)\nmide el CRECIMIENTO del contexto desde el último /compact\n(proxy: líneas del transcript vs baseline; umbral tunable,\ndebounce por banda). Al cruzar el umbral INYECTA:\n«vuelca con checkpoint y compacta TÚ ahora» (con holgura)\n→ el auto-compact-sorpresa se vuelve fallback raro"];
     Z_CHECK [color="#E08E45" label="💾  checkpoint  (skill — TÚ lo invocas, PROACTIVO)\nvuelca el HILO → .claude/memory/hilo-mental-actual.md\nen pausas / ANTES de /compact\n📜 → 🪞 doc=realidad · 💡 cerrar-slice §2 hace este mismo volcado"];
-    Z_COMPACT [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔔\n💤  precompact-volcar-estado  (PreCompact)\nNO-OP honesto: PreCompact no puede inyectar ni pedir\nacción (no hay turno antes de compactar) → sale 0"];
-    Z_REHID [color="#E08E45" label="🔔\n🧵  rehidratar-hilo  (SessionStart · GLOBAL)\nreinyecta hilo-mental-actual.md si existe → el HILO vuelve\n(silencioso si no existe)"];
+    Z_REHID [color="#E08E45" label="🔔\n🧵  rehidratar-hilo  (SessionStart · GLOBAL)\nreinyecta hilo-mental-actual.md si existe → el HILO vuelve\n+ GATE DE FRESCURA: si mtime>12h o rama distinta →\ndegrada a «⚠️ posiblemente OBSOLETO» (no engaña)\n+ en source=compact RESETEA el baseline del watermark\n(silencioso si no existe hilo)"];
 
     Z_OPEN -> Z_GIT;
     Z_GIT -> Z_PLAIN [label="no" color="#7FB069"];
-    Z_GIT -> Z_BOOT  [label="sí (1ª vez)"];
-    Z_BOOT -> Z_START;
+    Z_GIT -> Z_BOOT  [label="1ª vez tras clonar\n(bootstrap, UNA vez)" style=dashed color="#8A8A8A"];
+    Z_GIT -> Z_START [label="sí (repo con cerebro)\n— CADA sesión" color="#5B8DBF"];
+    Z_BOOT -> Z_START [style=dashed color="#8A8A8A"];
     Z_START -> Z_INJECT;
     Z_INJECT -> Z_PROT;
     Z_PROT -> Z_PROTW [label="sí" color="#E08E45"];
     Z_PROT -> Z_EST   [label="no"];
     Z_PROTW -> Z_EST;
-    Z_EST -> Z_ESTW [label="sí" color="#E08E45"];
-    Z_EST -> Z_MIG  [label="no"];
-    Z_ESTW -> Z_MIG;
-    Z_MIG -> Z_MIGW  [label="sí" color="#E08E45"];
-    Z_MIG -> Z_READY [label="no" color="#7FB069"];
-    Z_MIGW -> Z_READY;
-    Z_READY -> Z_CHECK [label="pausa / voy a compactar" style=dashed];
-    Z_CHECK -> Z_COMPACT [label="/compact\n(o auto-compact)"];
-    Z_COMPACT -> Z_REHID [label="tras compactar:\nSessionStart source=compact" style=dashed color="#5B8DBF"];
+    Z_EST -> Z_ESTW  [label="sí" color="#E08E45"];
+    Z_EST -> Z_READY [label="no" color="#7FB069"];
+    Z_ESTW -> Z_READY;
+    Z_READY -> Z_AVISO [label="durante la corrida\n(vigila cada tool)" style=dashed];
+    Z_AVISO -> Z_CHECK [label="cruza el umbral →\nvuelca + propón /compact" color="#E08E45"];
+    Z_READY -> Z_CHECK [label="o TÚ en una pausa\n(proactivo)" style=dashed color="#8A8A8A" constraint=false];
+    Z_CHECK -> Z_REHID [label="/compact o auto-compact →\nSessionStart source=compact\n(dispara sesion-inicio + rehidratar-hilo)" style=dashed color="#5B8DBF"];
     Z_REHID -> Z_READY [label="hilo restaurado →\nsigue sin perderlo" color="#7FB069" constraint=false];
-    Z_START -> Z_REHID [label="misma SessionStart\n(global + por-repo)" style=dotted color="#8A8A8A" constraint=false];
+    Z_START -> Z_REHID [label="misma SessionStart\n(startup/resume/compact · global + por-repo)" style=dotted color="#8A8A8A" constraint=false];
   }
 
   // ===================== ① INTEGRAR a develop/main =====================
@@ -73,8 +70,8 @@ digraph flujos {
     G1_IN  [shape=box color="#8A8A8A" fillcolor="#232323" fontcolor="#CFC8C0" penwidth=1.5 label="intento de integrar\n(git push · glab mr merge · gh pr merge)"];
     G1_D1  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔒\n🚧  git-branch-guard\n¿push DIRECTO\na develop/main?"];
     G1_DENY1 [color="#C0392B" label="🔴  DENY — no push a develop/main\nhaz ramita → MR (a main solo\nrelease del humano en la web)"];
-    G1_D2  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔒\n🔗  merge-squash-guard\n¿MR a develop\nSIN --squash?\n(mensaje tool-aware: gh o glab · P5)"];
-    G1_DENY2 [color="#C0392B" label="🔴  DENY — a develop se SQUASHEA\n(1 commit limpio/slice); rehaz con\n--squash --squash-message. main EXENTO"];
+    G1_D2  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔒\n🔗  merge-squash-guard\n¿MR con destino = develop CONFIRMADO\nSIN --squash?\n(SOLO develop obliga squash · G4 · msg tool-aware gh/glab · P5)"];
+    G1_DENY2 [color="#C0392B" label="🔴  DENY — SOLO a develop se SQUASHEA\n(1 commit limpio/slice); rehaz con --squash.\nmain (release) / ramas personales / destino\nINDETERMINADO → LIBRES (fail-safe: no fuerza squash)"];
     G1_D3  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔒\n✋  confirmar-merge-develop\n¿repo COMPARTIDO y\nfalta OK expreso del usuario\npara ESTE cierre?\n(busca tu OK en tus últimos 10 mensajes, no en líneas crudas · P17)"];
     G1_DENY3 [color="#C0392B" label="🔴  DENY — exige OK EXPRESO.\n«sigue/avanza» NO cuenta; a main pide\nOK SÚPER explícito (release). Itera en\nrama de integración con merge LOCAL"];
     G1_OK  [color="#7FB069" label="🟢  MERGE — develop: con --squash\nmain: release SIN squash\n📜 → 🌿 Flujo de git"];
@@ -82,42 +79,44 @@ digraph flujos {
     G1_IN -> G1_D1;
     G1_D1 -> G1_DENY1 [label="sí" color="#C0392B"];
     G1_D1 -> G1_D2    [label="no"];
-    G1_D2 -> G1_DENY2 [label="sí" color="#C0392B"];
-    G1_D2 -> G1_D3    [label="no / main / personal"];
+    G1_D2 -> G1_DENY2 [label="sí (develop confirmado)" color="#C0392B"];
+    G1_D2 -> G1_D3    [label="no · main · personal · indeterminado"];
     G1_D3 -> G1_DENY3 [label="sí" color="#C0392B"];
     G1_D3 -> G1_OK    [label="no (hay OK)" color="#7FB069"];
   }
 
-  // ===================== ② COMANDO GIT EN BASH — dos guards con la MISMA entrada ==========
-  // secret-scan (🔒 bloquea) y proteger-arbol (🔔 avisa) comparten entrada "comando git en Bash";
-  // un despachador los abre según el TIPO de comando.
+  // ===================== ② COMANDO GIT EN BASH — dos guards PARALELOS e independientes ==========
+  // secret-scan (🔒 bloquea) y proteger-arbol (🔔 avisa) son DOS PreToolUse/Bash separados que reciben
+  // la MISMA entrada; NO hay despachador — cada hook filtra por su cuenta si el comando le incumbe.
   subgraph cluster_f2 {
     label="② Comando git en Bash · guards que lo inspeccionan   (🔒 secret-scan bloquea · 🔔 proteger-arbol avisa)";
     labeljust="l"; fontcolor="#D97757"; fontsize=14; color="#D97757"; style="rounded"; penwidth=1.6; margin=16;
 
-    GG_IN   [shape=box color="#8A8A8A" fillcolor="#232323" fontcolor="#CFC8C0" penwidth=1.5 label="comando git en Bash\n(PreToolUse/Bash)"];
-    GG_DISP [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿qué comando git es?"];
-    GG_OTRO [color="#7FB069" label="🟢  otro → pasa\n(no es asunto de estos guards)"];
+    GG_IN   [shape=box color="#8A8A8A" fillcolor="#232323" fontcolor="#CFC8C0" penwidth=1.5 label="comando Bash con git (PreToolUse/Bash)\n→ los DOS hooks lo reciben en paralelo (sin despachador)"];
 
-    // --- rama secret-scan (commit / push) ---
-    S_D2  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔒\n🕵  secret-scan\n¿escape deliberado?\n(--no-verify · CLAUDE_SKIP_SECRET_SCAN=1)"];
+    // --- rama secret-scan (🔒 bloquea) — filtra POR SÍ MISMO si es commit/push ---
+    S_IS  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔒\n🕵  secret-scan\n¿es git commit / push?"];
+    S_NA  [color="#7FB069" label="🟢  no incumbe → pasa"];
+    S_D2  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿escape deliberado?\n(--no-verify · CLAUDE_SKIP_SECRET_SCAN=1)"];
     S_PASA2 [color="#7FB069" label="🟢  pasa (el humano manda)"];
-    S_D3  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿repo git y rango\ndeterminable?\n(commit: staging · push: @{u}..HEAD)"];
-    S_PASA3 [color="#7FB069" label="🟢  pasa (fail-open:\nsin git/upstream no bloquea)"];
+    S_D3  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿repo git y rango\ndeterminable?\n(commit: staging · push: @{u}..HEAD;\nsin upstream = 1er push de rama nueva →\ncae al merge-base con develop/main · G5)"];
+    S_PASA3 [color="#7FB069" label="🟢  pasa (fail-open:\nsin git ni base determinable, no bloquea)"];
     S_D4  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿línea AGREGADA con patrón de\nSECRETO (AKIA · PEM · sk-ant · gh_ ·\nglpat · xox · AIza) NO placeholder?"];
     S_PASA4 [color="#7FB069" label="🟢  pasa (sin secretos)"];
     S_DENY [color="#C0392B" label="🔴  DENY — secreto detectado (redacta el match).\nSácalo a env/gestor/*.local; si ya estaba\ncommiteado ROTA la credencial; si es falso\npositivo, --no-verify o CLAUDE_SKIP_SECRET_SCAN=1"];
 
-    // --- rama proteger-arbol (destructivo) ---
-    A_D2  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔔\n🌳  proteger-arbol\n¿orfanaría >0 commits\nSIN pushear? (@{u}..HEAD)"];
+    // --- rama proteger-arbol (🔔 avisa) — filtra POR SÍ MISMO si es destructivo ---
+    A_IS  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔔\n🌳  proteger-arbol\n¿es git DESTRUCTIVO?\n(reset --hard/--merge/--keep ·\ncheckout -f · rebase · branch -D)"];
+    A_NA  [color="#7FB069" label="🟢  no incumbe → pasa"];
+    A_D2  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿orfanaría >0 commits\nSIN pushear? (@{u}..HEAD)"];
     A_PASA [color="#7FB069" label="🟢  pasa (sin ruido)"];
     A_WARN [color="#E08E45" label="🟠  AVISA (no bloquea) — puede orfanar\nN commits en el árbol PRINCIPAL o worktree.\nAgente de fan-out: usa worktree AISLADO;\nsi rebobinas a propósito, ignóralo\n📜 → 🧱 Aislamiento · 💡 → 🧵 orquestar-fanout"];
 
-    GG_IN -> GG_DISP;
-    GG_DISP -> S_D2    [label="git commit / push"];
-    GG_DISP -> A_D2    [label="reset --hard/--merge/--keep ·\ncheckout -f · rebase · branch -D"];
-    GG_DISP -> GG_OTRO [label="otro" color="#7FB069"];
+    GG_IN -> S_IS;   // los dos hooks reciben la MISMA entrada, en paralelo
+    GG_IN -> A_IS;
 
+    S_IS -> S_NA [label="no" color="#7FB069"];
+    S_IS -> S_D2 [label="sí (commit/push)"];
     S_D2 -> S_PASA2 [label="sí" color="#7FB069"];
     S_D2 -> S_D3    [label="no"];
     S_D3 -> S_PASA3 [label="no" color="#7FB069"];
@@ -125,6 +124,8 @@ digraph flujos {
     S_D4 -> S_PASA4 [label="no" color="#7FB069"];
     S_D4 -> S_DENY  [label="sí" color="#C0392B"];
 
+    A_IS -> A_NA [label="no" color="#7FB069"];
+    A_IS -> A_D2 [label="sí (destructivo)"];
     A_D2 -> A_PASA [label="no" color="#7FB069"];
     A_D2 -> A_WARN [label="sí" color="#E08E45"];
   }
@@ -174,12 +175,12 @@ digraph flujos {
     labeljust="l"; fontcolor="#C0392B"; fontsize=14; color="#C0392B"; style="rounded"; penwidth=1.6; margin=16;
 
     G2_IN  [shape=box color="#8A8A8A" fillcolor="#232323" fontcolor="#CFC8C0" penwidth=1.5 label="fin de turno (Stop)\nse mira el último mensaje del asistente"];
-    G2_D0  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔒\n✅  dod-verificar  (Stop)\n¿lenguaje de ESTATUS /\nespera / pregunta?\n(en preview, con tu OK, ¿…?,\no el mensaje TERMINA en «?» → P1)"];
+    G2_D0  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="🔒\n✅  dod-verificar  (Stop)\n¿es ESTATUS / espera / pregunta\nSIN un cierre afirmado co-ubicado?\n(en preview · con tu OK · ¿…? · P1;\nG1: el claim se evalúa sobre el texto SIN\nlos tramos ¿…? → una pregunta NO salva\nun cierre afirmado en el mismo mensaje)"];
     G2_ESC [color="#7FB069" label="🟢  no dispara\n(no es un cierre)"];
-    G2_D1  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿afirma QA VISUAL\n(mockup/Chrome/pantalla) SIN\ncorrer tool de navegador\neste turno, y sin (1)?"];
+    G2_D1  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿afirma QA VISUAL\n(mockup/Chrome/pantalla) SIN\ncorrer tool de navegador este turno, y sin (1)?\n(G2b: la tool se detecta por ESTRUCTURA del\ntranscript —tool_use chrome-MCP/computer—,\nNO por la palabra «screenshot» en prosa)"];
     G2_VIS [color="#C0392B" label="🔴  BLOCK — QA visual A CIEGAS.\nEstatus honesto: «verificado técnico,\nSIN QA visual»; lo mira el usuario"];
     G2_D2  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿afirma CIERRE?\n(listo/terminado/funciona/\nquedó/cerrado/a la par)"];
-    G2_D3  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿el turno tocó CÓDIGO?\n(archivo que no sea\n.md/.txt ni memoria)"];
+    G2_D3  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿el turno tocó CÓDIGO?\n(archivo que no sea .md/.txt ni memoria;\nG2a: TAMBIÉN cuenta la edición por Bash\n—sed -i · patch · redirección › · tee—,\nno solo un «file_path» de Edit/Write)"];
     G2_D4  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿cita marca de (1) QA\nconfirmado por el usuario\no (2) OK expreso de cierre?"];
     G2_OK  [color="#7FB069" label="🟢  cierra\n(build/tests + memoria se RECUERDAN\ncomo peldaño, no como candado)\n📜 → 🎯 Definición de LISTO"];
     G2_DENY [color="#C0392B" label="🔴  BLOCK — verde técnico ≠ LISTO.\nSin (1) ni (2) no se declara LISTO.\nSi es MIGRACIÓN: la prueba es\nAUDITORÍA DE PARIDAD, no build+tests"];
@@ -244,7 +245,9 @@ digraph flujos {
     G3_CG  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿ya consentido\nen ESTA compu?"];
     G3_CM  [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="¿ya consentido\nen ESTE workflow?"];
     G3_RUN1 [color="#7FB069" label="🟢  corre silencioso"];
-    G3_ASK1 [color="#E08E45" label="🟠  ASK 1×/compu\n(se recuerda por máquina)"];
+    G3_COAL [shape=diamond fillcolor="#2B2622" color="#D97757" penwidth=2 label="G3 · fan-out paralelo:\n¿otro gate del MISMO lote (sesión+key)\nya tomó el lock atómico?"];
+    G3_SIL  [color="#7FB069" label="🟢  pasa en SILENCIO (coalesced)\nel 1er ask del lote cubre a los hermanos\n→ mata el flood de N asks (solo gratis/incluido)"];
+    G3_ASK1 [color="#E08E45" label="🟠  ASK 1×/compu\n(toma el lock · se recuerda por máquina)"];
     G3_RUN2 [color="#7FB069" label="🟢  corre silencioso"];
     G3_ASK2 [color="#E08E45" label="🟠  ASK 1×/workflow\n(se recuerda por sesión)"];
     G3_REG  [color="#E08E45" label="🔔\n📝  delegacion-registrar  (PostToolUse/Task)\ntras aprobar el ask y correr el agente, GRABA el consentimiento:\ngratis/incluido → por COMPU · metered → por WORKFLOW\n→ la próxima delegación corre SILENCIOSA (así se cumple «pregunta 1×»)"];
@@ -257,9 +260,11 @@ digraph flujos {
     G3_NIVEL -> G3_CG [label="gratis (local) /\nincluido (Claude en ventana)"];
     G3_NIVEL -> G3_CM [label="metered (overage /\nexterno / desconocido)"];
     G3_CG -> G3_RUN1 [label="sí" color="#7FB069"];
-    G3_CG -> G3_ASK1 [label="no" color="#E08E45"];
+    G3_CG -> G3_COAL [label="no (aún sin consentir)"];
+    G3_COAL -> G3_SIL  [label="sí (soy hermano)" color="#7FB069"];
+    G3_COAL -> G3_ASK1 [label="no (soy el 1º del lote)" color="#E08E45"];
     G3_CM -> G3_RUN2 [label="sí" color="#7FB069"];
-    G3_CM -> G3_ASK2 [label="no" color="#E08E45"];
+    G3_CM -> G3_ASK2 [label="no (metered NO se coalesce:\ncada uno confirma)" color="#E08E45"];
     G3_ASK1 -> G3_REG [label="apruebas → corre" color="#E08E45"];
     G3_ASK2 -> G3_REG [label="apruebas → corre" color="#E08E45"];
   }
