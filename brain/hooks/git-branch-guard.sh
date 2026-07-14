@@ -16,6 +16,11 @@ input=$(cat)
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -z "$cmd" ] && exit 0
 
+# Despoja literales entrecomillados (mensaje de commit / arg de grep / doc) para NO matchear una
+# MENCIÓN de "push a develop" como si fuera el comando. Igual que proteger-arbol/rama-vieja/
+# recordar-dashboard. Un push REAL a develop no lleva la rama entrecomillada → sigue bloqueándose.
+unquoted=$(printf '%s' "$cmd" | sed "s/'[^']*'//g; s/\"[^\"]*\"//g")
+
 block() {
   jq -n --arg r "$1" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
   exit 0
@@ -26,11 +31,11 @@ block() {
 PUSH_RE='git[[:space:]]+push[^;&|]*[[:space:]:/](main|develop)([[:space:]]|$|["'"'"'])'
 MERGE_RE='(glab[[:space:]]+mr[[:space:]]+merge|gh[[:space:]]+pr[[:space:]]+merge)[^;&|]*[[:space:]:/](main|develop)([[:space:]]|$|["'"'"'])'
 
-if printf '%s' "$cmd" | grep -qE "$PUSH_RE"; then
+if printf '%s' "$unquoted" | grep -qE "$PUSH_RE"; then
   block "NORMA DE GIT (ley interna): no se hace push a main/develop. NO reintentes esto. Haz el cambio por el flujo: ramita (feat/fix/chore/docs) desde develop → commit → push de la ramita → MR/PR → merge a develop. A main solo llega un release deliberado que hace el humano en la web de GitLab, no por CLI."
 fi
 
-if printf '%s' "$cmd" | grep -qE "$MERGE_RE"; then
+if printf '%s' "$unquoted" | grep -qE "$MERGE_RE"; then
   block "NORMA DE GIT (ley interna): mergear develop→main es un RELEASE, y lo hace el humano deliberadamente en la web de GitLab, no Claude por CLI. NO reintentes. El trabajo se integra a develop por MR de una ramita, no a main."
 fi
 
