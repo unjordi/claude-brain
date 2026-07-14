@@ -137,3 +137,69 @@ Hay **dos rutas de instalación que instalan conjuntos distintos** — nadie las
 ## 6. Qué NO cambia
 Los flujos ⓪–⑧ del mapa (la lógica de decisión) son los MISMOS; solo cambia DÓNDE vive el código y qué
 tiene gemelo manual. El mapa se re-anota (badge "⚙ lib" donde aplique), no se rehace.
+
+## 7. Hallazgos de la AUDITORÍA de flowcharts (2026-07-14) → checklist atómico
+> El Auditor de Calidad (procesos industriales + análisis de algoritmos) revisó los 9 flujos individual y
+> colectivamente, cotejando el mapa contra `brain/hooks/*.sh` **Y** la copia desplegada en la plantilla .NET.
+> Reporte completo: [`docs/auditoria-flowcharts.md`](auditoria-flowcharts.md). **Verificado H1/H3/H5/H6/H7
+> contra el código real (son reales).** Veredicto: el mapa es coherente como MODELO (no rehacer flujos),
+> pero la etiqueta "fiel a la lógica real" no se sostiene sin resolver el drift, y 3 candados se vuelven
+> fail-open bajo condiciones plausibles.
+>
+> **Regla de proceso (dura):** los fixes de **LÓGICA** de abajo son **CAMBIOS DE COMPORTAMIENTO** (nuevos
+> deny/disparos), NO "refactor puro con `test-brain` constante". Cada uno **nace con su test nuevo** (la
+> suite CRECE). En cada MR, separar explícitamente "reorg pura" de "fix de comportamiento".
+
+### A · ANTI-DRIFT primero (sostiene la premisa «fuente única») — H2, H7-cableado
+- [ ] Reconciliar `brain/hooks/` ↔ copia desplegada en la plantilla .NET (hoy driftea en AMBOS sentidos:
+      el widget tiene el `dod` fuerte con bloqueo QA-visual; la plantilla tiene el fix de comillas de
+      `git-branch-guard` — y ese fix vive en la ramita `fix/git-branch-guard-comillas`, aún NO en esta rama).
+- [ ] **Sello de versión** del cerebro (hoy no existe; el widget sí lo tiene).
+- [ ] `sincronizar-cerebro.sh` (fuente única = brain; NO `cp -f` ciego) + **check de drift BIDIRECCIONAL** en test-brain/CI.
+- [ ] Reconciliar las 2 rutas de install en una lista ÚNICA de «qué es global» → un clon de la plantilla SÍ obtiene secret-scan (hoy no).
+
+### B · lib `analizar-comando-git.sh` (Fase 1) — H1, H3, H5, H11, H13
+- [ ] `despoja_comillas(cmd)` para TODOS los git-hooks (fix #2; H13: hoy secret-scan y branch-guard-widget no despojan).
+- [ ] `es_push_a_base(cmd)` que resuelva la **rama actual + upstream** cuando el push es PELÓN (sin refspec)
+      → cierra **H1** (`git push` a secas en develop/main hoy NO se bloquea).
+- [ ] Anclar los escapes al **subcomando real** (`glab mr list|view`), no a cualquier token suelto (`status`)
+      → cierra **H3** (evasión de `confirmar-merge-develop` con `… && git status`).
+- [ ] `destino_de_mr(cmd)` con **caché por MR-id COMPARTIDA** entre squash-guard y confirmar → 1 sola llamada
+      de red (**H5**) + degradar a **deny conservador** si la resolución hace timeout (hoy el timeout evade el hook).
+- [ ] Guarda contra falso positivo de repo-path que termina en `/develop`|`/main` (**H11**).
+
+### C · lib `definicion-de-listo.sh` (Fase 2) — H4, #1
+- [ ] STATUS_RE **claim-aware**: subordinar el escape de estatus a que NO haya claim de cierre co-ubicado →
+      cierra **H4** («Listo, quedó terminado. Dime si reviso algo más.» hoy NO dispara).
+- [ ] Unificar la `dod` DÉBIL de la plantilla con la fuerte (bloqueo QA-visual-a-ciegas) sobre la MISMA lib (#1, confirmado por H2).
+
+### D · lib `detectar-secretos.sh` (Fase 3) — H7
+- [ ] Ampliar patrones: connection strings (`://user:pass@`, `Password=`), JWT, blobs base64 — hoy solo prefijos.
+- [ ] Decidir **fail-open vs fail-closed** para un guard de SEGURIDAD (hoy fail-open sin jq/git/rango).
+- [ ] Cablear `secret-scan` **también por-repo** (o documentar su dependencia del bootstrap) → **H7 = #4 como
+      P0 de seguridad**: un clon fresco de la plantilla NO tiene ningún escaneo de secretos.
+
+### E · Pasada de MAPA (anotar, NO rehacer) — H8, H9, H10, colisiones
+- [ ] Mostrar que **②③④ son el MISMO evento** PreToolUse/Bash con N hooks en PARALELO (no secuencial);
+      añadir la **matriz disparador×hooks** del reporte.
+- [ ] Añadir en ② la rama **`MERGE_RE`** de git-branch-guard (hoy solo pinta «push directo»).
+- [ ] Alinear norma N_GIT/CLAUDE.md: release a main **por CLI con OK súper-explícito** (no «JAMÁS por CLI»)
+      — o cerrar esa vía; hoy mapa+código se contradicen con la norma (**H8**).
+- [ ] Bajar **P0** de «activa/protege» a «norma SIN mecanismo local — enforcement externo (auto-mode)», o
+      darle mecanismo (guard que avise al editar `brain/hooks/*.sh`) (**H9**).
+- [ ] Reflejar `precompact-volcar-estado` como no-op inerte (o descablearlo + quitar su `statusMessage` que miente) (**H10**).
+
+### F · Backlog (fuera del refactor inmediato) — H6, H12
+- [ ] **H6** `delegacion-gate`: liberar el lock de coalescencia al NEGAR (hoy un «no» + reintento <60s permite
+      en silencio). *Alcance: solo gratis/incluido (costo cero) → wart de semántica, no de gasto; metered no se coalesce.*
+- [ ] **H12** doc=realidad dentro del hook: `delegacion-gate.sh:6` dice «def 95%», el real es **90**.
+
+### G · Numeración (unificar Fases ↔ PASOS)
+- [ ] PASO 1 = flowchart ⓪ **[✅]** · PASO 2 = Fases 1–3 (libs B/C/D) · **Fase 4** (gemelos-skill + dry-run
+      opcional) y el **mecanismo** de Fase 5 (anti-drift §A) quedan explícitos · PASO 3 = TIER 1/2 (G-fixes) en MR propio.
+
+### Secuencia sugerida por el auditor (a revisar con unjordi)
+**§A (anti-drift) PRIMERO** — hoy el mapa describe una amalgama que no corresponde ni a `brain/` ni a la
+plantilla; sin sello+drift-check, todo lo demás se construye sobre arena. Luego B/C/D (libs con sus fixes),
+luego E (mapa), F al backlog. **Alternativa:** hacer los fixes de LÓGICA de mayor severidad (H1/H3) ya
+mismo como hotfix, y el anti-drift como fase. ← decisión de unjordi.
