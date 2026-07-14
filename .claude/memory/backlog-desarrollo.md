@@ -4,6 +4,48 @@
 > develop, squash). Al arrancar uno, muévelo a "en curso"; al cerrarlo con QA, bórralo de aquí y
 > deja la huella en `bitacora.md`. Ordenado por lo más reciente arriba.
 
+## [2026-07-14] Mecanismo confiable para el ciclo cerrar/reabrir una BACKGROUND SESSION (anti-zombies)
+
+> **Origen:** dolor recurrente de unjordi (14-jul). Quiere cerrar la app CLI y reabrir (p. ej. para
+> re-fotografiar cableado de hooks o `CLAUDE.md`), pero **`/exit` deja la sesión "colgada como agente"
+> y `claude --resume` no la levanta** → tiene que pedirle a otro Claude que lo reconecte, y entre
+> intentos se le **ACUMULAN sesiones huérfanas**. Verificado en vivo (`claude agents --json`): 3 bg
+> sessions bajo el repo, **2 zombies** (`58577db4` blocked, `8e9c3f5e` idle) + la viva (`a10d906c`).
+
+### Diagnóstico (verificado en CLI **v2.1.208**)
+- **`claude --resume` / `-c` son para sesiones INTERACTIVAS normales** (viven en `~/.claude/projects/`),
+  **NO para background agents** (viven en `~/.claude/jobs/<id>/`). Usar `--resume` con un bg job es la
+  puerta equivocada → de ahí el "cuelgue".
+- Los **bg agents se manejan SOLO con `claude agents`**: TUI interactivo (seleccionar → Enter para
+  re-adjuntar; terminar desde ahí) o `claude agents --json [--all] [--cwd <path>]` para LISTAR sin TTY.
+- **NO existen** `claude stop <id>` ni `claude attach <id>` como comandos sueltos en esta versión (el
+  attach/stop viven DENTRO del TUI). ← un agente de guía los "inventó"; se verificó con `claude agents --help`.
+- **Arranque de bg:** `claude --bg` / `--background`. Detach (dejar vivo a propósito): según docs `←` en
+  prompt vacío o `Ctrl+Z` — **keybindings del TUI SIN verificar desde CLI** (confirmar en terminal real).
+- **Distinción de recarga (aprendida el mismo día):** el **CONTENIDO** de un hook `.sh` se lee del disco
+  **en cada disparo** → editar la lógica de un guard toma efecto YA, sin reiniciar (demostrado en vivo con
+  el fix de comillas). Lo que se **fotografía al arrancar** y sí exige reinicio: el **CABLEADO**
+  (`settings.json`: qué hook corre en qué evento) y el **`CLAUDE.md`** en contexto. → reiniciar solo hace
+  falta para cableado/normas, no para lógica de guards.
+
+### Flujo confiable HOY (runbook, sin script)
+1. **Salir sin colgar:** detach (`←`/`Ctrl+Z`), NO `/exit` con intención de resumir después por `--resume`.
+2. **Volver a una sesión:** `claude agents` → seleccionar → Enter. Nunca `--resume` para bg.
+3. **Arrancar fresca:** `cd <repo> && claude` (o `--bg`).
+4. **Matar zombies:** `claude agents` → terminarlos desde el TUI (idle/blocked que ya no sirven).
+
+### Propuesta a construir (en `~/code/PowerScripts/macos/`, ramita → tu flujo)
+Helper **`claude-bg`** (bash, macOS) + **runbook** documentando lo de arriba:
+- `claude-bg list` → tabla legible de `claude agents --json` (id · estado · nombre · repo), **marcando
+  zombies** (idle/blocked) de un vistazo → para triage rápido.
+- `claude-bg fresh [repo]` → arranca sesión nueva en el repo (guards frescos) de un comando.
+- **Límite honesto:** el attach/stop en sí es TUI-interactivo → un script **no puede** teclearlo; el
+  helper cubre listar/triage/arrancar-fresco, y el resto lo hace el runbook. (Follow-up: investigar si
+  hay una vía no-TUI de terminar sesiones para automatizar también el kill.)
+
+**Estado:** READY (idea aprobada por unjordi para documentar; construcción pendiente). Casa del script:
+PowerScripts, no el claude-brain (es tweak de máquina, no cerebro portable).
+
 ## [2026-07-13] ✅ Audit P0–P17 ATERRIZADO (resuelto) — leer antes que las secciones ↓
 Todos los pendientes del audit forense (secciones abajo) quedaron atendidos y en develop:
 - **P0–P8 + P17** implementados (integridad de guardarraíles · norma-nace-con-mecanismo · producto-instalable ·
