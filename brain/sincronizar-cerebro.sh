@@ -124,12 +124,13 @@ done <<EOF
 $PER_REPO
 EOF
 
-# ── Estampar la versión (SOLO en sync completo: un --only es parcial y no representa esa versión) ──
-if [ "$APPLY" = 1 ] && [ -z "$ONLY" ] && [ -f "$VERSION_FILE" ]; then
+# ── Estampar la versión SOLO en sync COMPLETO: cualquier operación PARCIAL (--only o --prune-only) NO
+# representa esa versión (el repo no queda completo) → estamparla MENTIRÍA sobre el estado del cerebro. ──
+if [ "$APPLY" = 1 ] && [ -z "$ONLY" ] && [ "$PRUNEONLY" != 1 ] && [ -f "$VERSION_FILE" ]; then
   cp -f "$VERSION_FILE" "$DST_HOOKS/.brain-version"
   echo ""; echo "  sello: $DST_HOOKS/.brain-version = v$VER"
-elif [ "$APPLY" = 1 ] && [ -n "$ONLY" ]; then
-  echo ""; echo "  (sync parcial --only: NO estampo versión — el repo no queda completo en v$VER)"
+elif [ "$APPLY" = 1 ] && { [ -n "$ONLY" ] || [ "$PRUNEONLY" = 1 ]; }; then
+  echo ""; echo "  (operación PARCIAL (--only/--prune-only): NO estampo versión — el repo no queda completo en v$VER)"
 fi
 
 # De-cablea del settings.json TODAS las entradas cuyo 'command' cite el basename del hook (jq).
