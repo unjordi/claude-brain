@@ -125,6 +125,19 @@ out="$(run_gate "$Q")";      is_silent "$out" && ok "ventana · incluido consent
 write_state 99   # se agota la ventana → mismo agente pasa a metered
 out="$(run_gate "$Q")";      is_ask "$out"    && ok "ventana · agotada → vuelve a preguntar (metered)" || bad "ventana agotada → ask; got: $out"
 
+# G3 — fan-out PARALELO: el 1er gate del lote pregunta; los HERMANOS (misma sesión+key, aún sin
+# registrar) pasan en SILENCIO (coalescing) para gratis/incluido → mata el flood de N asks. Metered
+# NO se coalesce (un fan-out de PAGO confirma cada uno: un 'no' no debe dejar correr agentes caros).
+rm -f "$CONS"; rm -rf "$CDIR"/.delegacion-ask.*.lock 2>/dev/null; write_state 19
+B="$(payload BATCH '' sonnet)"   # incluido (ventana 19% < 90%)
+out="$(run_gate "$B")"; is_ask "$out"    && ok "G3 fan-out · 1er gate del lote → pregunta"             || bad "G3: 1er gate no preguntó; got: $out"
+out="$(run_gate "$B")"; is_silent "$out" && ok "G3 fan-out · hermano del lote → silencio (coalesced)"  || bad "G3: el hermano volvió a preguntar (flood); got: $out"
+rm -f "$CONS"; rm -rf "$CDIR"/.delegacion-ask.*.lock 2>/dev/null; write_state 99
+M="$(payload BATCHM '' gpt-4o)"  # metered (API externa de pago)
+out="$(run_gate "$M")"; is_ask "$out"    && ok "G3 · metered 1er gate → pregunta"                      || bad "G3 metered 1º → ask; got: $out"
+out="$(run_gate "$M")"; is_ask "$out"    && ok "G3 · metered hermano → SIGUE preguntando (protección)" || bad "G3 metered hermano → debía seguir preguntando; got: $out"
+write_state 19
+
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "== (b1b) limite-gasto: FRENA solo con la AND (ventana agotada Y overage sin holgura) =="
