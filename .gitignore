@@ -24,3 +24,8 @@ docs/mapa-flujos.graphml
 docs/mapa-flujos.png
 # reporte de bug para Claude Code (worktree isolation): artefacto LOCAL de un solo uso (se fila externamente), NO se versiona en el brain compartible
 docs/bug-report-worktree-base.md
+# Docs de PLANIFICACION/AUDITORIA/DISENO (narrativa de debugging; NO describen el codigo) -> locales, no se versionan
+docs/plan-refactor-desacople.md
+docs/auditoria-flowcharts.md
+docs/mapa-flujos.dot
+docs/mapa-flujos.svg
