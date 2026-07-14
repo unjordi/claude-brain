@@ -22,6 +22,8 @@
 # cableado (los hooks ya no existen en disco → fallan abierto, no rompen) para que lo quites tú.
 set -u
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MANIFEST="$SCRIPT_DIR/hooks/MANIFEST"
 CLAUDE_DIR="$HOME/.claude"
 HOOKS_DIR="$CLAUDE_DIR/hooks"
 SKILLS_DIR="$CLAUDE_DIR/skills"
@@ -31,10 +33,16 @@ GCLAUDE="$CLAUDE_DIR/CLAUDE.md"
 echo "==> claude-brain: desinstalando cerebro global de $CLAUDE_DIR"
 
 # ── (a) Borrar los hooks de tier global + la lib compartida + la config de costo ──
-GLOBAL_HOOKS="git-branch-guard.sh merge-squash-guard.sh confirmar-merge-develop.sh recordar-dashboard.sh \
-              secret-scan.sh rama-vieja.sh proteger-arbol.sh limite-gasto.sh rehidratar-hilo.sh aviso-contexto.sh \
-              delegacion-gate.sh delegacion-registrar.sh delegacion-reporte.sh delegacion-comun.sh \
-              analizar-comando-git.sh limpiar-worktrees.sh"
+# Derivado del MANIFEST (fuente única, igual que install-brain) → no es una 3ª lista que driftee.
+if [ -f "$MANIFEST" ]; then
+  GLOBAL_HOOKS="$(awk '$1!~/^#/ && NF>=3 && ($2=="global"||$2=="both"){print $1".sh"}' "$MANIFEST")"
+else
+  echo "warn: falta $MANIFEST; caigo a la lista embebida (compatibilidad)"
+  GLOBAL_HOOKS="git-branch-guard.sh merge-squash-guard.sh confirmar-merge-develop.sh recordar-dashboard.sh \
+                secret-scan.sh rama-vieja.sh proteger-arbol.sh limite-gasto.sh rehidratar-hilo.sh aviso-contexto.sh \
+                delegacion-gate.sh delegacion-registrar.sh delegacion-reporte.sh delegacion-comun.sh \
+                analizar-comando-git.sh limpiar-worktrees.sh"
+fi
 for h in $GLOBAL_HOOKS; do
   rm -f "$HOOKS_DIR/$h"
 done

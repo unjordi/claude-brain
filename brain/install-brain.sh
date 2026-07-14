@@ -4,11 +4,12 @@
 # la skill de cierre, el dashboard y las normas globales." Re-correrlo es SEGURO (idempotente).
 #
 # Instala GLOBAL (en ~/.claude, aplica a TODOS los repos de esta máquina):
-#   (a) HOOKS de tier global en ~/.claude/hooks/  → git-branch-guard, merge-squash-guard,
-#       confirmar-merge-develop, recordar-dashboard, secret-scan, rama-vieja, proteger-arbol (PreToolUse/Bash),
-#       delegacion-gate + limite-gasto (PreToolUse/Task), delegacion-registrar (PostToolUse/Task),
-#       rehidratar-hilo (SessionStart: reinyecta el hilo mental si existe),
-#       + delegacion-comun.sh y analizar-comando-git.sh (libs) + agentes-costo.json (config).
+#   (a) HOOKS de tier {global, both} en ~/.claude/hooks/ — la LISTA se DERIVA de brain/hooks/MANIFEST
+#       (fuente única; ya no se cura a mano en paralelo con la copia por-repo). Incluye git-branch-guard,
+#       merge-squash-guard, confirmar-merge-develop, recordar-dashboard, secret-scan, rama-vieja,
+#       proteger-arbol (PreToolUse/Bash), delegacion-gate + limite-gasto (PreToolUse/Task),
+#       delegacion-registrar/reporte (PostToolUse/Task), rehidratar-hilo + aviso-contexto (SessionStart/
+#       PostToolUse) + delegacion-comun.sh y analizar-comando-git.sh (libs) + agentes-costo.json (config).
 #   (b) CABLEADO en ~/.claude/settings.json con "shell":"bash" (idempotente).
 #   (c) SKILLS genéricas (cerrar-slice, orquestar-fanout, checkpoint, rehidratar-hilo) en ~/.claude/skills/.
 #   (d) DASHBOARD del cerebro sembrado en la memoria GLOBAL (slug del HOME) si falta.
@@ -46,10 +47,14 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 # ── (a) Copiar hooks de tier global + la lib compartida ──
-GLOBAL_HOOKS="git-branch-guard.sh merge-squash-guard.sh confirmar-merge-develop.sh recordar-dashboard.sh \
-              secret-scan.sh rama-vieja.sh proteger-arbol.sh limite-gasto.sh rehidratar-hilo.sh aviso-contexto.sh \
-              delegacion-gate.sh delegacion-registrar.sh delegacion-reporte.sh delegacion-comun.sh \
-              analizar-comando-git.sh limpiar-worktrees.sh"
+# Los de tier {global, both} salen del MANIFEST (fuente única) → esta lista ya NO se cura a mano en
+# paralelo con la copia por-repo (antídoto a H2: dos listas divergían). El drift-check de test-brain
+# verifica que install/uninstall/sincronizar coincidan con el manifiesto.
+if [ -f "$SRC_HOOKS/MANIFEST" ]; then
+  GLOBAL_HOOKS="$(awk '$1!~/^#/ && NF>=3 && ($2=="global"||$2=="both"){print $1".sh"}' "$SRC_HOOKS/MANIFEST")"
+else
+  echo "warn: falta $SRC_HOOKS/MANIFEST; no puedo derivar la lista de hooks globales"; GLOBAL_HOOKS=""
+fi
 for h in $GLOBAL_HOOKS; do
   if [ -f "$SRC_HOOKS/$h" ]; then
     cp -f "$SRC_HOOKS/$h" "$HOOKS_DIR/$h"
