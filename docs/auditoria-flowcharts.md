@@ -113,11 +113,13 @@ El header del `.dot` dice "fuente de verdad… fiel a la lógica real de cada ho
   "clasificador auto-mode", según CLAUDE.md). Es exactamente el anti-patrón que `N_MEC` ("toda norma nace con su
   mecanismo") denuncia: una norma presentada como activa sin enforcer in-repo. El mapa sobre-declara P0.
 
-### H10 · [BAJO] Hook PreCompact cableado que el mapa no muestra + statusMessage engañoso
-- `plantilladotnet/.claude/settings.json` cablea `precompact-volcar-estado.sh` con
-  `statusMessage:"Cerebro: volcando estado antes de compactar"`, pero el hook es un no-op documentado
-  (`cat >/dev/null; exit 0`). El mapa ① no dibuja este nodo cableado y su statusMessage miente sobre lo que hace (nada).
-- Arreglo: quitar el statusMessage o descablearlo; reflejar en ① que existe como punto de extensión inerte.
+### H10 · [BAJO] Hook PreCompact cableado que el mapa no muestra + statusMessage engañoso — ✅ RESUELTO (2026-07-14)
+- (Estado al auditar) `plantilladotnet/.claude/settings.json` cableaba `precompact-volcar-estado.sh` con
+  `statusMessage:"Cerebro: volcando estado antes de compactar"`, pero el hook era un no-op.
+- **RESOLUCIÓN:** en lugar de reflejarlo como no-op, se **RETIRÓ por completo** (de-cableado + borrado en §A vía
+  `--prune-orphans`) — además una versión previa (aún viva en clones como cps) intentaba inyectar y **rompía la
+  validación del CLI** ("Hook JSON output validation failed"). El statusMessage se fue con el de-cableado. El mapa ①
+  nunca dibujó el nodo, así que queda correcto. Compactar sin perder el hilo lo cubren `checkpoint` + `rehidratar-hilo`.
 
 ### H11 · [BAJO] Falsos positivos de `git-branch-guard` — LÓGICA
 - Repo cuyo path termina en `/develop` o `/main`: `gh pr merge 5 -R org/develop` → MERGE_RE matchea

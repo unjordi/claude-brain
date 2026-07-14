@@ -35,6 +35,15 @@ recuperó por cherry-pick, pero casi se pierde). Si un ítem NO se puede aislar 
 orquestador**, no un agente suelto en el árbol compartido. Lo respalda el guard `proteger-arbol` (avisa
 antes de un git destructivo que orfanaría commits sin pushear).
 
+> **GOTCHA del worktree — base equivocada (feedback real cps, 2026-07-14).** El Agent tool crea el
+> worktree basado en **`origin/HEAD`** (= el default branch remoto, normalmente `origin/main`), **NO** en
+> el HEAD de tu rama activa. Si `main` es release-only y tu trabajo vive en `develop`/una ramita (p. ej. una
+> migración aún NO promovida a main), el worktree nace en un commit VIEJO (en cps: el monolito pre-migración)
+> y el agente NO encuentra los archivos que espera. **Workaround defensivo (ponlo en el prompt del agente):**
+> *"al iniciar, `git reset --hard <rama-objetivo>` en TU worktree aislado para nacer sobre la base correcta"*
+> — es seguro porque es tu worktree AISLADO (no el compartido). Disparará `proteger-arbol` (aviso, no bloqueo):
+> es un falso positivo conocido en worktree aislado (backlog H14). Fix de raíz = harness (backlog H15).
+
 ## Con agentes ACTIVOS — reglas anti-desastre (destiladas de un caso real, 2026-07)
 - **El sub-agente es TERMINAL.** Su prompt DEBE decírselo: *"eres terminal — cuando tu turno acaba NADA
   tuyo sigue corriendo; NO puedes 'lanzar en background' ni esperar notificaciones. Ejecuta el trabajo

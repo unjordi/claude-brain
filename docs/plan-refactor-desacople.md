@@ -198,12 +198,27 @@ tiene gemelo manual. El mapa se re-anota (badge "⚙ lib" donde aplique), no se 
       — o cerrar esa vía; hoy mapa+código se contradicen con la norma (**H8**).
 - [ ] Bajar **P0** de «activa/protege» a «norma SIN mecanismo local — enforcement externo (auto-mode)», o
       darle mecanismo (guard que avise al editar `brain/hooks/*.sh`) (**H9**).
-- [ ] Reflejar `precompact-volcar-estado` como no-op inerte (o descablearlo + quitar su `statusMessage` que miente) (**H10**).
+- [x] **H10 RESUELTO** — `precompact-volcar-estado` **RETIRADO por completo** (de-cableado + borrado en §A vía
+      `--prune-orphans`), no reflejado como no-op: rompía la validación del CLI. El mapa nunca lo mostró (ya está bien). Su `statusMessage` desapareció con el de-cableado.
 
-### F · Backlog (fuera del refactor inmediato) — H6, H12
+### F · Backlog (fuera del refactor inmediato) — H6, H12, H14, H15
 - [ ] **H6** `delegacion-gate`: liberar el lock de coalescencia al NEGAR (hoy un «no» + reintento <60s permite
       en silencio). *Alcance: solo gratis/incluido (costo cero) → wart de semántica, no de gasto; metered no se coalesce.*
 - [ ] **H12** doc=realidad dentro del hook: `delegacion-gate.sh:6` dice «def 95%», el real es **90**.
+- [ ] **H14** `proteger-arbol` afina en worktree AISLADO: hoy YA distingue aislado vs principal (etiqueta el árbol),
+      pero IGUAL dispara el aviso. En un worktree aislado reseteando a SU rama objetivo (workaround del H15) el aviso
+      es falso positivo → suprimir/suavizar cuando `git-dir != git-common-dir` Y el reset apunta a la rama del worktree.
+      *(Feedback real 2026-07-14, fan-out en cps: 4 agentes dispararon el aviso al resetear su worktree, todos legítimos.)*
+- [ ] **H15** *(HARNESS, no brain — reportar a Claude Code)*: `Agent tool isolation:"worktree"` basa el worktree en
+      **`origin/HEAD`** (→ `origin/main`), no en el HEAD de la rama ACTIVA. En cps eso cae en `bfc127e2` (monolito
+      PRE-migración `cpscsmWasm/`), porque la migración vive en develop/ramas y **nunca se promovió a main** (release-only)
+      → `origin/main`/`origin/HEAD` siguen en el monolito. Los agentes nacen en el árbol viejo y se auto-corrigen con
+      `git reset --hard <rama-objetivo>`. **Fix correcto: harness debe basar el worktree en el HEAD checkouteado, no en
+      `origin/HEAD`.** Workaround (ya documentado en `orquestar-fanout`): el agente resetea a la rama objetivo al inicio.
+      **SEVERIDAD real = ALTA, no cosmética:** el costo del workaround por ciclo (cada agente detecta el árbol viejo,
+      resetea, dispara `proteger-arbol`) **desincentiva delegar** — el usuario ya optó por aplicar un one-liner él mismo
+      "directo y verificado" en vez de un agente. Eso **erosiona la norma `orquesta: delega lo paralelizable`**: mientras
+      H15 viva, el default racional se vuelve el grind serial que la norma quiere evitar. → reportar a Claude Code con prioridad.
 
 ### G · Numeración (unificar Fases ↔ PASOS)
 - [ ] PASO 1 = flowchart ⓪ **[✅]** · PASO 2 = Fases 1–3 (libs B/C/D) · **Fase 4** (gemelos-skill + dry-run

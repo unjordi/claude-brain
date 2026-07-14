@@ -31,13 +31,14 @@ SRC_HOOKS="$SCRIPT_DIR/hooks"
 MANIFEST="$SRC_HOOKS/MANIFEST"
 VERSION_FILE="$SCRIPT_DIR/VERSION"
 
-DEST=""; APPLY=0; ONLY=""; PRUNE=0
+DEST=""; APPLY=0; ONLY=""; PRUNE=0; PRUNEONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --apply) APPLY=1 ;;
     --only)  shift; ONLY="${1:-}" ;;
     --only=*) ONLY="${1#--only=}" ;;
     --prune-orphans) PRUNE=1 ;;
+    --prune-only) PRUNE=1; PRUNEONLY=1 ;;   # SOLO retira huérfanos; NO sincroniza nada más (fix quirúrgico)
     -*) echo "ERROR: flag desconocido: $1"; exit 2 ;;
     *) [ -z "$DEST" ] && DEST="$1" || { echo "ERROR: argumento inesperado: $1"; exit 2; } ;;
   esac
@@ -86,12 +87,13 @@ register_hook() {
     ' "$gset" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then mv "$tmp" "$gset"; else rm -f "$tmp"; echo "  warn: no pude cablear ($pat)"; fi
 }
 
-# ── Sincronizar los archivos de tier {repo, both} ──
+# ── Sincronizar los archivos de tier {repo, both} (se SALTA entero con --prune-only) ──
 n_new=0; n_upd=0; n_ok=0; n_wire=0
 PER_REPO="$(awk '$1!~/^#/ && NF>=3 && ($2=="repo"||$2=="both"){print $1"|"$3}' "$MANIFEST")"
 
-[ "$APPLY" = 1 ] && mkdir -p "$DST_HOOKS"
-while IFS='|' read -r name kind; do
+[ "$PRUNEONLY" = 1 ] && echo "  (--prune-only: NO sincronizo hooks; solo retiro huérfanos)"
+[ "$APPLY" = 1 ] && [ "$PRUNEONLY" != 1 ] && mkdir -p "$DST_HOOKS"
+while [ "$PRUNEONLY" != 1 ] && IFS='|' read -r name kind; do
   [ -z "$name" ] && continue
   only_ok "$name" || continue
   src="$SRC_HOOKS/$name.sh"; dst="$DST_HOOKS/$name.sh"
