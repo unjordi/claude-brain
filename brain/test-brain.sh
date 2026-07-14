@@ -157,7 +157,7 @@ write_state 19   # restablece el state.json de ventana para lo que siga
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "== (b1c) merge-squash-guard: EXIGE squash SOLO si destino=develop confirmado (G4) =="
-# Modelo canónico (decisión de unjordi): squash únicamente cuando el destino es develop CONFIRMADO;
+# Modelo canónico (decisión del usuario): squash únicamente cuando el destino es develop CONFIRMADO;
 # main (release), ramas personales, ramitas y destino INDETERMINADO → libres (nunca se fuerza squash).
 rm -f "${TMPDIR:-/tmp}"/acg-mrdest-* 2>/dev/null   # caché de destino limpia (la lib cachea por MR-id)
 MSBIN="$FAKEHOME/msbin"; mkdir -p "$MSBIN"
@@ -170,7 +170,7 @@ mock_glab develop; out="$(ms 'glab mr merge 42 --auto-merge --yes')"
 is_deny "$out"   && ok "squash-guard G4: destino=develop confirmado, sin --squash → deny" || bad "squash-guard G4: no denegó merge a develop sin squash; got: $out"
 mock_glab develop; out="$(ms 'glab mr merge 42 --squash --auto-merge --yes')"
 is_silent "$out" && ok "squash-guard G4: develop CON --squash → pasa"                     || bad "squash-guard G4: bloqueó un merge que ya trae squash; got: $out"
-mock_glab DevelopUnjordi; out="$(ms 'glab mr merge 43 --auto-merge --yes')"
+mock_glab DevelopAna; out="$(ms 'glab mr merge 43 --auto-merge --yes')"
 is_silent "$out" && ok "squash-guard G4: destino=rama personal → NO fuerza squash (día a día libre)" || bad "squash-guard G4: forzó squash a rama personal; got: $out"
 mock_glab main; out="$(ms 'glab mr merge 44 --yes')"
 is_silent "$out" && ok "squash-guard G4: destino=main (release) → NO fuerza squash"       || bad "squash-guard G4: forzó squash a un release; got: $out"

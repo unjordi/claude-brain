@@ -15,7 +15,7 @@ ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "limpiar-worktrees: 
 MAIN_WT=$(git -C "$ROOT" rev-parse --show-toplevel)
 BITA="$ROOT/.claude/memory/bitacora.md"
 # Base de INTEGRACIÓN configurable: en el flujo mini-develop la base NO es develop sino TU rama personal
-# (DevelopUnjordi/DevelopAliazCIA/chunito) — expórtala en CLAUDE_INTEGRACION_BASE para que el barrido
+# (p. ej. `DevelopAna`/`DevelopBeto`) — expórtala en CLAUDE_INTEGRACION_BASE para que el barrido
 # reconozca como mergeadas las ramitas integradas a ELLA (si no, quedan zombies eternos). Sin override:
 # develop, o la rama por defecto del remoto, o main.
 base="${CLAUDE_INTEGRACION_BASE:-}"

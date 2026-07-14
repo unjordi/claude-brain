@@ -6,8 +6,8 @@
 # Antídoto a "se me va la onda al cambiar de sesión/compu o cuando el sprint es largo".
 # Vive en <repo>/.claude/hooks (viaja por git) y se cablea en <repo>/.claude/settings.json.
 # Genérico: sirve para cualquier stack (semilla plantillaRepoVacio). El aviso de MIGRACIÓN/paridad
-# NO vive aquí (es dominio de la plantilla .NET, no del cerebro portable): va en el sesion-inicio
-# de la plantilla, no en esta versión genérica.
+# NO vive aquí (es dominio del proyecto consumidor —p. ej. un repo .NET—, no del cerebro portable):
+# va en el sesion-inicio del propio repo consumidor, no en esta versión genérica.
 set -u
 
 ROOT="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"

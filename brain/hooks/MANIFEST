@@ -1,6 +1,6 @@
 # MANIFEST — FUENTE ÚNICA del cerebro (claude-brain): declara, por cada archivo de brain/hooks/, su
 # TIER (dónde se despliega) y su KIND (cómo). De aquí DERIVAN las 2 rutas de instalación y el drift-check
-# → dejan de divergir a mano (antídoto a H2/H7: hoy install-brain.sh y la copia por-repo de la plantilla
+# → dejan de divergir a mano (antídoto a H2/H7: hoy install-brain.sh y la copia por-repo del consumidor
 # eran dos listas curadas por separado).
 #
 # Formato:  <nombre-sin-.sh>   <tier>   <kind>

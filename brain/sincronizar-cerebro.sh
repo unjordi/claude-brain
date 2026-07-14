@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # sincronizar-cerebro.sh — despliega/actualiza la copia POR-REPO del cerebro (claude-brain) en un repo
-# consumidor (p. ej. la plantilla .NET), desde brain/ como FUENTE ÚNICA. Antídoto al drift: la copia
+# consumidor (p. ej. un repo .NET), desde brain/ como FUENTE ÚNICA. Antídoto al drift: la copia
 # por-repo deja de curarse a mano y se DERIVA del MANIFEST (tier {repo, both}).
 #
 # Qué copia a <repo>/.claude/hooks/: los archivos de tier {repo, both} (hooks + libs que sourcean),
