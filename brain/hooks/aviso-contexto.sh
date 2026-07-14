@@ -6,6 +6,9 @@
 # canal para inyectar contexto ni pedir acción; por eso se retiró). Este hook vigila cuánto CRECIÓ el
 # contexto desde el último /compact y, al cruzar una banda POR DEBAJO del punto de auto-compact, INYECTA
 # un aviso para que el modelo vuelque con `checkpoint` y proponga al usuario un /compact PROACTIVO (holgura).
+# El aviso ESCALA por banda: 1 = heads-up con holgura; 2 = checkpoint AHORA + propón /compact; ≥3 =
+# INMINENTE → ORDENA RE-correr `checkpoint` (aunque ya se corrió: desde entonces pasó más trabajo y el hilo
+# quedó atrás) + compactar YA. El hook no puede correr el skill, pero sí ORDENAR su re-ejecución.
 #
 # Por qué PostToolUse (y no Stop/UserPromptSubmit): es el ÚNICO evento que dispara DURANTE una corrida
 # autónoma larga (muchos tool-calls sin turno del usuario) — justo cuando el auto-compact golpea. Stop
@@ -75,7 +78,18 @@ printf '%s %s\n' "$baseline" "$new_band" > "$AVISO_F" 2>/dev/null || true
 # ¿Cruzamos una banda NUEVA (>=1)? Si no, silencio (debounce).
 { [ "$band" -ge 1 ] && [ "$band" -gt "$last_band" ]; } || exit 0
 
-msg="⚠️ Contexto creciendo (~${delta} líneas de transcript desde el último /compact). REGLA DURA DE ORDEN (no la saltes): ANTES de siquiera PROPONER o hacer un /compact, el skill \`checkpoint\` YA TIENE QUE HABER CORRIDO en este tramo (volcar el HILO a hilo-mental-actual.md, fresco y en la rama actual). El orden es OBLIGATORIO: 1) corre \`checkpoint\` AHORA → 2) SOLO DESPUÉS propón al usuario un /compact PROACTIVO (con holgura, antes de que el auto-compact —contexto lleno, SIN aviso— te gane). Proponer o ejecutar un /compact SIN el checkpoint corrido antes = perder el hilo reciente: es un ERROR, no lo hagas. (Si YA corriste checkpoint en este tramo y el hilo sigue fresco, no lo repitas: procede.)"
+# ── Escalada de urgencia por BANDA (heurística; UMBRAL es el knob principal) ─────────────────────
+#   banda 1  → heads-up con holgura (aún hay margen; solo recuerda el orden checkpoint→compact).
+#   banda 2  → checkpoint AHORA + propón /compact proactivo (mensaje fuerte del orden obligatorio).
+#   banda ≥3 → INMINENTE: RE-checkpoint (aunque ya lo corriste — desde entonces pasó más trabajo y el
+#              hilo quedó atrás) + compacta YA. El hook no puede correr el skill, pero SÍ ordenarlo.
+if [ "$band" -ge 3 ]; then
+  msg="🚨 AUTO-COMPACT INMINENTE (~${delta} líneas de transcript desde el último /compact). Corre \`checkpoint\` DE NUEVO AHORA MISMO —SÍ, aunque YA lo hayas corrido en este tramo: desde entonces pasó más trabajo y el hilo volcado quedó atrás— y ENSEGUIDA compacta (propón /compact al usuario con holgura). Si el auto-compact —contexto lleno, SIN aviso— te gana antes, rehidratarás un hilo VIEJO. Orden inviolable: 1) \`checkpoint\` FRESCO → 2) /compact."
+elif [ "$band" -ge 2 ]; then
+  msg="⚠️ Contexto ALTO (~${delta} líneas de transcript desde el último /compact). REGLA DURA DE ORDEN (no la saltes): ANTES de siquiera PROPONER o hacer un /compact, el skill \`checkpoint\` YA TIENE QUE HABER CORRIDO en este tramo (volcar el HILO a hilo-mental-actual.md, fresco y en la rama actual). Orden OBLIGATORIO: 1) corre \`checkpoint\` AHORA → 2) SOLO DESPUÉS propón un /compact PROACTIVO (con holgura, antes de que el auto-compact —SIN aviso— te gane). Proponer/ejecutar /compact SIN checkpoint fresco antes = perder el hilo reciente: es un ERROR. (Si YA corriste checkpoint en este tramo y sigue fresco, no lo repitas: procede.)"
+else
+  msg="ℹ️ Contexto creciendo (~${delta} líneas de transcript desde el último /compact). Heads-up (aún hay HOLGURA): cuando vayas a compactar, PRIMERO corre \`checkpoint\` (vuelca el HILO a hilo-mental-actual.md, fresco y en la rama actual) y SOLO DESPUÉS compacta. No compactes sin ese volcado."
+fi
 
 jq -n --arg c "$msg" '{hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:$c}}'
 exit 0
