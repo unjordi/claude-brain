@@ -150,13 +150,17 @@ tiene gemelo manual. El mapa se re-anota (badge "⚙ lib" donde aplique), no se 
 > deny/disparos), NO "refactor puro con `test-brain` constante". Cada uno **nace con su test nuevo** (la
 > suite CRECE). En cada MR, separar explícitamente "reorg pura" de "fix de comportamiento".
 
-### A · ANTI-DRIFT primero (sostiene la premisa «fuente única») — H2, H7-cableado
-- [ ] Reconciliar `brain/hooks/` ↔ copia desplegada en la plantilla .NET (hoy driftea en AMBOS sentidos:
-      el widget tiene el `dod` fuerte con bloqueo QA-visual; la plantilla tiene el fix de comillas de
-      `git-branch-guard` — y ese fix vive en la ramita `fix/git-branch-guard-comillas`, aún NO en esta rama).
-- [ ] **Sello de versión** del cerebro (hoy no existe; el widget sí lo tiene).
-- [ ] `sincronizar-cerebro.sh` (fuente única = brain; NO `cp -f` ciego) + **check de drift BIDIRECCIONAL** en test-brain/CI.
-- [ ] Reconciliar las 2 rutas de install en una lista ÚNICA de «qué es global» → un clon de la plantilla SÍ obtiene secret-scan (hoy no).
+### A · ANTI-DRIFT primero (sostiene la premisa «fuente única») — H2, H7-cableado  ✅ (2026-07-14)
+- [x] Reconciliar `brain/hooks/` ↔ copia desplegada en la plantilla .NET. *A5 (plantilla `405c8d7`,
+      ramita `chore/propagar-cerebro-seccion-A`, pendiente MR): propagados lib + 3 wrappers §B + secret-scan.
+      Verificado cero regresión (CONF_RE/RELEASE_RE idénticos). **dod (120 líneas) queda para §C** — a propósito.*
+- [x] **Sello de versión** del cerebro. *A1: `brain/VERSION` (0.1.0). sincronizar lo estampa en `.brain-version` (solo en sync completo).*
+- [x] `sincronizar-cerebro.sh` (fuente única = brain; NO `cp -f` ciego, diff-aware, `--only`/`--prune-orphans`)
+      + **drift-check** en test-brain (bloque e2, brain-interno: manifest↔install↔uninstall↔sincronizar). *A3+A4.*
+- [x] Reconciliar las 2 rutas de install en una lista ÚNICA («qué es global») = `brain/hooks/MANIFEST`; install/
+      uninstall DERIVAN de él. secret-scan → tier `both` → **un clon de la plantilla SÍ obtiene secret-scan (cierra H7)**. *A2.*
+- [x] **Bonus (destapado por el QA de compact en cps):** retirado `precompact-volcar-estado` (de-wire + borrado
+      vía `--prune-orphans`) — rompía la validación del CLI ("Hook JSON output validation failed"). OK explícito de unjordi ("no lo queremos").
 
 ### B · lib `analizar-comando-git.sh` (Fase 1) — H1, H3, H5, H11, H13
 - [x] `despoja_comillas(cmd)` para TODOS los git-hooks (fix #2; H13). *slice-1, `d6b17e5`: `git-branch-guard` ya la usa vía la lib; falta propagar a secret-scan (→ §D) y a la copia de la plantilla (→ §A).*
