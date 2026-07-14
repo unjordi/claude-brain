@@ -20,7 +20,17 @@ DOCMSG=""
 root=$(git rev-parse --show-toplevel 2>/dev/null || true)
 if [ -n "$root" ]; then
   if git -C "$root" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then range="@{u}..HEAD"
-  else mb=$(git -C "$root" merge-base HEAD develop 2>/dev/null || git -C "$root" merge-base HEAD main 2>/dev/null || true); [ -n "$mb" ] && range="$mb..HEAD" || range=""; fi
+  else
+    # G8: en un clon FRESCO el ref LOCAL develop/main puede no existir (solo el remote-tracking) → antes
+    # el merge-base fallaba y la revisión doc=realidad se auto-anulaba en silencio. Ahora cae también a
+    # origin/develop|origin/main, así el recordatorio doc=realidad funciona desde el primer push.
+    mb=""
+    for ref in develop origin/develop main origin/main; do
+      mb=$(git -C "$root" merge-base HEAD "$ref" 2>/dev/null)
+      [ -n "$mb" ] && break
+    done
+    [ -n "$mb" ] && range="$mb..HEAD" || range=""
+  fi
   if [ -n "$range" ]; then
     names=$(git -C "$root" diff --name-only "$range" 2>/dev/null)
     status=$(git -C "$root" diff --name-status "$range" 2>/dev/null)

@@ -399,6 +399,25 @@ rm -rf "$DDNO" "$DDYES"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
+echo "== (b8) recordar-dashboard: merge-base cae a origin/develop en clon sin develop local (G8) =="
+# Sin ref LOCAL develop/main (clon fresco / default con otro nombre) el merge-base fallaba y la revisión
+# doc=realidad se auto-anulaba en silencio. Ahora cae a origin/develop|origin/main.
+G8ROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-g8.XXXXXX")"; G8HOME="$G8ROOT/home"; mkdir -p "$G8HOME"
+BARE8="$G8ROOT/bare.git"; SRC8="$G8ROOT/src"
+git init --bare -q -b develop "$BARE8" >/dev/null 2>&1
+git clone -q "$BARE8" "$SRC8" >/dev/null 2>&1
+git -C "$SRC8" config user.email t@t >/dev/null 2>&1; git -C "$SRC8" config user.name tester >/dev/null 2>&1
+printf 'base\n' > "$SRC8/base.txt"; git -C "$SRC8" add base.txt >/dev/null 2>&1; git -C "$SRC8" commit -qm base >/dev/null 2>&1
+git -C "$SRC8" push -q origin develop >/dev/null 2>&1
+git -C "$SRC8" checkout -q -b feat/g8 develop >/dev/null 2>&1
+git -C "$SRC8" branch -D develop >/dev/null 2>&1   # simula clon fresco: solo queda origin/develop
+mkdir -p "$SRC8/src"; printf 'x=1\n' > "$SRC8/src/foo.js"; git -C "$SRC8" add src/foo.js >/dev/null 2>&1; git -C "$SRC8" commit -qm code >/dev/null 2>&1
+out="$(printf '%s' '{"tool_input":{"command":"git push -u origin feat/g8"}}' | (cd "$SRC8" && HOME="$G8HOME" bash "$HOOKS/recordar-dashboard.sh"))"
+printf '%s' "$out" | grep -q 'doc=realidad' && ok "G8: sin develop local → merge-base cae a origin/develop → doc=realidad activo" || bad "G8: la revisión doc=realidad se auto-anuló (no cayó a origin/develop); got: $out"
+rm -rf "$G8ROOT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
 echo "== (c) idempotencia: install-brain.sh 2× contra el \$HOME falso =="
 FAKEHOME2="$(mktemp -d "${TMPDIR:-/tmp}/brain-inst.XXXXXX")"
 HOME="$FAKEHOME2" bash "$INSTALLER" >/dev/null 2>&1
