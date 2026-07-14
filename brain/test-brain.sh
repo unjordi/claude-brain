@@ -202,6 +202,26 @@ o="$(scan 'ls -la')"
 [ -z "$o" ] && ok "secret-scan ignora comandos no-git" || bad "secret-scan reaccionó a no-git; got: $o"
 rm -rf "$SCANREPO"
 
+# (5) G5: PRIMER push de una rama NUEVA sin upstream → antes fail-open (no escaneaba); ahora escanea lo
+# que la rama AGREGA vs el merge-base con develop/main.
+G5ROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-g5.XXXXXX")"; G5REPO="$G5ROOT/repo"; mkdir -p "$G5REPO"
+git -C "$G5REPO" init -q >/dev/null 2>&1
+git -C "$G5REPO" symbolic-ref HEAD refs/heads/main >/dev/null 2>&1
+git -C "$G5REPO" config user.email t@t >/dev/null 2>&1
+git -C "$G5REPO" config user.name  tester >/dev/null 2>&1
+printf 'base limpia\n' > "$G5REPO/base.txt"; git -C "$G5REPO" add base.txt >/dev/null 2>&1; git -C "$G5REPO" commit -qm base >/dev/null 2>&1
+git -C "$G5REPO" branch develop >/dev/null 2>&1
+scan5() { printf '%s' "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$1\"}}" | CLAUDE_PROJECT_DIR="$G5REPO" bash "$HOOKS/secret-scan.sh"; }
+git -C "$G5REPO" checkout -q -b feat/nueva >/dev/null 2>&1
+printf 'key = AKIA1234567890ABCDEF\n' > "$G5REPO/secreto.txt"; git -C "$G5REPO" add secreto.txt >/dev/null 2>&1; git -C "$G5REPO" commit -qm add >/dev/null 2>&1
+o="$(scan5 'git push -u origin feat/nueva')"
+printf '%s' "$o" | grep -q '"deny"' && ok "secret-scan G5: 1er push de rama nueva (sin upstream) escanea vs merge-base → bloquea" || bad "secret-scan G5: NO bloqueó el secreto en el 1er push de rama nueva; got: $o"
+git -C "$G5REPO" checkout -q main >/dev/null 2>&1; git -C "$G5REPO" checkout -q -b feat/limpia >/dev/null 2>&1
+printf 'sin secretos\n' > "$G5REPO/nota.txt"; git -C "$G5REPO" add nota.txt >/dev/null 2>&1; git -C "$G5REPO" commit -qm nota >/dev/null 2>&1
+o="$(scan5 'git push -u origin feat/limpia')"
+[ -z "$o" ] && ok "secret-scan G5: 1er push de rama nueva LIMPIA → silencio (sin falso positivo)" || bad "secret-scan G5: falso positivo en rama nueva limpia; got: $o"
+rm -rf "$G5ROOT"
+
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "== (b3) proteger-arbol: avisa si un git destructivo orfanaría commits sin pushear =="

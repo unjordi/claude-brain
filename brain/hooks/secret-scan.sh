@@ -67,7 +67,18 @@ if [ "$mode" = "commit" ]; then
   files=$(git -C "$dir" diff --cached --name-only --diff-filter=ACM 2>/dev/null)
 else
   BASE=$(git -C "$dir" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)
-  [ -z "$BASE" ] && exit 0   # sin upstream no sé qué sale → no bloqueo (fail-open)
+  if [ -z "$BASE" ]; then
+    # G5: rama NUEVA sin upstream (el 1er push — donde más se cuela un secreto, porque toda la historia
+    # de la rama es nueva). Antes: sin upstream → fail-open (no escaneaba nada). Ahora escanea lo que la
+    # rama AGREGA sobre la base de integración: el merge-base con develop/main (remotas primero, luego
+    # locales). Así el primer push SÍ se revisa.
+    for ref in origin/develop origin/main develop main; do
+      git -C "$dir" rev-parse --verify --quiet "$ref" >/dev/null 2>&1 || continue
+      BASE=$(git -C "$dir" merge-base HEAD "$ref" 2>/dev/null)
+      [ -n "$BASE" ] && break
+    done
+    [ -z "$BASE" ] && exit 0   # ni upstream ni base develop/main → no sé qué sale → fail-open
+  fi
   files=$(git -C "$dir" diff "$BASE..HEAD" --name-only --diff-filter=ACM 2>/dev/null)
 fi
 [ -z "$files" ] && exit 0
