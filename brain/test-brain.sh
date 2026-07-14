@@ -7,8 +7,8 @@
 #   (b) gate de delegación: casos gratis / incluido / metered(overage) / metered(externo) /
 #       desconocido, el ciclo gate→registrar→gate-silencioso, y la transición dentro/fuera de la
 #       ventana de 5h (incluido → metered al agotarse la ventana).
-#   (b5) compactación: precompact NO emite hookSpecificOutput (contrato de PreCompact — el bug real
-#        que bash -n no veía) + rehidratar-hilo inyecta/silencia según exista el hilo.
+#   (b5) compactación: precompact RETIRADO (ya no existe el .sh) + rehidratar-hilo inyecta/silencia
+#        según exista el hilo, con gate de frescura (viejo/otra-rama → "⚠️ posiblemente OBSOLETO").
 #   (c) idempotencia: install-brain.sh corrido 2× contra el $HOME falso → cada hook queda 1× en
 #       settings.json y hay 1 solo bloque de normas en CLAUDE.md.
 #

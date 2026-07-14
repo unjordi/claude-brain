@@ -86,7 +86,7 @@ antes de un git destructivo que orfanaría commits sin pushear).
 - **`delegacion-reporte`** (PostToolUse/Task) — tras cada subagente, recuerda registrar avance + limpiar worktree.
 - **`limpiar-worktrees.sh`** — barre worktrees zombies (rama mergeada) y anota los vivos en la bitácora.
 - **`proteger-arbol`** (PreToolUse/Bash) — avisa antes de un git DESTRUCTIVO (`reset --hard`/`checkout -f`/`rebase`/`branch -D`) que orfanaría commits sin pushear; antídoto al "agente reseteó HEAD en el árbol compartido".
-- **`precompact-volcar-estado`** (PreCompact) — antes de compactar, vuelca avance/decisiones/pendientes.
+- **`checkpoint`** (skill) + **`rehidratar-hilo`** (SessionStart) + **`aviso-contexto`** (watermark) — compactar sin perder el hilo del fan-out (el hook `precompact` se retiró: PreCompact no puede inyectar ni pedir acción).
 
 ## Anti-patrones
 - ❌ Monitorear agentes "de niñera" y actualizar el estado a mano al final. → El auto-reporte es el default.
