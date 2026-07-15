@@ -117,7 +117,9 @@ this figure ~10×, so a heavy week can read as hundreds of API-equivalent dollar
 ## Prerequisites
 
 - **macOS 13+** (built and tested on macOS 26 / Apple silicon).
-- **Xcode command-line tools** (`swift` — `xcode-select --install`).
+- **Xcode command-line tools** (`swift`) — **solo si compilas desde fuente** (`--build`). Por default el
+  instalador BAJA el `.app` precompilado del release `macos-latest` (SIN Xcode/Swift), igual que el `.exe`
+  de Windows.
 - **`jq`** for JSON normalization (`brew install jq`).
 - **Node.js** (`npm`/`npx`) to install `ccusage`. The installer runs
   `npm i -g ccusage` for you; if you already have `ccusage` on `PATH` it's used
@@ -133,8 +135,8 @@ curl -fsSL https://raw.githubusercontent.com/unjordi/claude-brain/main/bootstrap
 ```
 
 `bootstrap.sh` installs any missing `jq`/`node` via Homebrew, clones the repo to `~/claude-brain`,
-and runs the top-level `install.sh`. (It won't auto-install Homebrew itself, and asks you to run
-`xcode-select --install` if `swift` is missing.) **Or by hand** from the repo:
+and runs the top-level `install.sh`. (It won't auto-install Homebrew itself; `swift`/Xcode CLT **solo**
+hace falta si compilas con `--build` — por default se baja el `.app` precompilado.) **Or by hand** from the repo:
 
 > The widget measures **Claude Code (the `claude` CLI)**: the installer also installs it (skip with
 > `--no-claude-code`), but **you log in** — run `claude` and `/login` once, or the widget only shows the
@@ -151,9 +153,9 @@ Or with [just](https://github.com/casey/just):
 just install
 ```
 
-This builds `Claude Brain Widget.app` into `~/Applications`, installs the fetch script
-and launchd agent, primes the cache with one run, and launches the app. Look for
-the `5h` / `7d` indicator in your menu bar.
+This **downloads** the precompiled `Claude Brain Widget.app` into `~/Applications` (SIN Xcode/Swift;
+`--build` fuerza compilar desde fuente), installs the fetch script and launchd agent, primes the
+cache with one run, and launches the app. Look for the `5h` / `7d` indicator in your menu bar.
 
 To launch at login: **System Settings → General → Login Items → +** and add
 **Claude Brain Widget**.

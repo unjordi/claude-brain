@@ -1,0 +1,59 @@
+name: Release macOS app
+
+# Cierra el circulo "nosotros subimos -> los demas reciben" para macOS (paridad con release-windows.yml).
+#
+# Cuando 'main' avanza (release deliberado) y toca macos/** (o brain/, que va EMBEBIDO en el .app, o
+# assets/ del que sale el icono), este workflow compila el .app en un runner macOS y lo publica como
+# asset del release rolling 'macos-latest'. El instalador (macos/install.sh) baja ese .app -> instala
+# SIN Xcode/Swift (paridad con el ClaudeBrain.exe de Windows). Fallback: compilar desde fuente
+# (macos/install.sh --build, o si la descarga falla). Se puede disparar a mano (workflow_dispatch).
+#
+# Nota: el .app queda ad-hoc signed (sin cuenta de desarrollador Apple), asi que al bajarlo el
+# instalador le quita el atributo com.apple.quarantine (si no, Gatekeeper lo bloquea).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'macos/**'
+      - 'brain/**'
+      - 'assets/**'
+      - '.github/workflows/release-macos.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # crear/borrar el release y subir el asset
+
+jobs:
+  build-and-publish:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install librsvg (para rasterizar el icono del .app)
+        run: brew install librsvg
+
+      - name: Build + assemble the .app (swift build release)
+        run: |
+          APP="$(bash macos/make-app.sh)"
+          test -d "$APP" || { echo "no se genero el .app"; exit 1; }
+          # ditto = zip macOS-correcto: preserva el bundle, symlinks y la firma ad-hoc.
+          ditto -c -k --keepParent "$APP" ClaudeBrainWidget.app.zip
+          ls -la ClaudeBrainWidget.app.zip
+
+      - name: Publish rolling 'macos-latest' release with the .app
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="${{ github.sha }}"
+          short="${sha:0:7}"
+          # Rolling: borro el release + su tag y lo recreo apuntando al sha actual, para que
+          # 'macos-latest' SIEMPRE refleje el commit del .app publicado (como windows-latest).
+          gh release delete macos-latest --cleanup-tag --yes 2>/dev/null || true
+          gh release create macos-latest ClaudeBrainWidget.app.zip \
+            --target "$sha" \
+            --title "Widget de macOS (rolling)" \
+            --notes "Claude Brain Widget.app para macOS (ad-hoc signed; instala sin Xcode/Swift).
+          build-sha: $sha
+          El instalador lo baja, lo descomprime en ~/Applications y le quita el quarantine."
+          echo "Publicado macos-latest @ $short"

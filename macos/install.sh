@@ -7,10 +7,12 @@
 #   ./install.sh --no-brain   # skip the Claude-Code brain (hooks/norms); only daemon + app
 #   ./install.sh --no-ccusage # don't npm-install ccusage; fall back to npx at runtime
 #   ./install.sh --no-claude-code # skip auto-installing the Claude Code CLI (the widget measures IT)
+#   ./install.sh --build      # compila el .app desde fuente (necesita Xcode CLT) en vez de bajar el precompilado
 #
 # This is the macOS MASTER installer for claude-brain: it lays down the shared Claude-Code brain
 # (global hooks, delegation-cost governance, skill, norms) AND the quota daemon + optional app.
-# Idempotent.
+# Idempotent. Por DEFAULT baja el .app PRECOMPILADO del release 'macos-latest' (SIN Xcode/Swift),
+# paridad con el .exe de Windows; si la descarga falla, compila desde fuente como fallback.
 
 set -euo pipefail
 
@@ -27,11 +29,16 @@ PLIST_DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LIMITS_DEFAULT="$HOME/.config/claude-brain/limits.env"
 APPS_DIR="$HOME/Applications"
 STATE_FILE="$HOME/Library/Caches/claude-brain/state.json"
+APP_NAME="Claude Brain Widget"
+# .app precompilado del release rolling 'macos-latest' (lo publica release-macos.yml). Paridad con
+# el ClaudeBrain.exe de Windows: instalar SIN Xcode/Swift. Repo público → descarga sin auth.
+APP_ASSET_URL="https://github.com/unjordi/claude-brain/releases/download/macos-latest/ClaudeBrainWidget.app.zip"
 
 SKIP_APP=0
 SKIP_CCUSAGE=0
 SKIP_BRAIN=0
 SKIP_CLAUDE_CODE=0
+BUILD=0
 for arg in "$@"; do
   case "$arg" in
     --no-app)         SKIP_APP=1 ;;
@@ -39,6 +46,7 @@ for arg in "$@"; do
     --no-brain)       SKIP_BRAIN=1 ;;
     --no-ccusage)     SKIP_CCUSAGE=1 ;;
     --no-claude-code) SKIP_CLAUDE_CODE=1 ;;
+    --build)          BUILD=1 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
@@ -91,9 +99,8 @@ fi
 echo "==> Checking prerequisites"
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing: $1" >&2; exit 1; }; }
 need jq
-if [[ "$SKIP_APP" -eq 0 ]]; then
-  need swift
-fi
+# swift ya NO es prerequisito duro: por default se BAJA el .app precompilado (sin Xcode/Swift). Solo
+# se exige swift en el fallback de compilar-desde-fuente (o con --build) — se verifica en la sección del app.
 # rsvg-convert (librsvg): rasteriza el SVG del ícono (app + login item del daemon). Opcional pero
 # recomendado; sin él, el ícono no se (re)genera y queda el genérico.
 if ! command -v rsvg-convert >/dev/null 2>&1; then
@@ -211,13 +218,39 @@ else
 fi
 
 if [[ "$SKIP_APP" -eq 0 ]]; then
-  echo "==> Building app bundle"
-  APP="$("$ROOT/make-app.sh")"
   install -d "$APPS_DIR"
-  rm -rf "$APPS_DIR/$(basename "$APP")"
-  cp -R "$APP" "$APPS_DIR/"
-  INSTALLED_APP="$APPS_DIR/$(basename "$APP")"
-  echo "    installed -> $INSTALLED_APP"
+  INSTALLED_APP="$APPS_DIR/$APP_NAME.app"
+  got_app=0
+
+  # 1) Preferimos BAJAR el .app precompilado del release (SIN Xcode/Swift). Fallback: compilar desde
+  #    fuente. --build fuerza compilar (devs). Espeja install.ps1 de Windows.
+  if [[ "$BUILD" -eq 0 ]]; then
+    echo "==> Bajando el .app precompilado del release 'macos-latest' (sin Xcode/Swift)..."
+    TMPZ="$(mktemp -t claude-brain-app-XXXX).zip"
+    if curl -fsSL "$APP_ASSET_URL" -o "$TMPZ" 2>/dev/null && [[ -s "$TMPZ" ]]; then
+      rm -rf "$INSTALLED_APP"
+      # ditto = unzip macOS-correcto (preserva el bundle/symlinks/atributos del .app)
+      if ditto -x -k "$TMPZ" "$APPS_DIR" 2>/dev/null && [[ -d "$INSTALLED_APP" ]]; then
+        # CRÍTICO: sin quitar el quarantine, Gatekeeper bloquea un .app bajado (ad-hoc signed).
+        xattr -dr com.apple.quarantine "$INSTALLED_APP" 2>/dev/null || true
+        got_app=1
+        echo "    instalado (precompilado, sin SDK) -> $INSTALLED_APP"
+      fi
+    fi
+    rm -f "$TMPZ"
+    [[ "$got_app" -eq 0 ]] && echo "    (no pude bajar el precompilado —release aún no existe o sin red—; compilo desde fuente)"
+  fi
+
+  # 2) Fallback / --build: compilar desde fuente (requiere Xcode Command Line Tools).
+  if [[ "$got_app" -eq 0 ]]; then
+    command -v swift >/dev/null 2>&1 || { echo "missing: swift (Xcode Command Line Tools) — necesario para compilar el .app. Instálalo (xcode-select --install) o reintenta cuando exista el release macos-latest." >&2; exit 1; }
+    echo "==> Building app bundle (desde fuente)"
+    APP="$("$ROOT/make-app.sh")"
+    rm -rf "$INSTALLED_APP"
+    cp -R "$APP" "$APPS_DIR/"
+    echo "    installed (compilado) -> $INSTALLED_APP"
+  fi
+
   echo "==> Launching"
   open "$INSTALLED_APP"
 fi
