@@ -100,6 +100,8 @@ public sealed class PopupForm : Form
     // 4 Chats · 5 Cerebro. Chats se OCULTA del riel si no hay chats locales (como macOS #77), pero
     // el índice 4 sigue reservado para él y Cerebro es siempre 5 (así no se recablean los `_tab==`).
     private static readonly string[] TabNames = { "Límites", "Resumen", "Modelos", "Proyectos", "Chats", "Cerebro" };
+    // Ícono por pestaña — paridad con el riel de macOS (SF Symbols gauge/chart.bar.doc/chart.bar/folder/message/brain).
+    private static readonly string[] TabIcons = { "⏱", "📋", "📊", "📁", "💬", "🧠" };
     private const int TabChats = 4, TabCerebro = 5;
 
     /// ¿Hay conversaciones locales? (decide si el botón Chats aparece en el riel).
@@ -267,8 +269,11 @@ public sealed class PopupForm : Form
             var col = active ? _accent : Blend(_bg, _fg, 0.82);
             using var brush = new SolidBrush(col);
             var sf = new StringFormat { LineAlignment = StringAlignment.Center, Alignment = StringAlignment.Near };
+            // ícono de la pestaña (mismo estilo tintado que ⟳/⏻; paridad con el riel de macOS)
+            g.DrawString(TabIcons[idx], font, brush,
+                new RectangleF(r.X + Sc(11), r.Y, Sc(20), r.Height), sf);
             g.DrawString(TabNames[idx], active ? fontB : font, brush,
-                new RectangleF(r.X + Sc(14), r.Y, r.Width - Sc(16), r.Height), sf);
+                new RectangleF(r.X + Sc(32), r.Y, r.Width - Sc(34), r.Height), sf);
         }
 
         // bottom row: refresh + quit (fondos redondeados sutiles al hover-less, glifos tenues)

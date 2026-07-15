@@ -32,3 +32,6 @@ docs/mapa-flujos.svg
 
 # memoria de dev PRIVADA del widget (historia de debugging/backlog; NO describe el código y NO viaja a repos consumidores)
 .claude/memory/backlog-desarrollo.md
+
+# flowcharts individuales (derivados del mapa, también gitignored) — artefactos locales de visualización
+docs/flowcharts/
