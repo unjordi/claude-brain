@@ -42,6 +42,12 @@ para que no quede apuntando a un tema ya terminado.
   **DECISIONES**; lo descartado a propósito va en **FUERA POR DECISIÓN** (no en pendiente). **Estado
   BIDIRECCIONAL:** ni dejes "pendiente" algo que YA está hecho, ni marques "hecho" algo sin verificar —
   la doc miente en ambos sentidos y cuesta auditorías (en un caso real el usuario forzó 3 por esto).
+- **Backlog COMPLETO, no solo lo elegido:** si este slice viene de una lista de hallazgos/opciones que
+  TÚ generaste (una auditoría, una revisión, un diagnóstico) y el usuario solo actuó sobre un
+  subconjunto, **los ítems restantes se escriben AHORA a PENDIENTE** con su severidad y origen — nunca
+  se quedan solo narrados en el chat. Y esa elección del usuario **NO es "el alcance que él acordó"**:
+  el corte lo pusiste tú al redactar las opciones; no lo cites como instrucción suya para justificar no
+  tocar el resto (ver norma "Ningún hallazgo tuyo se queda solo narrado en el chat").
 - **Appendea UNA línea al FINAL** de `.claude/memory/bitacora.md` (`- fecha · rama · quién · qué`)
   con `>>` (`printf '%s\n' '- …' >> bitacora.md`), **no** con un Edit que reescriba: el append-al-final
   es lo que deja que varias sesiones/agentes escriban la misma bitácora sin pisarse (dos `>>` no chocan;
