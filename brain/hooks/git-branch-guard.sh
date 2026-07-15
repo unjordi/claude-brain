@@ -31,7 +31,7 @@ if acg_push_toca_base "$cmd"; then
 fi
 
 if acg_merge_menciona_base "$cmd"; then
-  block "NORMA DE GIT (ley interna): mergear develop→main es un RELEASE, y lo hace el humano deliberadamente en la web de GitLab, no Claude por CLI. NO reintentes. El trabajo se integra a develop por MR de una ramita, no a main."
+  block "NORMA DE GIT (ley interna): este comando nombra un merge directo a develop/main. NO lo hagas así. El trabajo se integra por el flujo: ramita → MR → develop (con OK expreso, lo vigila confirmar-merge-develop). A main = release deliberado: normalmente el humano en la web de GitLab; por CLI solo con OK súper-explícito (también confirmar-merge-develop). NO reintentes el merge que nombra la base."
 fi
 
 exit 0

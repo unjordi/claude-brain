@@ -35,7 +35,7 @@ printf '%s' "$cmd" | grep -qE "$SQUASH_RE" && exit 0
 # Todo lo demás va LIBRE: `main` es RELEASE (conserva historia — JAMÁS se fuerza squash, así un squash
 # olvidado nunca aplasta el histórico de un release), y ramas personales/ramitas son el día a día (a tu
 # gusto). El destino lo resuelve la lib (acg_destino_de_mr): caché por MR-id COMPARTIDA con
-# confirmar-merge-develop (1 llamada de red, no 2) + timeout interno para no fallar-abierto por muerte
+# confirmar-merge-develop (típicamente 1 llamada de red, no 2; no es lock) + timeout interno para no fallar-abierto por muerte
 # del proceso (H5). FAIL-SAFE hacia esa prioridad: si NO podemos confirmar que el destino es `develop`
 # (vacío por timeout/error), NO forzamos squash (nunca arriesgamos aplastar un release por no resolver).
 _destino=$(acg_destino_de_mr "$cmd")

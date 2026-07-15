@@ -38,8 +38,8 @@ acg_es_merge_mr "$cmd" || exit 0
 [ -f "${CLAUDE_PROJECT_DIR:-.}/.claude/repo-compartido" ] || exit 0
 
 # DESTINO del merge: main = RELEASE (autorización SUPER explícita); develop/otro = confirmación normal.
-# Lo resuelve la lib (acg_destino_de_mr): caché por MR-id COMPARTIDA con merge-squash-guard (1 llamada
-# de red, no 2) + timeout interno para no fallar-abierto por muerte del proceso (H5).
+# Lo resuelve la lib (acg_destino_de_mr): caché por MR-id COMPARTIDA con merge-squash-guard (típicamente
+# 1 llamada de red, no 2; no es lock) + timeout interno para no fallar-abierto por muerte del proceso (H5).
 # FAIL-SAFE: si no podemos determinar el destino (vacío por timeout/error), se trata como develop (conservador → pide OK).
 destino=$(acg_destino_de_mr "$cmd")
 

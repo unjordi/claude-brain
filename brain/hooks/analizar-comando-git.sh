@@ -94,9 +94,11 @@ acg__run_timeout() {
 
 # Resuelve el target_branch de un MR/PR (glab/gh) para decidir el destino del merge, con:
 #  - CACHÉ por (repo,herramienta,mr-id) en TMPDIR → COMPARTIDA entre merge-squash-guard y
-#    confirmar-merge-develop: el MISMO `glab mr merge` los dispara a AMBOS ⇒ misma clave ⇒ una sola
-#    llamada de red en lugar de dos idénticas (H5). Solo cachea un resultado NO vacío (un vacío por
-#    timeout/error se reintenta la próxima).
+#    confirmar-merge-develop: el MISMO `glab mr merge` los dispara a AMBOS ⇒ misma clave. Si un hook
+#    corre ANTES que el otro (el caso normal), el 2º relee el caché ⇒ 1 llamada de red, no 2. Ojo: NO
+#    es un lock — bajo ejecución REALMENTE simultánea ambos podrían leer el caché vacío y llamar los
+#    dos (2 llamadas idénticas, inocuo). Solo cachea un resultado NO vacío (un vacío por timeout/error
+#    se reintenta la próxima).
 #  - TIMEOUT interno corto (ACG_MR_TIMEOUT, default 6s < el timeout del hook en settings.json: 10s/15s)
 #    para que el proceso SIEMPRE termine y EMITA su decisión, en vez de que el CLI lo mate por colgarse
 #    y trate el merge como "sin deny" (fail-open por muerte del proceso, H5).
