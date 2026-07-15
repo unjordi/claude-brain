@@ -2,9 +2,12 @@ import AppKit
 import SwiftUI
 
 /// Autoactualización LIGERA del widget, estilo winturbo: la app trae embebido el SHA/fecha del commit
-/// con que se buildeó (version.json, escrito por make-app.sh) y la ruta de su clon. Al abrir la
-/// pestaña Cerebro consulta `commits/main` de GitHub; si el repo avanzó, ofrece un botón que hace
-/// `git pull` + `install.sh` y relanza. FAIL-OPEN: sin red / sin version.json / sin clon → no molesta.
+/// con que se buildeó (version.json, escrito por make-app.sh). Al abrir la pestaña Cerebro consulta
+/// `commits/main` de GitHub; si el repo avanzó, ofrece un botón que hace `git pull` + `install.sh` y
+/// relanza. El clon a actualizar se RESUELVE localmente (ver resolveClonePath): la ruta embebida es la
+/// del build —en un .app precompilado en CI, la del runner, que no existe en la Mac—, así que se
+/// prefiere el clon de instalación local (~/.claude-brain). FAIL-OPEN: sin red / sin version.json /
+/// sin clon local → no molesta (el botón invita a actualizar a mano).
 @MainActor
 final class Updater: ObservableObject {
     static let shared = Updater()
@@ -28,9 +31,25 @@ final class Updater: ObservableObject {
               let data = try? Data(contentsOf: url),
               let o = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
         localShort = o["sha"] ?? "?"
-        repoPath = o["repo"] ?? ""
         localDate = o["date"].flatMap { ISO8601DateFormatter().date(from: $0) }
-        canSelfUpdate = !repoPath.isEmpty && FileManager.default.fileExists(atPath: repoPath + "/macos/install.sh")
+        // La ruta EMBEBIDA (o["repo"]) es la del BUILD; en un .app precompilado en CI es la del runner
+        // (/Users/runner/work/...) que NO existe en la Mac del usuario → antes canSelfUpdate quedaba
+        // false y el botón caía a "actualiza a mano". Resolvemos el clon de instalación LOCAL.
+        repoPath = Self.resolveClonePath(embedded: o["repo"] ?? "")
+        canSelfUpdate = !repoPath.isEmpty
+    }
+
+    /// Clon local para auto-actualizar. Prefiere el embebido si EXISTE aquí (build local), luego
+    /// $CLAUDE_BRAIN_DIR, luego ~/.claude-brain (el clon oculto que siembra el bootstrap). Devuelve ""
+    /// si ninguno tiene macos/install.sh → sin auto-update (el botón invita a hacerlo a mano).
+    private static func resolveClonePath(embedded: String) -> String {
+        let fm = FileManager.default
+        var candidates: [String] = []
+        if !embedded.isEmpty { candidates.append(embedded) }
+        if let env = ProcessInfo.processInfo.environment["CLAUDE_BRAIN_DIR"], !env.isEmpty { candidates.append(env) }
+        candidates.append(fm.homeDirectoryForCurrentUser.path + "/.claude-brain")
+        for c in candidates where fm.fileExists(atPath: c + "/macos/install.sh") { return c }
+        return ""
     }
 
     /// Chequea GitHub como mucho 1×/15 min (evita el rate-limit anónimo). Fire-and-forget desde la vista.
