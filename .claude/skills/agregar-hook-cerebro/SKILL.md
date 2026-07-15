@@ -44,10 +44,10 @@ Estilo de la casa (mira `git-branch-guard.sh` / `secret-scan.sh` como plantilla)
 El árbol está duplicado a mano: **README + 3 GUIs**. Toca los CUATRO en la misma tanda con los MISMOS
 `emoji/name/desc` (o el README miente sobre el widget → doc <= realidad; ver memoria [[arbol-cerebro-sync]]):
 - **README** raíz — el bloque de árbol de texto (conectores `├─`/`└─`).
-- **macOS** `macos/Sources/ClaudeQuota/PopoverView.swift` → `brainTiers` (en el tier que toque) +
+- **macOS** `macos/Sources/ClaudeBrain/PopoverView.swift` → `brainTiers` (en el tier que toque) +
   `BrainInspector.swift` → `knownGlobalHooks`.
 - **Linux** `src/plasmoid/contents/ui/main.qml` → `brainTiers` + `brainGlobalHooks`.
-- **Windows** `windows/src/ClaudeQuota/PopupForm.cs` → `BrainTiers` + `BrainInspector.cs` → `KnownGlobalHooks`.
+- **Windows** `windows/src/ClaudeBrain/PopupForm.cs` → `BrainTiers` + `BrainInspector.cs` → `KnownGlobalHooks`.
 - Tier por dureza: 🔒 INVIOLABLE (bloquea) · 🔔 AUTOMÁTICO (inyecta/recuerda) · 📜 NORMAS · 💡 SKILLS.
 - El estado (activo/faltante) lo lee el inspector de cada GUI. **HOOKS** se casan por basename
   (`knownGlobalHooks`) → renombrar su texto no rompe el estado. **NORMAS** se casan por NAME en la

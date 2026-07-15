@@ -2,7 +2,7 @@
 # Remove the Claude Code quota widget AND the shared Claude-Code brain. Idempotent.
 #
 #   ./uninstall.sh            # remove everything (widget + brain)
-#   ./uninstall.sh --keep-cfg # keep ~/.config/claude-quota/limits.env
+#   ./uninstall.sh --keep-cfg # keep ~/.config/claude-brain/limits.env
 #   ./uninstall.sh --no-brain # remove only the widget; leave the Claude-Code brain installed
 
 set -euo pipefail
@@ -10,7 +10,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BRAIN_UNINSTALLER="$ROOT/brain/uninstall-brain.sh"
 
-PLASMOID_ID="io.github.unjordi.claude-quota-widget"
+PLASMOID_ID="io.github.unjordi.claude-brain"
 KEEP_CFG=0
 SKIP_BRAIN=0
 for arg in "$@"; do
@@ -51,7 +51,7 @@ rm -rf "$HOME/.cache/claude-brain"
 
 if [[ "$KEEP_CFG" -eq 0 ]]; then
   echo "==> Removing config"
-  rm -rf "$HOME/.config/claude-quota"
+  rm -rf "$HOME/.config/claude-brain"
 fi
 
 echo "Done."

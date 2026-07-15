@@ -40,7 +40,7 @@ siguen con el modelo git-based, que ahí no duele.
 > laptop de Liora) antes de confiar en él, y el asset del release no existe hasta el primer release a
 > `main` que dispare la Fase 1. Diseño y comportamiento reales:
 
-Cambios en `windows/src/ClaudeQuota/Updater.cs`:
+Cambios en `windows/src/ClaudeBrain/Updater.cs`:
 
 1. **Detección de versión** → dejar de comparar contra `commits/main` y comparar contra el
    **release**: `GET /repos/unjordi/claude-brain/releases/tags/windows-latest`, leer el `build-sha:`
@@ -49,10 +49,10 @@ Cambios en `windows/src/ClaudeQuota/Updater.cs`:
    Mantener el **fail-open** (sin release / sin red → no molesta).
 
 2. **Acción de update** → en vez de `git ff` + rebuild:
-   - Descargar el asset `ClaudeQuota.exe` del release a un archivo **temporal** (`%TEMP%`).
+   - Descargar el asset `ClaudeBrain.exe` del release a un archivo **temporal** (`%TEMP%`).
    - (Opcional pero recomendado) verificar tamaño/deshabilitar si la descarga viene vacía.
    - Un script `pwsh` desprendido: espera a que el proceso del widget cierre, **reemplaza** el exe en
-     `%LOCALAPPDATA%\Programs\ClaudeQuota\ClaudeQuota.exe` con el temporal, reescribe `version.json`
+     `%LOCALAPPDATA%\Programs\ClaudeBrain\ClaudeBrain.exe` con el temporal, reescribe `version.json`
      con el nuevo SHA, y **relanza**. (Un exe self-contained single-file NO puede sobreescribirse
      mientras corre → por eso el swap va en el script externo, igual que hoy con el rebuild.)
    - **Fail-open duro:** ante CUALQUIER fallo (descarga, permiso, swap) → NO dejar el widget en mal

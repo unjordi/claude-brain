@@ -161,7 +161,7 @@ To launch at login: **System Settings → General → Login Items → +** and ad
 ## Tuning the fallback caps
 
 When the OAuth endpoint is reachable the percentages are exact and **no tuning
-is needed** — the caps in `~/.config/claude-quota/limits.env` only matter for
+is needed** — the caps in `~/.config/claude-brain/limits.env` only matter for
 the offline/no-credentials fallback. To calibrate them, run `/usage` once and
 set each USD cap to **the popover's "$ used" ÷ the `/usage` fraction**, then
 reload the agent:
@@ -169,7 +169,7 @@ reload the agent:
 ```sh
 # e.g. popover shows "$16" on the 5-hour bar and /usage says 36% →
 #   FIVE_HOUR_CAP_USD = 16 / 0.36 ≈ 45
-$EDITOR ~/.config/claude-quota/limits.env
+$EDITOR ~/.config/claude-brain/limits.env
 launchctl kickstart -k gui/$(id -u)/io.github.unjordi.claude-brain
 ```
 
@@ -206,7 +206,7 @@ binary, `make-app.sh` wraps it in a `.app` bundle with an `LSUIElement` Info.pli
 - **Indicator rows show `!`** — the app can't read `state.json`. Check the
   fetch agent: `cat /tmp/claude-brain.err.log`.
 - **No indicator at all** — confirm the app is running
-  (`pgrep -lf ClaudeQuota`); if not, `open "~/Applications/Claude Brain Widget.app"`.
+  (`pgrep -lf ClaudeBrain`); if not, `open "~/Applications/Claude Brain Widget.app"`.
 - **Percentages way off from `/usage`** — check `jq .basis` on
   `~/Library/Caches/claude-brain/state.json`. If it says `"cost"`, the OAuth
   endpoint isn't reachable (are Claude Code credentials in your Keychain? are
@@ -223,7 +223,7 @@ binary, `make-app.sh` wraps it in a `.app` bundle with an `LSUIElement` Info.pli
 
 ```sh
 just uninstall   # remove app, agent, fetch script (keeps limits.env)
-just purge       # also remove ~/.config/claude-quota and the cache
+just purge       # also remove ~/.config/claude-brain and the cache
 ```
 
 ## License

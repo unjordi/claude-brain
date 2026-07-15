@@ -19,12 +19,15 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 BIN_SRC="$ROOT/src/bin/claude-brain-fetch"
 UNIT_SRC="$ROOT/src/systemd"
 PLASMOID_SRC="$ROOT/src/plasmoid"
-PLASMOID_ID="io.github.unjordi.claude-quota-widget"
+PLASMOID_ID="io.github.unjordi.claude-brain"
+OLD_PLASMOID_ID="io.github.unjordi.claude-quota-widget"   # legacy: se elimina en el install (borra el previo)
 BRAIN_INSTALLER="$ROOT/brain/install-brain.sh"
 
 BIN_DEST="$HOME/.local/bin/claude-brain-fetch"
 UNIT_DEST="$HOME/.config/systemd/user"
-LIMITS_DEFAULT="$HOME/.config/claude-quota/limits.env"
+# Config del widget: con el rebrand COMPLETO (2026-07) pasó a ~/.config/claude-brain (el código lee
+# de ahí). "Borra el previo por completo": NO se migra la config vieja; se instala limpia (defaults).
+LIMITS_DEFAULT="$HOME/.config/claude-brain/limits.env"
 
 REINSTALL=0
 SKIP_PLASMOID=0
@@ -109,20 +112,16 @@ fi
 echo "==> Ensuring ~/.local/bin on PATH (zsh + bash)"
 ensure_path_local_bin
 
-# ── Migración desde el nombre viejo (claude-quota → claude-brain). Idempotente / fail-safe. ──
-# CRÍTICO: un reinstall NO debe dejar 2 timers/daemons vivos ni perder la calibración del usuario.
-echo "==> Migrating any previous 'claude-quota' install (idempotent)"
-# 1) Baja y deshabilita las units VIEJAS antes de instalar las nuevas (evita timer/daemon duplicado).
+# ── "Borra el previo por completo" (regla 2026-07-15). Idempotente / fail-safe. ──
+# El rebrand claude-quota → claude-brain NO migra nada: ELIMINA el install viejo y reinstala limpio.
+echo "==> Eliminando cualquier instalación previa 'claude-quota' (install limpio)"
+# 1) Baja y deshabilita las units VIEJAS (evita timer/daemon duplicado).
 systemctl --user disable --now claude-quota.timer claude-quota.service 2>/dev/null || true
 rm -f "$HOME/.config/systemd/user/claude-quota.timer" "$HOME/.config/systemd/user/claude-quota.service"
 rm -f "$HOME/.local/bin/claude-quota-fetch"   # el fetch viejo (renombrado a claude-brain-fetch)
 systemctl --user daemon-reload 2>/dev/null || true
-# 2) Preserva estado: mueve solo el CACHE viejo al nombre nuevo si aún no existe. El dir de CONFIG
-#    (~/.config/claude-quota) NO se renombra — ahí viven limits.env/machine-id/account (calibración +
-#    identidad de sync), que se preservan quietos, igual que en macOS y Windows (contrato invisible).
-if [[ -d "$HOME/.cache/claude-quota" && ! -e "$HOME/.cache/claude-brain" ]]; then
-  mv "$HOME/.cache/claude-quota" "$HOME/.cache/claude-brain"
-fi
+# 2) Borra el cache y la config VIEJOS por completo (no migramos: se regeneran limpios).
+rm -rf "$HOME/.cache/claude-quota" "$HOME/.config/claude-quota"
 
 echo "==> Installing fetch script -> $BIN_DEST"
 install -D -m 0755 "$BIN_SRC" "$BIN_DEST"
@@ -211,6 +210,8 @@ if [[ "$SKIP_PLASMOID" -eq 0 ]]; then
     echo "==> Removing existing plasmoid (if any)"
     kpackagetool6 -t Plasma/Applet -r "$PLASMOID_ID" 2>/dev/null || true
   fi
+  # Borra el plasmoid VIEJO (Id legacy) SIEMPRE — que no queden 2 widgets tras el rename del Id.
+  kpackagetool6 -t Plasma/Applet -r "$OLD_PLASMOID_ID" 2>/dev/null || true
   echo "==> Installing plasmoid"
   if kpackagetool6 -t Plasma/Applet -l 2>/dev/null | grep -q "^${PLASMOID_ID}$"; then
     kpackagetool6 -t Plasma/Applet -u "$PLASMOID_SRC"

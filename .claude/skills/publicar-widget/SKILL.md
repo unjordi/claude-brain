@@ -54,8 +54,8 @@ main para que el autoupdate llegue a la gente.
 ## Reinstalar para QA (macOS)
 ```
 bash macos/install.sh --no-brain      # rebuild + reinstala (NO corre el instalador del cerebro)
-pkill -f "Claude Quota.app/Contents/MacOS/ClaudeQuota"; sleep 2
-open "/Users/unjordi/Applications/Claude Quota.app"
+pkill -f "Claude Brain Widget.app/Contents/MacOS/ClaudeBrain"; sleep 2
+open "/Users/unjordi/Applications/Claude Brain Widget.app"
 ```
 `--no-brain` = solo widget/daemon (no toca `~/.claude`). El QA visual de unjordi es el sello final;
 verde técnico (build/tests) es necesario pero **no** suficiente (definición de LISTO).

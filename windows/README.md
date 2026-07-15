@@ -119,7 +119,7 @@ By default `install.ps1` **downloads the precompiled, self-contained `ClaudeBrai
 (bundles the .NET runtime) from the rolling `windows-latest` release — **no .NET SDK needed**.
 It copies it to `%LOCALAPPDATA%\Programs\ClaudeBrain\ClaudeBrain.exe`, sets the `HKCU\…\Run`
 autostart entry, and launches it. Re-run any time to update in place; it also migrates an old
-`ClaudeQuota` install (removes its autostart + folder).
+`ClaudeBrain` install (removes its autostart + folder).
 
 **Fallback / devs:** if the download fails (e.g. the release is rebuilding, ~1–2 min) it builds from
 source with `dotnet publish` — that path needs the [.NET 10 SDK](https://dotnet.microsoft.com/download).
@@ -176,7 +176,7 @@ If the active account ever differs from the pinned one, the footer turns red wit
 **Quitar cuenta fijada** removes the pin. The file may hold a UUID or an email.
 
 All three platforms share this guard (Linux/macOS read the same pin from
-`~/.config/claude-quota/account`, overridable via `$CLAUDE_QUOTA_ACCOUNT`).
+`~/.config/claude-brain/account`, overridable via `$CLAUDE_BRAIN_ACCOUNT`).
 
 ## Sync between machines (opt-in)
 
@@ -185,7 +185,7 @@ It is **opt-in** — nothing is uploaded unless you point the widget at a cloud 
 your machines already share (Google Drive, etc.). Turn it on by setting the sync
 folder in **one** of two ways (the env var wins):
 
-- Env var `CLAUDE_QUOTA_SYNC_DIR`, or
+- Env var `CLAUDE_BRAIN_SYNC_DIR`, or
 - a plain-text file `%LOCALAPPDATA%\claude-brain\sync-dir` (same config style as the
   account pin).
 
@@ -223,7 +223,7 @@ Your Claude Code credentials and transcripts are never touched.
 ## Development
 
 ```powershell
-cd windows\src\ClaudeQuota
+cd windows\src\ClaudeBrain
 dotnet build                         # compile
 dotnet run                           # run from source (framework-dependent)
 dotnet run -- --shot ..\..\..\shots  # render the 3 popup tabs + tray icons to PNG
@@ -264,5 +264,5 @@ the headless way to eyeball the UI without clicking the tray. Source layout:
 ## License
 
 MIT (same as the rest of the repo — a fork of
-[fuziontech/claude-quota-widget](https://github.com/fuziontech/claude-quota-widget)).
+[fuziontech/claude-brain](https://github.com/fuziontech/claude-brain)).
 See [../LICENSE](../LICENSE).

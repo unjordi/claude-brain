@@ -233,7 +233,7 @@ memoria, dashboard ni registro de consentimiento.
 
 ## Créditos
 
-Nació de [`fuziontech/claude-quota-widget`](https://github.com/fuziontech/claude-quota-widget) (MIT),
+Nació de [`fuziontech/claude-brain`](https://github.com/fuziontech/claude-brain) (MIT),
 restyleado según [`FelixDes/claude-kde-usage-widget`](https://github.com/FelixDes/claude-kde-usage-widget),
 y luego crecido de "un widget de cuota" a "un cerebro portable de Claude Code con cara de widget".
 Licencia **MIT** (ver [LICENSE](LICENSE); copyright original de fuziontech, conservado).

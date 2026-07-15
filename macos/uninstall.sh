@@ -2,7 +2,7 @@
 # Remove the macOS Claude Code quota app, agent, fetch script, AND the shared Claude-Code brain.
 #
 #   ./uninstall.sh            # remove everything (app + brain; keeps limits.env)
-#   ./uninstall.sh --purge    # also remove ~/.config/claude-quota and the cache
+#   ./uninstall.sh --purge    # also remove ~/.config/claude-brain and the cache
 #   ./uninstall.sh --no-brain # remove only the app; leave the Claude-Code brain installed
 
 set -euo pipefail
@@ -14,7 +14,7 @@ LABEL="io.github.unjordi.claude-brain"
 FETCH_DEST="$HOME/.local/bin/claude-brain-fetch"
 PLIST_DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
 APP_DEST="$HOME/Applications/Claude Brain Widget.app"
-CONFIG_DIR="$HOME/.config/claude-quota"
+CONFIG_DIR="$HOME/.config/claude-brain"
 CACHE_DIR="$HOME/Library/Caches/claude-brain"
 
 PURGE=0
@@ -38,7 +38,7 @@ fi
 
 echo "==> Stopping app"
 osascript -e 'tell application "Claude Brain Widget" to quit' 2>/dev/null || true
-pkill -f "Claude Brain Widget.app/Contents/MacOS/ClaudeQuota" 2>/dev/null || true
+pkill -f "Claude Brain Widget.app/Contents/MacOS/ClaudeBrain" 2>/dev/null || true
 
 echo "==> Unloading launchd agent"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true

@@ -22,9 +22,9 @@ BRAIN_INSTALLER="$ROOT/../brain/install-brain.sh"
 
 FETCH_DEST="$HOME/.local/bin/claude-brain-fetch"
 PLIST_DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
-# El dir de config (~/.config/claude-quota) NO se renombra en el rebrand: ahí viven la
-# calibración (limits.env), el machine-id del sync y el account pin — dejarlo quieto los preserva.
-LIMITS_DEFAULT="$HOME/.config/claude-quota/limits.env"
+# Config del widget: con el rebrand COMPLETO (2026-07) pasó a ~/.config/claude-brain (el código lee
+# de ahí). "Borra el previo por completo": NO se migra la config vieja; se instala limpia (defaults).
+LIMITS_DEFAULT="$HOME/.config/claude-brain/limits.env"
 APPS_DIR="$HOME/Applications"
 STATE_FILE="$HOME/Library/Caches/claude-brain/state.json"
 
@@ -43,16 +43,16 @@ for arg in "$@"; do
   esac
 done
 
-# --- Migración del nombre viejo (claude-quota -> claude-brain) ---------------------------------
-# Un reinstall NO debe dejar 2 daemons, 2 apps ni perder calibración. Idempotente y fail-safe:
-# si nada viejo existe, cada paso es un no-op silencioso. Corre ANTES de instalar lo nuevo.
+# --- "Borra el previo por completo" (regla 2026-07-15) -----------------------------------------
+# El rebrand claude-quota -> claude-brain NO migra ni conserva nada del install viejo: lo ELIMINA y
+# reinstala limpio. Idempotente y fail-safe: si nada viejo existe, cada paso es un no-op silencioso.
 OLD_LABEL="io.github.unjordi.claude-quota"
 OLD_PLIST="$HOME/Library/LaunchAgents/$OLD_LABEL.plist"
 OLD_FETCH="$HOME/.local/bin/claude-quota-fetch"
 OLD_APP="$HOME/Applications/Claude Quota.app"
 OLD_CACHE="$HOME/Library/Caches/claude-quota"
-NEW_CACHE="$HOME/Library/Caches/claude-brain"
-echo "==> Migrando instalación previa (claude-quota -> claude-brain) si existe"
+OLD_CONFIG="$HOME/.config/claude-quota"
+echo "==> Eliminando cualquier instalación previa 'claude-quota' (install limpio)"
 # 1) Baja y elimina el LaunchAgent viejo (que no queden 2 daemons).
 launchctl bootout "gui/$(id -u)/$OLD_LABEL" 2>/dev/null || true
 launchctl unload "$OLD_PLIST" 2>/dev/null || true
@@ -61,13 +61,8 @@ rm -f "$OLD_PLIST" "$OLD_FETCH"
 osascript -e 'tell application "Claude Quota" to quit' 2>/dev/null || true
 pkill -f "Claude Quota.app/Contents/MacOS/ClaudeQuota" 2>/dev/null || true
 rm -rf "$OLD_APP"
-# 3) Migra el cache (state/stats/chats/sessions) al nombre nuevo si aún no existe. La calibración
-#    (limits.env, machine-id, account pin) vive en ~/.config/claude-quota, que NO se renombra, así
-#    que se preserva sola: solo el cache cambia de ruta.
-if [[ -d "$OLD_CACHE" && ! -d "$NEW_CACHE" ]]; then
-  echo "    migrando cache: $OLD_CACHE -> $NEW_CACHE"
-  mv "$OLD_CACHE" "$NEW_CACHE"
-fi
+# 3) Borra el cache y la config VIEJOS por completo (no migramos: se regeneran limpios).
+rm -rf "$OLD_CACHE" "$OLD_CONFIG"
 
 # Asegura que ~/.local/bin (donde viven el fetch y, típicamente, el CLI `claude`) esté en el PATH,
 # en zsh Y bash (macOS default es zsh, pero no asumas). Idempotente por marcador; crea el rc si falta.

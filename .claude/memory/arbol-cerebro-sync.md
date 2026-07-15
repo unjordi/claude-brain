@@ -8,9 +8,9 @@ espejarse.**
 
 ## Los 4 catálogos (mismo emoji / name / desc / evento / detalle)
 1. **README** raíz — el bloque de árbol de texto (` ``` ` con conectores `├─`/`└─`).
-2. **macOS** — `macos/Sources/ClaudeQuota/PopoverView.swift`, propiedad `brainTiers`.
+2. **macOS** — `macos/Sources/ClaudeBrain/PopoverView.swift`, propiedad `brainTiers`.
 3. **Linux** — `src/plasmoid/contents/ui/main.qml`, propiedad `brainTiers`.
-4. **Windows** — `windows/src/ClaudeQuota/PopupForm.cs`, `BrainTiers`.
+4. **Windows** — `windows/src/ClaudeBrain/PopupForm.cs`, `BrainTiers`.
 
 ## Y la LÓGICA DE ESTADO por GUI (casa NOMBRES → si renombras, renombra aquí también)
 Cada GUI decide "installed/absent/…" por el **nombre** de la pieza. Si cambias el NAME de una norma

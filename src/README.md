@@ -47,8 +47,8 @@ de cadencia. El plasmoide es vista pura: lee `~/.cache/claude-brain/state.json` 
 ## Ajustar los caps del fallback (solo importa offline)
 
 Con el endpoint OAuth alcanzable los porcentajes son exactos y **no hay que ajustar nada**. Para el
-fallback offline, pon cada cap en USD en `~/.config/claude-quota/limits.env` como *"$ usado" del popup
-÷ la fracción de `/usage`*, y `systemctl --user restart claude-quota.service`.
+fallback offline, pon cada cap en USD en `~/.config/claude-brain/limits.env` como *"$ usado" del popup
+÷ la fracción de `/usage`*, y `systemctl --user restart claude-brain.service`.
 
 | Plan | `FIVE_HOUR_CAP_USD` | `WEEKLY_CAP_USD` |
 |---|---|---|
@@ -118,7 +118,7 @@ just refresh  # fuerza un fetch ya e imprime el resultado
 ```
 
 - **Píldora gris con `…`** — el caché aún no se escribe; el primer fetch tarda mientras `ccusage` arranca en frío.
-- **`error: cat rc=1`** — el fetch tronó (`journalctl --user -u claude-quota.service`); normalmente falta `jq`/`ccusage`.
+- **`error: cat rc=1`** — el fetch tronó (`journalctl --user -u claude-brain.service`); normalmente falta `jq`/`ccusage`.
 - **Porcentajes lejos de `/usage`** — `jq .basis ~/.cache/claude-brain/state.json`: `"cost"` = el endpoint OAuth no es alcanzable (¿credenciales? ¿en línea?) y estás en el fallback; `"oauth"` = viene de Anthropic y debe coincidir.
 - **Widget en blanco en el panel** — reinicia plasmashell una vez: `just reload-plasmashell`.
 
@@ -129,13 +129,13 @@ just test-brain           # las 45 pruebas del cerebro (contra un $HOME falso)
 just upgrade-plasmoid      # reconstruye + reinstala el plasmoide tras editar main.qml
 just reload-plasmashell    # reinicia plasmashell para tomar cambios
 just lint                  # shellcheck a los scripts bash
-just package               # arma dist/claude-quota-widget-X.Y.Z.plasmoid
+just package               # arma dist/claude-brain-X.Y.Z.plasmoid
 ```
 
 ## Desinstalar
 
 ```sh
 just uninstall              # widget + daemon
-just uninstall-keep-cfg     # conserva ~/.config/claude-quota/limits.env
+just uninstall-keep-cfg     # conserva ~/.config/claude-brain/limits.env
 bash ../brain/uninstall-brain.sh   # el cerebro (idempotente; conserva tus datos)
 ```

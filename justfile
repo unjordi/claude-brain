@@ -2,7 +2,7 @@
 #
 # Run `just --list` to see all targets.
 
-PLASMOID_ID := "io.github.unjordi.claude-quota-widget"
+PLASMOID_ID := "io.github.unjordi.claude-brain"
 PLASMOID_SRC := justfile_directory() + "/src/plasmoid"
 VERSION := `jq -r '.KPlugin.Version' src/plasmoid/metadata.json`
 
@@ -24,7 +24,7 @@ install-headless:
 reinstall:
     ./install.sh --reinstall
 
-# Remove everything (keeps ~/.config/claude-quota/limits.env)
+# Remove everything (keeps ~/.config/claude-brain/limits.env)
 uninstall-keep-cfg:
     ./uninstall.sh --keep-cfg
 
@@ -48,10 +48,10 @@ preview:
 
 # Build a distributable .plasmoid (zip) of the widget
 package:
-    rm -f dist/claude-quota-widget-{{VERSION}}.plasmoid
+    rm -f dist/claude-brain-{{VERSION}}.plasmoid
     mkdir -p dist
-    cd src/plasmoid && zip -r ../../dist/claude-quota-widget-{{VERSION}}.plasmoid . -x '*.swp' '*.DS_Store'
-    @echo "Wrote dist/claude-quota-widget-{{VERSION}}.plasmoid"
+    cd src/plasmoid && zip -r ../../dist/claude-brain-{{VERSION}}.plasmoid . -x '*.swp' '*.DS_Store'
+    @echo "Wrote dist/claude-brain-{{VERSION}}.plasmoid"
 
 # Install ONLY the shared Claude-Code brain (global hooks, delegation-cost governance, norms)
 install-brain:
@@ -71,19 +71,19 @@ lint:
 
 # Force one fetch cycle now (via systemd) and print the result
 refresh:
-    systemctl --user start claude-quota.service
+    systemctl --user start claude-brain.service
     sleep 1
     jq . ~/.cache/claude-brain/state.json
 
 # Show timer status + last few journal entries
 status:
-    systemctl --user status claude-quota.timer --no-pager || true
+    systemctl --user status claude-brain.timer --no-pager || true
     @echo ""
-    journalctl --user -u claude-quota.service -n 10 --no-pager
+    journalctl --user -u claude-brain.service -n 10 --no-pager
 
 # Tail the systemd journal for the fetch service
 logs:
-    journalctl --user -u claude-quota.service -f
+    journalctl --user -u claude-brain.service -f
 
 # Wipe build artifacts
 clean:

@@ -17,4 +17,4 @@ unjordi quiso **bajar la transparencia de TODOS los widgets de KDE** (no solo el
 **Aplicar:** `plasma-apply-desktoptheme CachyOS-Nord-opaco`. **Revertir:** `plasma-apply-desktoptheme CachyOS-Nord-round`.
 **Tunear:** subir `opacity:0.97`→`1.0` (100% opaco) o bajar a 0.90 en esos dos SVG y re-aplicar.
 
-OJO: cambio LOCAL de CachyOS (los SVG del tema viven en `~/.local`, NO viajan por git ni por Drive — solo viaja esta nota); macOS/Windows no aplica. Editar SVGs con **`command sed`** (su `cp` está aliaseado a `cp -i`; ver [[claude-quota-widget]] gotchas). Surgió mientras pulíamos el [[claude-quota-widget]].
+OJO: cambio LOCAL de CachyOS (los SVG del tema viven en `~/.local`, NO viajan por git ni por Drive — solo viaja esta nota); macOS/Windows no aplica. Editar SVGs con **`command sed`** (su `cp` está aliaseado a `cp -i`; ver [[claude-brain]] gotchas). Surgió mientras pulíamos el [[claude-brain]].

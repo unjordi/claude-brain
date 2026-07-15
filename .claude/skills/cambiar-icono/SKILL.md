@@ -11,7 +11,7 @@ description: >
 
 Repo `~/code/claude-brain` (GitHub `unjordi/claude-brain`). El ícono es **cerebro crema + chispa
 naranja de Claude sobre squircle grafito**. Identidad establecida el 2026-07-11 (antes era un medidor,
-de cuando el widget se llamaba "Claude Quota").
+de cuando el widget se llamaba "Claude Brain Widget").
 
 ## Fuente ÚNICA: dos SVG (texto, versionable — NO hay binarios de arte en el repo salvo el .ico)
 - `assets/icon.svg` — **arte grande** (≥128px): cerebro con surcos + chispa fina de 12 rayos.
@@ -32,7 +32,7 @@ Para cambiar el diseño: edita los SVG, renderiza a PNG para autoevaluar (`rsvg-
   grande en 128+) y arma `macos/build/AppIcon.icns`. `make-app.sh` lo copia a la `.app`.
 - **Linux (plasmoid):** el SVG grande vive en `src/plasmoid/contents/icons/claude-brain.svg` y
   `metadata.json` tiene `"Icon": "claude-brain"`. Si cambias el arte, re-copia `assets/icon.svg` ahí.
-- **Windows (.ico):** regenera `windows/src/ClaudeQuota/ClaudeBrain.ico` con el packer: rsvg-convert a
+- **Windows (.ico):** regenera `windows/src/ClaudeBrain/ClaudeBrain.ico` con el packer: rsvg-convert a
   PNGs (16/32 de la chica, 48/64/128/256 de la grande) → python empaca un .ico multi-tamaño (PNG-
   embedded, válido Vista+). Ver el bloque en la bitácora del 2026-07-11 o reusar el mismo script.
 
