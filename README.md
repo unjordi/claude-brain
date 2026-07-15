@@ -237,3 +237,6 @@ Nació de [`fuziontech/claude-brain`](https://github.com/fuziontech/claude-brain
 restyleado según [`FelixDes/claude-kde-usage-widget`](https://github.com/FelixDes/claude-kde-usage-widget),
 y luego crecido de "un widget de cuota" a "un cerebro portable de Claude Code con cara de widget".
 Licencia **MIT** (ver [LICENSE](LICENSE); copyright original de fuziontech, conservado).
+
+El cerebro del ícono deriva del emoji 🧠 de [Noto Emoji](https://github.com/googlefonts/noto-emoji)
+de Google (Apache-2.0); el fondo grafito y el asterisco naranja son propios. Ver [NOTICE](NOTICE).
