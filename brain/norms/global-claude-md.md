@@ -161,4 +161,22 @@ TodoWrite es SCRATCH de sesión — el backlog DURABLE es estado-proyecto.md. Lo
 `delegacion-reporte` (PostToolUse/Task); los worktrees zombies los barre `limpiar-worktrees.sh` (borra
 los de ramas mergeadas, deja los vivos anotando su pendiente en la bitácora). **Señal de que te
 desviaste:** el usuario tuvo que PEDIRTE que actualizaras bitácora/estado, o se acumularon worktrees zombies.
+
+# Compact instructions
+
+> Sección FUNCIONAL, no decorativa: el CLI de Claude Code re-lee este `CLAUDE.md` de disco al compactar
+> (manual O automático) y busca el heading `# Compact instructions` (nivel 1, case-insensitive) para guiar
+> el resumen. Por eso va como `#` (no `##`) aunque rompa la jerarquía del doc: el heading exacto es el
+> contrato. Complementa —no sustituye— al skill `checkpoint` (vuelca el hilo a disco) + el hook
+> `rehidratar-hilo` (lo relee al retomar); esta sección solo mejora el resumen del propio CLI.
+
+Al compactar (manual O automático), PRESERVA por encima de todo:
+- El **HILO de trabajo actual**: qué estamos haciendo AHORA, la decisión a medio cocinar, el "siguiente paso
+  concreto" y el porqué. Si existe `.claude/memory/hilo-mental-actual.md`, su contenido ES la fuente del hilo:
+  consérvalo íntegro, no lo resumas.
+- La **tarea/objetivo activo**, las restricciones acordadas en la conversación y las **DECISIONES ABIERTAS**
+  (NO las cierres ni las des por hechas al resumir).
+- Lo último que pidió el usuario y el "feeling" de trabajo (tono, prioridades).
+Prioriza CONTINUIDAD sobre brevedad; NO sobre-resumas hasta perder el hilo. Rutas de archivo, nombres de
+función, comandos y mensajes de error CONCRETOS: consérvalos literales.
 <!-- END claude-brain -->
