@@ -425,6 +425,26 @@ rm -rf "$G7ROOT"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
+echo "== (b3c) git-branch-guard: bloquea push/merge REAL a main/develop, NO una MENCIÓN entrecomillada =="
+# HOME AISLADO SIN copia global del hook: si no, la cláusula de dedupe doble-cableado (la copia del
+# repo CEDE cuando existe ~/.claude/hooks/…) haría que el guard salga en silencio en una máquina con el
+# cerebro instalado globalmente → falso FAIL. (Igual que el gb() de b1d, que usa $GBHOME.)
+mkdir -p "$FAKEHOME/_nohooks/.claude"
+gbg() { printf '{"tool_input":{"command":%s}}' "$(printf '%s' "$1" | jq -Rs .)" | HOME="$FAKEHOME/_nohooks" bash "$HOOKS/git-branch-guard.sh"; }
+is_deny   "$(gbg 'git push origin develop')"                              && ok "gbg: push real a develop → deny (dientes intactos)"           || bad "gbg: NO bloqueó un push real a develop"
+is_silent "$(gbg 'git push -u origin feat/x')"                            && ok "gbg: push a una ramita → pasa"                                || bad "gbg: bloqueó un push a ramita"
+is_silent "$(gbg 'git commit -m "doc: no hagas git push a develop"')"     && ok "gbg: 'push…develop' en mensaje de commit (dato) → pasa"       || bad "gbg: bloqueó una mención entrecomillada en commit (regresión del fix de comillas)"
+is_silent "$(gbg 'grep -rn "git push origin develop" .claude/')"          && ok "gbg: 'push…develop' en arg de grep (dato) → pasa"             || bad "gbg: bloqueó una frase entrecomillada en grep (regresión del fix de comillas)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (b3d) confirmar-merge-develop: el CONF_RE reconoce el imperativo 'haz merge a develop' =="
+CMDCR=$(grep "CONF_RE=" "$HOOKS/confirmar-merge-develop.sh" | sed "s/^[^']*'//; s/'\$//")
+printf '%s' "tonces, haz merge a develop de la rama X" | grep -qiE "$CMDCR" && ok "confirmar: reconoce 'haz merge a develop' (imperativo)" || bad "confirmar: NO reconoce 'haz merge a develop' (regresión del CONF_RE)"
+printf '%s' "ya mergea eso"                            | grep -qiE "$CMDCR" && ok "confirmar: reconoce 'mergea'"                            || bad "confirmar: NO reconoce 'mergea'"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
 echo "== (b4) dod-verificar: cierre/claim-visual sin evidencia bloquea; con OK o tool de navegador, no =="
 DODTX="$FAKEHOME/dod-transcript.jsonl"
 dod() { # dod "<texto final asistente>" "<línea extra de tool/edit o vacío>"
