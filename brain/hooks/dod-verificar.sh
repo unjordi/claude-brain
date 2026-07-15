@@ -46,16 +46,43 @@ turn=$(printf '%s\n' "$window" | awk '
 last=$(printf '%s\n' "$turn" | jq -rs '[.[] | select((.message.role // .type)=="assistant") | (.message.content[]? | select(.type=="text") | .text)] | last // ""' 2>/dev/null)
 [ -z "$last" ] && exit 0
 
-# ── ESCAPE: ¿el mensaje es ESTATUS/ESPERA/PROPUESTA (no un cierre)? → no dispares. ──
-STATUS_RE='con tu (ok|visto|aprobaci)|dime si|dime c[oó]mo|dime qu[eé]|te aviso|te muestro|cuando .{0,40}(reporte|termine|cierre|entre|merge)|en preview|a tu (revisi|qa)|para tu (revisi|qa|visto)|pendiente de tu|sin mergear|armado sin merge|no (lo |la )?mergeo|no cierro|no declaro|espero (tu|a que|el)|revisamos (en la ma|juntos|al rato|cuando)|si (ya |te )?(qued|late|parece)|¿[^?]{0,120}\?|definici[oó]n de .?listo|qu[eé] entiendes por|palabra .?listo'
-printf '%s' "$last" | grep -qiE "$STATUS_RE" && exit 0
+# ── CLAIM de cierre (G1): se computa AQUÍ, antes de los escapes por PREGUNTA, porque una pregunta
+# co-ubicada NO debe anular un cierre afirmado en el MISMO mensaje ("Listo, quedó terminado.
+# ¿Reviso algo más?"). Con claim presente, la pregunta ya no salva el turno → se evalúa el claim. ──
+CLAIM_RE='listo para (la )?(producci|desplegar|deploy|salir|mergear)|en producci[oó]n|(ya |todo |esto |lo |la )?(qued[oó]|est[aá]|dej[eé]) *(listo|lista|terminad|completad|funcionando)|(m[oó]dulo|migraci[oó]n|feature|slice|endpoint|p[aá]gina|tarea)[^.]{0,40}(complet|termin|listo|a la par|de punta a punta)|100% (listo|completo|a la par)|de punta a punta|ya (funciona|jala|sirve)|todo (listo|verde|jalando)|\bcerrad[oa]s?\b|\bcerramos\b|\bterminamos\b|de trancazo|🏁|🎉|✅ *(listo|hecho|terminad|cerrad|complet)'
+# El claim se evalúa sobre el texto SIN los tramos de pregunta (¿…?): así "¿ya quedó terminado el
+# módulo?" (léxico de cierre DENTRO de una pregunta) NO cuenta como claim, pero "Listo, quedó
+# terminado. ¿Reviso algo más?" (claim AFIRMADO + pregunta aparte) SÍ. G1 = una pregunta co-ubicada
+# no salva un cierre afirmado; una pregunta que SOLO consulta el estado, sí escapa.
+_decl=$(printf '%s' "$last" | sed 's/¿[^?]*?//g')
+printf '%s' "$_decl" | grep -qiE "$CLAIM_RE" && claim=si || claim=no
 
-# P1 (precisión, baja falsos positivos): si la ÚLTIMA línea con texto del mensaje del asistente TERMINA
-# en signo de interrogación, es una PREGUNTA, no un cierre → no dispares. (Mató un falso positivo real:
-# preguntar por un UUID disparaba el guard aunque NO se declaraba nada listo.) Acepta cierre de comilla/
-# paréntesis tras el "?". No afloja el candado: un CIERRE de verdad no termina preguntando.
-_lastline=$(printf '%s\n' "$last" | awk 'NF{l=$0} END{print l}')
-printf '%s' "$_lastline" | grep -qE '[?？][")»'"'"'”]*$' && exit 0
+# ── ESCAPE por DOWNGRADE explícito (léxico PRESCRITO de preview/auto-degradación, o meta-discusión de
+# la palabra "listo"): SIEMPRE escapa, incluso con un claim de cierre co-ubicado. Usar este léxico ES
+# declarar NO-listo — "el módulo quedó terminado pero lo dejo EN PREVIEW, A TU REVISIÓN" es honesto,
+# no un falso LISTO. (Por eso NO se subordina al claim: sería un falso positivo castigar justo la
+# frase que la norma pide.) ──
+DOWNGRADE_RE='en preview|a tu (revisi|qa)|para tu (revisi|qa|visto)|pendiente de tu|sin mergear|armado sin merge|no (lo |la )?mergeo|no cierro|no declaro|definici[oó]n de .?listo|qu[eé] entiendes por|palabra .?listo'
+printf '%s' "$last" | grep -qiE "$DOWNGRADE_RE" && exit 0
+
+# ── ESCAPE por ESTATUS DÉBIL (deferir/avisar/consultar) — SOLO si NO hay un CLAIM de cierre co-ubicado
+# (H4), igual que la pregunta de abajo. Antes esto escapaba SIEMPRE, así "Listo, quedó terminado. Dime
+# si reviso algo más." se salvaba con "dime si" pese al cierre AFIRMADO. Un deferral suave NO neutraliza
+# un LISTO afirmado en el mismo mensaje (cierra H4); si NO hay claim, sí escapa (sigue siendo estatus). ──
+WEAK_STATUS_RE='con tu (ok|visto|aprobaci)|dime si|dime c[oó]mo|dime qu[eé]|te aviso|te muestro|cuando .{0,40}(reporte|termine|cierre|entre|merge)|espero (tu|a que|el)|revisamos (en la ma|juntos|al rato|cuando)|si (ya |te )?(qued|late|parece)'
+if [ "$claim" != si ]; then
+  printf '%s' "$last" | grep -qiE "$WEAK_STATUS_RE" && exit 0
+fi
+
+# ── Escape por PREGUNTA — SOLO si NO hay un CLAIM de cierre co-ubicado (G1). El `¿…?` interno y la
+# última línea que termina en `?` son señales de PREGUNTA (pedir input), no de cierre; pero un cierre
+# afirmado en el mismo mensaje NO se salva colgándole una pregunta al final. (P1: mató un falso
+# positivo real — preguntar por un UUID disparaba el guard sin declararse nada listo.) ──
+if [ "$claim" != si ]; then
+  printf '%s' "$last" | grep -qiE '¿[^?]{0,120}\?' && exit 0
+  _lastline=$(printf '%s\n' "$last" | awk 'NF{l=$0} END{print l}')
+  printf '%s' "$_lastline" | grep -qE '[?？][")»'"'"'”]*$' && exit 0
+fi
 
 # Marca de (1) confirmación de funcionalidad o (2) autorización expresa de cierre, CITADA en el mensaje.
 # (Se computa AQUÍ ARRIBA porque B2 también la usa: si el usuario ya confirmó, citar SU QA visual es
@@ -69,20 +96,36 @@ printf '%s' "$last" | grep -qiE "$CONF_RE" && conf=si || conf=no
 # QA de Chrome sin ver la pantalla y reaparecieron bugs ya resueltos.) ──
 VISUAL_RE='(qued[oó]|se ve[n]?) (igual|como|tal cual|clavad|idéntic)[^.]{0,25}(mockup|dise[nñ]|legado|pantalla)|lo verifiqu[eé] (en chrome|en el navegador|visualmente|en pantalla)|en chrome (se ve|qued[oó]|funciona|jala|lo prob[eé]|ya)|la pantalla (muestra|se ve|qued)|hice .{0,12}qa visual|qa visual.{0,15}(ok|pas|hecho|verde|aprob|correct)|screenshot (muestra|confirma)|el render (se ve|qued[oó]|correct)|se ve (id[eé]ntic|tal cual|como el (mockup|legado|dise))'
 if [ "$conf" != si ] && printf '%s' "$last" | grep -qiE "$VISUAL_RE"; then
-  if ! printf '%s' "$turn" | grep -qE 'mcp__claude-in-chrome__|"name":[[:space:]]*"computer"|read_page|tabs_context|tabs_create|gif_creator|browser_batch|screenshot'; then
+  # G2(b): detecta la tool de navegador por ESTRUCTURA del transcript (un tool_use cuyo "name" es una
+  # tool de navegador), NO por la palabra "screenshot" suelta en prosa — si no, decir "no tomé
+  # screenshot" suprimía el bloqueo. Solo un tool_use REAL (chrome MCP o el tool `computer`) cuenta.
+  if ! printf '%s' "$turn" | grep -qE '"name"[[:space:]]*:[[:space:]]*"(mcp__claude-in-chrome__[a-z_]+|computer)"'; then
     vreason="DETENTE — afirmaste una OBSERVACIÓN VISUAL ('se ve/quedó como el mockup / en Chrome / la pantalla muestra…') pero en ESTE turno NO corriste NINGUNA tool de navegador/screenshot: lo estás declarando A CIEGAS. No uses léxico de QA visual sin haber mirado la pantalla. Estatus honesto: 'verificado técnicamente, SIN QA visual (a ciegas)' — el QA visual lo hace el usuario o una captura real. (Lección real (2026-07): se insinuó QA de Chrome sin verla y reaparecieron bugs ya resueltos.)"
     jq -n --arg r "$vreason" '{decision:"block", reason:$r}'
     exit 0
   fi
 fi
 
-# ── ¿Afirma CIERRE real (algo quedó terminado/funciona/en producción)? ──
-CLAIM_RE='listo para (la )?(producci|desplegar|deploy|salir|mergear)|en producci[oó]n|(ya |todo |esto |lo |la )?(qued[oó]|est[aá]|dej[eé]) *(listo|lista|terminad|completad|funcionando)|(m[oó]dulo|migraci[oó]n|feature|slice|endpoint|p[aá]gina|tarea)[^.]{0,40}(complet|termin|listo|a la par|de punta a punta)|100% (listo|completo|a la par)|de punta a punta|ya (funciona|jala|sirve)|todo (listo|verde|jalando)|\bcerrad[oa]s?\b|\bcerramos\b|\bterminamos\b|de trancazo|🏁|🎉|✅ *(listo|hecho|terminad|cerrad|complet)'
-printf '%s' "$last" | grep -qiE "$CLAIM_RE" || exit 0
+# ── ¿Afirma CIERRE real? (ya computado arriba como $claim para G1). ──
+[ "$claim" = si ] || exit 0
 
 # ¿El TURNO tocó CÓDIGO (algún archivo que NO sea documentación ni memoria)? Si no, un "listo" no exige
 # verificación técnica (turno de docs/config puro).
 codigo=$(printf '%s' "$turn" | grep -oE '"file_path":"[^"]+"' | grep -vE '\.(md|txt)"|/\.claude/memory/' | head -1)
+# G2(a): editar por Bash (sed -i / patch / redirección `>`/`tee` a un archivo) NO genera "file_path" →
+# antes parecía que el turno no tocó código (evasión). Inspecciona los comandos Bash del turno.
+if [ -z "$codigo" ]; then
+  _bash=$(printf '%s' "$turn" | jq -rs '[.[] | (.message.content[]? // empty) | select(.type=="tool_use" and .name=="Bash") | (.input.command // "")] | join("\n")' 2>/dev/null)
+  if printf '%s' "$_bash" | grep -qE 'sed[[:space:]]+-i|(^|[[:space:]])patch([[:space:]]|$)'; then
+    codigo="(bash-inplace)"   # edición in-place / parche → mutación fuerte (rara vez solo-doc)
+  else
+    # Redirección o tee hacia un archivo con extensión NO-doc (excluye docs, logs y /dev/*).
+    codigo=$(printf '%s\n' "$_bash" \
+      | grep -oE '(>>?|(^|[[:space:]])tee([[:space:]]+-a)?)[[:space:]]*[^[:space:]|;&<>]+\.[A-Za-z0-9]+' \
+      | grep -oE '[^[:space:]|;&<>]+\.[A-Za-z0-9]+$' \
+      | grep -vE '\.(md|txt|log)$|^/dev/' | head -1)
+  fi
+fi
 [ -z "$codigo" ] && exit 0
 
 # Evidencia en el turno (build/tests/lint es SOFT — se reporta; el candado duro es conf).

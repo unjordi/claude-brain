@@ -12,16 +12,20 @@
 #
 # Fail-open ante parseo (sin jq no bloquea). Vive en <repo>/.claude/hooks/ (viaja por git).
 
+# dedupe doble-cableado: si soy la copia del REPO y la copia GLOBAL existe, cedo (la global maneja
+# esta invocación) → evita disparo doble en máquina con el cerebro global; en un clon SIN bootstrap
+# (sin copia global) la del repo sí corre. NO-debilitante: sigue disparando 1× y denegando igual.
+case "$0" in "$HOME/.claude/hooks/"*) : ;; *) [ -f "$HOME/.claude/hooks/$(basename "$0")" ] && exit 0 ;; esac
 input=$(cat)
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -z "$cmd" ] && exit 0
 
-# ¿El comando integra un MR/PR? (merge/accept en glab, pr merge en gh)
-MERGE_RE='(glab[[:space:]]+mr[[:space:]]+(merge|accept)|gh[[:space:]]+pr[[:space:]]+merge)'
-printf '%s' "$cmd" | grep -qE "$MERGE_RE" || exit 0
+# shellcheck source=analizar-comando-git.sh
+. "$(dirname "$0")/analizar-comando-git.sh"
 
-# Escape: ayuda/inspección, no una integración real.
-printf '%s' "$cmd" | grep -qE '(^|[[:space:]])(--help|-h)([[:space:]]|$)' && exit 0
+# ¿El comando EJECUTA una integración REAL de MR/PR? (merge/accept glab, pr merge gh; no ayuda/dry-run).
+# La lógica de reconocimiento vive en la lib (fuente única con los otros git-guards → no divergen).
+acg_es_merge_mr "$cmd" || exit 0
 
 # ¿Ya trae squash? (--squash o -s). Si sí, todo bien.
 SQUASH_RE='(--squash([[:space:]]|=|$)|(^|[[:space:]])-s([[:space:]]|$))'
@@ -30,24 +34,11 @@ printf '%s' "$cmd" | grep -qE "$SQUASH_RE" && exit 0
 # La obligatoriedad de --squash aplica SÓLO cuando el DESTINO es `develop` (1 commit limpio por slice).
 # Todo lo demás va LIBRE: `main` es RELEASE (conserva historia — JAMÁS se fuerza squash, así un squash
 # olvidado nunca aplasta el histórico de un release), y ramas personales/ramitas son el día a día (a tu
-# gusto). Determinamos el destino consultando el MR/PR (glab/gh).
-# FAIL-SAFE hacia esa prioridad: si NO podemos confirmar que el destino es `develop`, NO forzamos squash
-# (nunca arriesgamos aplastar un release por no poder resolver el destino).
-_destino=""
-if command -v jq >/dev/null 2>&1; then
-  _repo=$(printf '%s' "$cmd" | grep -oE '(--repo|-R)[[:space:]=]+[^[:space:]]+' | grep -oE '[^[:space:]=]+$')
-  # Robustez: si el comando no trae --repo, deriva el repo del remote del PROYECTO (CLAUDE_PROJECT_DIR),
-  # no del cwd del hook (que puede no ser el repo → la consulta de destino fallaría y caería a fail-safe).
-  [ -z "$_repo" ] && _repo=$(git -C "${CLAUDE_PROJECT_DIR:-.}" remote get-url origin 2>/dev/null | sed -E 's#^(git@[^:]+:|https?://[^/]+/)##; s#\.git$##')
-  _mrid=$(printf '%s' "$cmd" | grep -oE '(mr[[:space:]]+(merge|accept)|pr[[:space:]]+merge)[[:space:]]+#?[0-9]+' | grep -oE '[0-9]+$')
-  if [ -n "$_mrid" ]; then
-    if printf '%s' "$cmd" | grep -qE 'glab[[:space:]]+mr'; then
-      _destino=$(glab api "projects/:id/merge_requests/$_mrid" ${_repo:+-R "$_repo"} 2>/dev/null | jq -r '.target_branch // empty' 2>/dev/null)
-    else
-      _destino=$(gh pr view "$_mrid" ${_repo:+-R "$_repo"} --json baseRefName -q .baseRefName 2>/dev/null)
-    fi
-  fi
-fi
+# gusto). El destino lo resuelve la lib (acg_destino_de_mr): caché por MR-id COMPARTIDA con
+# confirmar-merge-develop (1 llamada de red, no 2) + timeout interno para no fallar-abierto por muerte
+# del proceso (H5). FAIL-SAFE hacia esa prioridad: si NO podemos confirmar que el destino es `develop`
+# (vacío por timeout/error), NO forzamos squash (nunca arriesgamos aplastar un release por no resolver).
+_destino=$(acg_destino_de_mr "$cmd")
 # SOLO `develop` obliga squash; el resto (main/personales/ramitas/desconocido) queda libre.
 [ "$_destino" = "develop" ] || exit 0
 

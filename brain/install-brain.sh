@@ -4,20 +4,22 @@
 # la skill de cierre, el dashboard y las normas globales." Re-correrlo es SEGURO (idempotente).
 #
 # Instala GLOBAL (en ~/.claude, aplica a TODOS los repos de esta máquina):
-#   (a) HOOKS de tier global en ~/.claude/hooks/  → git-branch-guard, merge-squash-guard,
-#       confirmar-merge-develop, recordar-dashboard, secret-scan, rama-vieja, proteger-arbol (PreToolUse/Bash),
-#       delegacion-gate + limite-gasto (PreToolUse/Task), delegacion-registrar (PostToolUse/Task),
-#       rehidratar-hilo (SessionStart: reinyecta el hilo mental si existe),
-#       + delegacion-comun.sh (lib) + agentes-costo.json (config).
+#   (a) HOOKS de tier {global, both} en ~/.claude/hooks/ — la LISTA se DERIVA de brain/hooks/MANIFEST
+#       (fuente única; ya no se cura a mano en paralelo con la copia por-repo). Incluye git-branch-guard,
+#       merge-squash-guard, confirmar-merge-develop, recordar-dashboard, secret-scan, rama-vieja,
+#       proteger-arbol (PreToolUse/Bash), delegacion-gate + limite-gasto (PreToolUse/Task),
+#       delegacion-registrar/reporte (PostToolUse/Task), rehidratar-hilo + aviso-contexto (SessionStart/
+#       PostToolUse) + libs `delegacion-comun.sh`, `analizar-comando-git.sh`, `detectar-secretos.sh`
+#       + agentes-costo.json (config). La lista EXACTA se deriva de brain/hooks/MANIFEST.
 #   (b) CABLEADO en ~/.claude/settings.json con "shell":"bash" (idempotente).
-#   (c) SKILLS genéricas (cerrar-slice, orquestar-fanout, checkpoint) en ~/.claude/skills/.
+#   (c) SKILLS genéricas (cerrar-slice, orquestar-fanout, checkpoint, rehidratar-hilo) en ~/.claude/skills/.
 #   (d) DASHBOARD del cerebro sembrado en la memoria GLOBAL (slug del HOME) si falta.
 #   (e) NORMAS globales inyectadas en ~/.claude/CLAUDE.md (bloque con marcador, solo si faltan).
 #
 # confirmar-merge-develop AHORA es GLOBAL (candado de merges a develop/main con OK explícito): antes
 # vivía solo por-repo y por eso faltaba donde el repo no lo traía (un caso real 2026-07-11) → promovido a
 # global para que aplique en TODA sesión/clon. NO instala globales los hooks REPO-SCOPED restantes
-# (sesion-inicio, precompact-volcar-estado, dod-verificar): esos viven en brain/hooks/ como FUENTE para
+# (sesion-inicio, dod-verificar): esos viven en brain/hooks/ como FUENTE para
 # que cada repo los copie a su .claude/ y los cablee (se cargan solo si la sesión INICIA en el repo).
 #
 # OS-agnóstico: los hooks corren bajo bash en Mac/Linux/Windows(Git Bash). FAIL-SAFE sin jq (avisa;
@@ -46,10 +48,14 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 # ── (a) Copiar hooks de tier global + la lib compartida ──
-GLOBAL_HOOKS="git-branch-guard.sh merge-squash-guard.sh confirmar-merge-develop.sh recordar-dashboard.sh \
-              secret-scan.sh rama-vieja.sh proteger-arbol.sh limite-gasto.sh rehidratar-hilo.sh \
-              delegacion-gate.sh delegacion-registrar.sh delegacion-reporte.sh delegacion-comun.sh \
-              limpiar-worktrees.sh"
+# Los de tier {global, both} salen del MANIFEST (fuente única) → esta lista ya NO se cura a mano en
+# paralelo con la copia por-repo (antídoto a H2: dos listas divergían). El drift-check de test-brain
+# verifica que install/uninstall/sincronizar coincidan con el manifiesto.
+if [ -f "$SRC_HOOKS/MANIFEST" ]; then
+  GLOBAL_HOOKS="$(awk '$1!~/^#/ && NF>=3 && ($2=="global"||$2=="both"){print $1".sh"}' "$SRC_HOOKS/MANIFEST")"
+else
+  echo "warn: falta $SRC_HOOKS/MANIFEST; no puedo derivar la lista de hooks globales"; GLOBAL_HOOKS=""
+fi
 for h in $GLOBAL_HOOKS; do
   if [ -f "$SRC_HOOKS/$h" ]; then
     cp -f "$SRC_HOOKS/$h" "$HOOKS_DIR/$h"
@@ -92,7 +98,9 @@ register_hook PostToolUse Task 'bash "$HOME/.claude/hooks/delegacion-registrar.s
 register_hook PostToolUse Task 'bash "$HOME/.claude/hooks/delegacion-reporte.sh"'   'delegacion-reporte'
 # SessionStart sin matcher (matcher vacío ⇒ se omite la clave ⇒ casa TODAS las fuentes: startup/resume/compact/clear)
 register_hook SessionStart '' 'bash "$HOME/.claude/hooks/rehidratar-hilo.sh"'       'rehidratar-hilo'
-echo "ok: hooks cableados en $GSET (git-branch-guard, merge-squash-guard, confirmar-merge-develop, recordar-dashboard, secret-scan, rama-vieja, proteger-arbol, limite-gasto, delegacion-gate/registrar, rehidratar-hilo)"
+# PostToolUse sin matcher (casa TODA tool) — watermark anti-auto-compact: avisa de compactar proactivo
+register_hook PostToolUse '' 'bash "$HOME/.claude/hooks/aviso-contexto.sh"'          'aviso-contexto'
+echo "ok: hooks cableados en $GSET (git-branch-guard, merge-squash-guard, confirmar-merge-develop, recordar-dashboard, secret-scan, rama-vieja, proteger-arbol, limite-gasto, delegacion-gate/registrar, rehidratar-hilo, aviso-contexto)"
 
 # ── (c) Skills genéricas del cerebro (cerrar-slice, orquestar-fanout, …) ──
 if [ -d "$SRC_SKILLS" ]; then
@@ -144,5 +152,5 @@ else
 fi
 
 echo "listo: cerebro global instalado (hooks + cableado + skill + dashboard + normas)."
-echo "       Los hooks repo-scoped (sesion-inicio, precompact-volcar-estado, dod-verificar) viven en"
+echo "       Los hooks repo-scoped (sesion-inicio, dod-verificar) viven en"
 echo "       brain/hooks/ como fuente: cópialos al .claude/ de cada repo (se cargan al INICIAR ahí)."

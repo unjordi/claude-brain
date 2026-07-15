@@ -19,35 +19,45 @@
 # Vive en brain/hooks/ (fuente), se instala GLOBAL en ~/.claude/hooks/ (aplica a todos los repos).
 set -u
 
+# dedupe doble-cableado: si soy la copia del REPO y la copia GLOBAL existe, cedo (evita doble escaneo
+# en máquina con el cerebro global; en un clon SIN bootstrap la del repo sí corre). Necesario ahora que
+# secret-scan es tier `both` (viaja per-repo Y global). NO-debilitante: sigue escaneando 1× y denegando.
+case "$0" in "$HOME/.claude/hooks/"*) : ;; *) [ -f "$HOME/.claude/hooks/$(basename "$0")" ] && exit 0 ;; esac
+
 input=$(cat 2>/dev/null || true)
+# Sin jq NO podemos ni parsear el comando ni EMITIR un deny (el deny es JSON vía jq) → fail-open forzoso
+# (no hay forma de bloquear limpio). Es una limitación real, no una elección; documentada.
 command -v jq >/dev/null 2>&1 || exit 0
-command -v git >/dev/null 2>&1 || exit 0
+
+# DECISIÓN fail-open vs fail-closed (§D): por DEFAULT fail-OPEN ante fallo de INFRAESTRUCTURA (sin git, no
+# es repo, no se puede determinar el rango del diff) — bloquear TODO commit por un problema de entorno es
+# desproporcionado y este guard es "red de seguridad, no cárcel"; el backstop real es la rotación + gates
+# server-side. Con CLAUDE_SECRET_SCAN_STRICT=1 el operador OPTA por fail-CLOSED: si no se puede escanear,
+# se bloquea (postura conservadora para entornos sensibles). El default NO cambia el comportamiento previo.
+STRICT="${CLAUDE_SECRET_SCAN_STRICT:-0}"
+bail_open() {  # $1 = motivo. En strict → deny; si no → deja pasar (exit 0).
+  if [ "$STRICT" = "1" ]; then
+    jq -n --arg r "FRENO DE SEGURIDAD (secret-scan, modo STRICT): no pude escanear en busca de secretos ($1) y CLAUDE_SECRET_SCAN_STRICT=1 exige poder verificar antes de dejar entrar código. Resuelve la causa, o usa 'git … --no-verify' / CLAUDE_SKIP_SECRET_SCAN=1 para esta acción." \
+      '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
+  fi
+  exit 0
+}
+
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -z "$cmd" ] && exit 0
 
-# ¿Es un commit o un push? Si no, no es asunto de este guard.
+# ¿Es un commit o un push? Si no, no es asunto de este guard (NO es "no poder escanear" → nunca strict-bloquea).
 printf '%s' "$cmd" | grep -qE 'git[[:space:]]+(commit|push)' || exit 0
-# Escapes deliberados.
+# Escapes deliberados (el humano manda) — ganan incluso en strict.
 [ "${CLAUDE_SKIP_SECRET_SCAN:-}" = "1" ] && exit 0
 printf '%s' "$cmd" | grep -qE '(^|[[:space:]])--no-verify([[:space:]]|$)' && exit 0
 
+command -v git >/dev/null 2>&1 || bail_open "git no está en el PATH"
 dir="${CLAUDE_PROJECT_DIR:-.}"
-git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
+git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || bail_open "no es un repo git ($dir)"
 
-# Patrones de secretos, todos de forma inconfundible (prefijo + longitud/charset fijos).
-PAT='(AKIA[0-9A-Z]{16})'
-PAT="$PAT"'|(-----BEGIN[[:space:]-]*(RSA|EC|OPENSSH|DSA|PGP)?[[:space:]]*PRIVATE KEY-----)'
-PAT="$PAT"'|(sk-ant-[A-Za-z0-9_-]{20,})'
-PAT="$PAT"'|(sk-proj-[A-Za-z0-9_-]{20,})'
-PAT="$PAT"'|(sk-[A-Za-z0-9]{32,})'
-PAT="$PAT"'|(gh[posru]_[A-Za-z0-9]{36,})'
-PAT="$PAT"'|(github_pat_[A-Za-z0-9_]{40,})'
-PAT="$PAT"'|(glpat-[A-Za-z0-9_-]{20})'
-PAT="$PAT"'|(xox[baprs]-[A-Za-z0-9-]{10,})'
-PAT="$PAT"'|(AIza[0-9A-Za-z_-]{35})'
-
-# Placeholders célebres de documentación que NO son secretos reales.
-SAFE_RE='AKIAIOSFODNN7EXAMPLE|EXAMPLE_KEY|your[-_]?(api[-_]?)?key|xxxx+|<[A-Za-z_]+>'
+# shellcheck source=detectar-secretos.sh
+. "$(dirname "$0")/detectar-secretos.sh"   # patrones + ds_buscar (lógica; §D)
 
 # ¿Estamos en commit o en push? Define de dónde sacar el diff de lo que ENTRA al repo.
 mode="commit"
@@ -67,7 +77,18 @@ if [ "$mode" = "commit" ]; then
   files=$(git -C "$dir" diff --cached --name-only --diff-filter=ACM 2>/dev/null)
 else
   BASE=$(git -C "$dir" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)
-  [ -z "$BASE" ] && exit 0   # sin upstream no sé qué sale → no bloqueo (fail-open)
+  if [ -z "$BASE" ]; then
+    # G5: rama NUEVA sin upstream (el 1er push — donde más se cuela un secreto, porque toda la historia
+    # de la rama es nueva). Antes: sin upstream → fail-open (no escaneaba nada). Ahora escanea lo que la
+    # rama AGREGA sobre la base de integración: el merge-base con develop/main (remotas primero, luego
+    # locales). Así el primer push SÍ se revisa.
+    for ref in origin/develop origin/main develop main; do
+      git -C "$dir" rev-parse --verify --quiet "$ref" >/dev/null 2>&1 || continue
+      BASE=$(git -C "$dir" merge-base HEAD "$ref" 2>/dev/null)
+      [ -n "$BASE" ] && break
+    done
+    [ -z "$BASE" ] && bail_open "sin upstream ni base develop/main para acotar el rango del push"
+  fi
   files=$(git -C "$dir" diff "$BASE..HEAD" --name-only --diff-filter=ACM 2>/dev/null)
 fi
 [ -z "$files" ] && exit 0
@@ -75,10 +96,8 @@ fi
 hits=""
 while IFS= read -r f; do
   [ -z "$f" ] && continue
-  found=$(added_lines "$f" | grep -oE "$PAT" 2>/dev/null | grep -viE "$SAFE_RE" | head -3)
-  if [ -n "$found" ]; then
-    # Redacta cada match: primeros 6 chars + …(redactado).
-    red=$(printf '%s' "$found" | sed -E 's/(.{6}).*/\1…(redactado)/' | tr '\n' ' ')
+  red=$(ds_buscar "$(added_lines "$f")" | tr '\n' ' ')   # ds_buscar ya redacta y excluye placeholders (lib)
+  if [ -n "$red" ]; then
     hits="${hits}
   • ${f}: ${red}"
   fi

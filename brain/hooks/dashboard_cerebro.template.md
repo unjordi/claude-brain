@@ -13,7 +13,7 @@
 
 ## Infra clave (donde estan las cosas)
 - Runner CI/CD: <...>
-- Repo nuevo: forkear <plantilla> -> proteger-ramas.sh -> bootstrap-claude.sh
+- Repo nuevo: forkear <tu-repo-plantilla> -> proteger-ramas.sh -> bootstrap-claude.sh
 - Guards: ~/.claude/hooks/git-branch-guard.sh + recordar-dashboard.sh
 
 ## Cabos sueltos / pendientes

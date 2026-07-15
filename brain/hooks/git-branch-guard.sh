@@ -1,41 +1,36 @@
 #!/usr/bin/env bash
-# git-branch-guard.sh — PreToolUse guard de la NORMA DE GIT (ley interna).
-# Lee el JSON del hook por stdin; si el comando Bash intenta tocar una rama
-# protegida (push a main/develop, o mergear la MR de develop = promover a main),
-# devuelve permissionDecision "deny": NO pregunta — bloquea la acción incorrecta y
-# REDIRIGE a Claude al flujo correcto (ramita → MR → develop).
+# git-branch-guard.sh — WRAPPER delgado sobre analizar-comando-git.sh. Bloquea (deny) push/merge a una
+# rama protegida (develop/main) y redirige al flujo ramita→MR→develop. NO pregunta: bloquea la acción
+# incorrecta. La LÓGICA de "qué toca una base" vive en la lib (fuente ÚNICA de los git-guards → no
+# divergen). Fail-open ante parseo. Vive en <repo>/.claude/hooks/ (viaja por git) y ~/.claude (por máquina).
+# Releases develop→main = acción de release deliberada; normalmente el humano en la web de GitLab, por
+# CLI solo con OK súper-explícito (lo vigila confirmar-merge-develop). Este guard bloquea el PUSH a base.
 #
-# CLAVE (evita falsos positivos): main/develop debe ser el DESTINO del push (mismo
-# segmento tras `git push`, sin cruzar ; && ||), no aparecer en cualquier lado.
-# Así `git checkout -b x develop && git push origin x` (flujo normal) PASA, y
-# `... && git push origin develop` (el disfraz) se bloquea. grep corre por línea.
-# Fail-open ante parseo. Vive en <repo>/.claude/hooks/ (viaja por git) y ~/.claude (por máquina).
-# Releases develop→main = acción deliberada del humano en la web de GitLab, no por CLI.
+# Cubre (via lib): push explícito a develop/main, push PELÓN/`HEAD`/`--force` estando EN develop/main
+# (H1), ignora menciones entrecomilladas (H13) y valores de --repo/-R (repo llamado …/develop, H11).
 
+# dedupe doble-cableado: si soy la copia del REPO y la copia GLOBAL existe, cedo (la global maneja esta
+# invocación) → evita disparo doble; en un clon SIN bootstrap (sin copia global) la del repo sí corre.
+case "$0" in "$HOME/.claude/hooks/"*) : ;; *) [ -f "$HOME/.claude/hooks/$(basename "$0")" ] && exit 0 ;; esac
+
+command -v jq >/dev/null 2>&1 || exit 0
 input=$(cat)
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -z "$cmd" ] && exit 0
 
-# Despoja literales entrecomillados (mensaje de commit / arg de grep / doc) para NO matchear una
-# MENCIÓN de "push a develop" como si fuera el comando. Igual que proteger-arbol/rama-vieja/
-# recordar-dashboard. Un push REAL a develop no lleva la rama entrecomillada → sigue bloqueándose.
-unquoted=$(printf '%s' "$cmd" | sed "s/'[^']*'//g; s/\"[^\"]*\"//g")
+# shellcheck source=analizar-comando-git.sh
+. "$(dirname "$0")/analizar-comando-git.sh"
 
 block() {
   jq -n --arg r "$1" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
   exit 0
 }
 
-# main/develop como DESTINO, dentro del mismo segmento de comando ([^;&|] = no cruza ; && ||),
-# precedido por espacio/':'/'/' y seguido por espacio/fin/comilla. NO matchea feat/develop-x.
-PUSH_RE='git[[:space:]]+push[^;&|]*[[:space:]:/](main|develop)([[:space:]]|$|["'"'"'])'
-MERGE_RE='(glab[[:space:]]+mr[[:space:]]+merge|gh[[:space:]]+pr[[:space:]]+merge)[^;&|]*[[:space:]:/](main|develop)([[:space:]]|$|["'"'"'])'
-
-if printf '%s' "$unquoted" | grep -qE "$PUSH_RE"; then
-  block "NORMA DE GIT (ley interna): no se hace push a main/develop. NO reintentes esto. Haz el cambio por el flujo: ramita (feat/fix/chore/docs) desde develop → commit → push de la ramita → MR/PR → merge a develop. A main solo llega un release deliberado que hace el humano en la web de GitLab, no por CLI."
+if acg_push_toca_base "$cmd"; then
+  block "NORMA DE GIT (ley interna): no se hace push a main/develop (incluye el push PELÓN estando parado EN develop/main). NO reintentes esto. Haz el cambio por el flujo: ramita (feat/fix/chore/docs) desde develop → commit → push de la ramita → MR/PR → merge a develop. A main solo llega un release deliberado: normalmente el humano en la web de GitLab; por CLI solo con OK súper-explícito (lo vigila confirmar-merge-develop)."
 fi
 
-if printf '%s' "$unquoted" | grep -qE "$MERGE_RE"; then
+if acg_merge_menciona_base "$cmd"; then
   block "NORMA DE GIT (ley interna): mergear develop→main es un RELEASE, y lo hace el humano deliberadamente en la web de GitLab, no Claude por CLI. NO reintentes. El trabajo se integra a develop por MR de una ramita, no a main."
 fi
 

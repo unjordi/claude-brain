@@ -16,36 +16,32 @@
 # (no push directo a develop/main) + merge-squash-guard. `git merge` LOCAL a cualquier rama tampoco se
 # intercepta. Complementa a git-branch-guard y merge-squash-guard (exige --squash a develop). Fail-open sin jq.
 set -u
+# dedupe doble-cableado: si soy la copia del REPO y la copia GLOBAL existe, cedo (la global maneja
+# esta invocación) → evita disparo doble (y doble llamada de red) en máquina con el cerebro global;
+# en un clon SIN bootstrap la del repo sí corre. NO-debilitante: sigue exigiendo el OK igual.
+case "$0" in "$HOME/.claude/hooks/"*) : ;; *) [ -f "$HOME/.claude/hooks/$(basename "$0")" ] && exit 0 ;; esac
 input=$(cat 2>/dev/null || true)
 command -v jq >/dev/null 2>&1 || exit 0
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -z "$cmd" ] && exit 0
 
-# ¿Es una INTEGRACIÓN server-side de MR/PR? (git merge local NO cuenta → iterar en integración es libre)
-MERGE_RE='(glab[[:space:]]+mr[[:space:]]+(merge|accept)|gh[[:space:]]+pr[[:space:]]+merge)'
-printf '%s' "$cmd" | grep -qE "$MERGE_RE" || exit 0
-# Escapes: ayuda/inspección, no una integración real.
-printf '%s' "$cmd" | grep -qE '(^|[[:space:]])(--help|-h|list|view|--dry-run|status)([[:space:]]|$)' && exit 0
+# shellcheck source=analizar-comando-git.sh
+. "$(dirname "$0")/analizar-comando-git.sh"
+
+# ¿Es una INTEGRACIÓN server-side de MR/PR REAL? (git merge local NO cuenta → iterar en integración es
+# libre; ayuda/inspección tampoco). La lib ancla el reconocimiento al subcomando real → un token suelto
+# de OTRO comando encadenado (`glab mr merge 5 --yes && git status`) YA NO evade el gate (H3).
+acg_es_merge_mr "$cmd" || exit 0
 
 # ALCANCE: solo repos COMPARTIDOS. Sin la marca `.claude/repo-compartido` (que viaja por git en los
 # repos de equipo), este candado no aplica → repos personales/solo mergean a su develop sin pedir OK.
 [ -f "${CLAUDE_PROJECT_DIR:-.}/.claude/repo-compartido" ] || exit 0
 
 # DESTINO del merge: main = RELEASE (autorización SUPER explícita); develop/otro = confirmación normal.
-# FAIL-SAFE: si no podemos determinar el destino, se trata como develop (conservador).
-destino=""
-_repo=$(printf '%s' "$cmd" | grep -oE '(--repo|-R)[[:space:]=]+[^[:space:]]+' | grep -oE '[^[:space:]=]+$')
-# Robustez: si el comando no trae --repo, deriva el repo del remote del PROYECTO (CLAUDE_PROJECT_DIR),
-# no del cwd del hook — así la detección del destino (develop vs main) no depende de dónde corra el hook.
-[ -z "$_repo" ] && _repo=$(git -C "${CLAUDE_PROJECT_DIR:-.}" remote get-url origin 2>/dev/null | sed -E 's#^(git@[^:]+:|https?://[^/]+/)##; s#\.git$##')
-_mrid=$(printf '%s' "$cmd" | grep -oE '(mr[[:space:]]+(merge|accept)|pr[[:space:]]+merge)[[:space:]]+#?[0-9]+' | grep -oE '[0-9]+$')
-if [ -n "$_mrid" ]; then
-  if printf '%s' "$cmd" | grep -qE 'glab[[:space:]]+mr'; then
-    destino=$(glab api "projects/:id/merge_requests/$_mrid" ${_repo:+-R "$_repo"} 2>/dev/null | jq -r '.target_branch // empty' 2>/dev/null)
-  else
-    destino=$(gh pr view "$_mrid" ${_repo:+-R "$_repo"} --json baseRefName -q .baseRefName 2>/dev/null)
-  fi
-fi
+# Lo resuelve la lib (acg_destino_de_mr): caché por MR-id COMPARTIDA con merge-squash-guard (1 llamada
+# de red, no 2) + timeout interno para no fallar-abierto por muerte del proceso (H5).
+# FAIL-SAFE: si no podemos determinar el destino (vacío por timeout/error), se trata como develop (conservador → pide OK).
+destino=$(acg_destino_de_mr "$cmd")
 
 # Ramas personales de integración (Develop<Usuario>, epic/*, integracion/*, feat/*, fix/*…) reciben
 # merge CONTINUO sin gate: ahí vive el día a día del modelo MINI-DEVELOP-por-dev. SOLO el `develop`

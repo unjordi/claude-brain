@@ -22,4 +22,9 @@ case "$DG_NIVEL" in
 esac
 tmp=$(mktemp) || exit 0
 jq --arg k "$DG_KEY" --arg s "$DG_SID" "$filtro" "$CONS" > "$tmp" 2>/dev/null && mv "$tmp" "$CONS" || rm -f "$tmp"
+
+# H6: al APROBARSE (este hook solo corre si el Task corrió), libera el lock de coalescencia del lote →
+# la ruta feliz no deja un fantasma de ~10s. (El "no" no llega aquí; ese caso lo cubre la ventana corta
+# del gate.) Ruta del lock vía el helper COMPARTIDO → sin drift del hash con el gate.
+rmdir "$(deleg_lock_path "$DG_SID" "$DG_KEY")" 2>/dev/null || true
 exit 0

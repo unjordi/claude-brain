@@ -35,6 +35,15 @@ recuperó por cherry-pick, pero casi se pierde). Si un ítem NO se puede aislar 
 orquestador**, no un agente suelto en el árbol compartido. Lo respalda el guard `proteger-arbol` (avisa
 antes de un git destructivo que orfanaría commits sin pushear).
 
+> **GOTCHA del worktree — base equivocada (feedback real, 2026-07).** El Agent tool crea el
+> worktree basado en **`origin/HEAD`** (= el default branch remoto, normalmente `origin/main`), **NO** en
+> el HEAD de tu rama activa. Si `main` es release-only y tu trabajo vive en `develop`/una ramita (p. ej. una
+> migración a una nueva estructura aún NO promovida a main), el worktree nace en un commit VIEJO (la estructura
+> previa) y el agente NO encuentra los archivos que espera. **Workaround defensivo (ponlo en el prompt del agente):**
+> *"al iniciar, `git reset --hard <rama-objetivo>` en TU worktree aislado para nacer sobre la base correcta"*
+> — es seguro porque es tu worktree AISLADO (no el compartido). Disparará `proteger-arbol` (aviso, no bloqueo):
+> es un falso positivo conocido en worktree aislado (backlog H14). Fix de raíz = harness (backlog H15).
+
 ## Con agentes ACTIVOS — reglas anti-desastre (destiladas de un caso real, 2026-07)
 - **El sub-agente es TERMINAL.** Su prompt DEBE decírselo: *"eres terminal — cuando tu turno acaba NADA
   tuyo sigue corriendo; NO puedes 'lanzar en background' ni esperar notificaciones. Ejecuta el trabajo
@@ -86,7 +95,7 @@ antes de un git destructivo que orfanaría commits sin pushear).
 - **`delegacion-reporte`** (PostToolUse/Task) — tras cada subagente, recuerda registrar avance + limpiar worktree.
 - **`limpiar-worktrees.sh`** — barre worktrees zombies (rama mergeada) y anota los vivos en la bitácora.
 - **`proteger-arbol`** (PreToolUse/Bash) — avisa antes de un git DESTRUCTIVO (`reset --hard`/`checkout -f`/`rebase`/`branch -D`) que orfanaría commits sin pushear; antídoto al "agente reseteó HEAD en el árbol compartido".
-- **`precompact-volcar-estado`** (PreCompact) — antes de compactar, vuelca avance/decisiones/pendientes.
+- **`checkpoint`** (skill) + **`rehidratar-hilo`** (SessionStart) + **`aviso-contexto`** (watermark) — compactar sin perder el hilo del fan-out (el hook `precompact` se retiró: PreCompact no puede inyectar ni pedir acción).
 
 ## Anti-patrones
 - ❌ Monitorear agentes "de niñera" y actualizar el estado a mano al final. → El auto-reporte es el default.

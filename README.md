@@ -20,7 +20,7 @@ Un `install-brain.sh` y tu máquina queda con el candado puesto. Idempotente y a
 
 |  |  |  |  |
 |:--|:--|:--|:--|
-| **8** · hooks globales | **4** · hooks por-repo | **68** · pruebas verdes | **3** · plataformas |
+| **13** · hooks globales | **2** · hooks por-repo | **114** · pruebas verdes | **3** · plataformas |
 
 > El cerebro **no es propietario**: no trae skills de proyecto (ni .NET, ni repos de empresa) — solo
 > hooks agnósticos, normas y una skill genérica `cerrar-slice` que cualquier proyecto puede adoptar.
@@ -67,6 +67,14 @@ Puerta por OS: **Linux/KDE** → `./install.sh` · **macOS** → [`macos/`](maco
 El cerebro se ordena por *dureza*: arriba lo que te **bloquea** sin negociar; abajo lo que apenas
 **sugiere**. Cada pieza sabe qué evento la dispara. Esta es, tal cual, la pestaña “Cerebro” del widget.
 
+> **¿Por qué unos bloquean y otros no?** Es cosa del *mecanismo*, no del tema. Un **hook** es un script
+> que el CLI corre SOLO, en un evento, **fuera de tu turno** → por eso puede **denegar** una acción (un
+> push a `develop`, un cierre sin evidencia). Un **skill** lo ejecuta el modelo **dentro** de su turno:
+> no puede bloquear nada, es una guía que invocas tú. De ahí la regla: los **dientes** (deny/block) viven
+> en hooks; la **lógica** se comparte en libs `.sh`; los **nudges** (recordar, rehidratar el hilo) pueden
+> tener un **gemelo skill** manual (`checkpoint` escribe · `rehidratar-hilo` lee) que sobrevive aunque un
+> update del CLI rompa el hook.
+
 ```
 🔒 Hooks Forzosos — hooks que bloquean (deny) · no negociables
 ├─ 🚧 git-branch-guard         push/merge a develop·main → denegado
@@ -84,10 +92,11 @@ El cerebro se ordena por *dureza*: arriba lo que te **bloquea** sin negociar; ab
 ├─ 🌳 proteger-arbol           git destructivo que orfanaría commits sin pushear → avisa (fan-out: usa worktree aislado)
 ├─ 📝 delegacion-registrar     materializa el "pregunta una sola vez"
 ├─ 📮 delegacion-reporte       al terminar un agente: recuerda registrar avance + limpiar su worktree
-├─ 🧵 rehidratar-hilo          reinyecta hilo-mental-actual.md al abrir/retomar/compactar (GLOBAL)
+├─ 🧵 rehidratar-hilo          reinyecta hilo-mental-actual.md al abrir/retomar/compactar (GLOBAL) — con gate de frescura
+├─ 📈 aviso-contexto           watermark: avisa "compacta TÚ ahora" antes del auto-compact-sorpresa (GLOBAL)
 └─ 📁 por-repo · viajan en el .claude de cada repo
-   ├─ 🧭 sesion-inicio            reinyecta rama + norma + memoria al abrir
-   └─ 💤 precompact-volcar-estado no-op honesto (PreCompact no puede inyectar; lo vuelca 💾 checkpoint)
+   └─ 🧭 sesion-inicio            reinyecta rama + norma + memoria al abrir
+      (💤 precompact-volcar-estado se RETIRÓ: PreCompact no puede inyectar; lo cubren 💾 checkpoint + 🧵 rehidratar-hilo + 📈 aviso-contexto)
 
 📜 Normas — reglas que Claude se autoimpone (CLAUDE.md)
 ├─ 🎯 Definition of Done       verde técnico ≠ Done/Listo/Ya Quedó; exige QA o un OK explícito
@@ -98,12 +107,13 @@ El cerebro se ordena por *dureza*: arriba lo que te **bloquea** sin negociar; ab
 💡 Skills — opt-in, las invocas tú
 ├─ 📦 cerrar-slice             build+tests+memoria al día + MR con resumen curado
 ├─ 💾 checkpoint               vuelca el HILO a memoria para compactar sin perderlo (proactivo)
+├─ 💧 rehidratar-hilo          relee el HILO a mano (gemelo del hook; respaldo si un update del CLI rompe el auto-rehidratado)
 └─ 🧵 orquestar-fanout         fan-out sin niñera: asigna del backlog, auto-reporta y limpia al cerrar
 ```
 
 Los hooks **por-repo** son fuente en [`brain/hooks/`](brain/hooks/) que cada repo copia a su propio
 `.claude/` y cablea en su `settings.json` — se cargan solo cuando una sesión *inicia* en ese repo. El
-cerebro **se autoprueba**: [`brain/test-brain.sh`](brain/test-brain.sh) corre 68 checks contra un
+cerebro **se autoprueba**: [`brain/test-brain.sh`](brain/test-brain.sh) corre 114 checks contra un
 `$HOME` aislado, y la CI repite `bash -n` + `jq empty` + `shellcheck` en cada push. Tras un fan-out,
 el helper [`limpiar-worktrees.sh`](brain/hooks/limpiar-worktrees.sh) barre los worktrees de ramas ya
 mergeadas y deja anotado en la bitácora el pendiente de los que sigan vivos.
@@ -111,8 +121,8 @@ mergeadas y deja anotado en la bitácora el pendiente de los que sigan vivos.
 ### 🗺️ El mapa del cerebro — fuente de verdad visual
 
 [`docs/mapa-flujos.dot`](docs/mapa-flujos.dot) es el **mapa único** del cerebro: los flowcharts de
-decisión de cada hook (⓪ ciclo de sesión · ① integrar · ② comando git · ③ push-nudges · ④ dod-verificar
-↔ ⑤ cerrar-slice · ⑥ delegar · ⑦ orquestar-fanout), **fieles a la lógica real de los `.sh`**, más las
+decisión de cada hook (⓪ instalación · ① ciclo de sesión · ② integrar · ③ comando git · ④ push-nudges · ⑤ dod-verificar
+↔ ⑥ cerrar-slice · ⑦ delegar · ⑧ orquestar-fanout), **fieles a la lógica real de los `.sh`**, más las
 📜 **normas** que hacen cumplir (el cimiento), la referencia de lib/skill, y la leyenda con este mismo
 árbol. Cada flujo apunta a la norma/skill que invoca (📜/💡) y viceversa.
 

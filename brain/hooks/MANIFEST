@@ -1,0 +1,42 @@
+# MANIFEST — FUENTE ÚNICA del cerebro (claude-brain): declara, por cada archivo de brain/hooks/, su
+# TIER (dónde se despliega) y su KIND (cómo). De aquí DERIVAN las 2 rutas de instalación y el drift-check
+# → dejan de divergir a mano (antídoto a H2/H7: hoy install-brain.sh y la copia por-repo del consumidor
+# eran dos listas curadas por separado).
+#
+# Formato:  <nombre-sin-.sh>   <tier>   <kind>
+#   tier:  global  → solo ~/.claude/hooks (lo instala el bootstrap; NO viaja por-repo)
+#          repo    → solo <repo>/.claude/hooks (se carga si la sesión INICIA en el repo)
+#          both    → AMBOS (global por bootstrap + viaja por-repo por si se clona SIN bootstrap);
+#                    estos DEBEN traer la cláusula de dedupe (la copia del repo cede a la global)
+#   kind:  hook   → se cablea en settings.json (evento)
+#          lib    → solo se copia (los hooks la hacen `source`)
+#          script → solo se copia (standalone; se corre a mano/por cron, no se cablea)
+#
+# Consumidores:
+#   - install-brain.sh   : instala GLOBAL = {global, both} (hooks+libs).
+#   - sincronizar-cerebro.sh : despliega POR-REPO = {repo, both} (hooks+libs) desde brain (fuente única).
+#   - test-brain.sh (e2): drift-check — verifica que ambas rutas coincidan con este manifiesto.
+#
+# Líneas '#' y en blanco se ignoran. Al agregar/mover un hook: EDITA AQUÍ y las rutas lo heredan.
+
+git-branch-guard         both    hook
+merge-squash-guard       both    hook
+confirmar-merge-develop  both    hook
+recordar-dashboard       both    hook
+secret-scan              both    hook
+analizar-comando-git     both    lib
+detectar-secretos        both    lib
+
+proteger-arbol           global  hook
+rama-vieja               global  hook
+limite-gasto             global  hook
+rehidratar-hilo          global  hook
+aviso-contexto           global  hook
+delegacion-gate          global  hook
+delegacion-registrar     global  hook
+delegacion-reporte       global  hook
+limpiar-worktrees        global  script
+delegacion-comun         global  lib
+
+dod-verificar            repo    hook
+sesion-inicio            repo    hook

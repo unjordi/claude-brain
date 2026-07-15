@@ -56,6 +56,21 @@ clasificar_delegacion() {
   DG_KEY="$DG_NIVEL:$DG_FIRMA"
 }
 
+# ── Lock de coalescencia de asks (G3/H6) — COMPARTIDO por gate (lo crea) y registrar (lo libera) para
+# que el hash (sesión|key)→ruta NUNCA diverja entre los dos hooks. La ventana solo debe cubrir a los
+# HERMANOS SIMULTÁNEOS de un fan-out (los N Task de un mismo mensaje llegan en <1-2s); un lock más viejo
+# ya no es un lote vivo. Así un ask NEGADO deja de colar un reintento en silencio (cierra H6). ──
+deleg_lock_path() {  # $1=sid $2=key → ruta del lock
+  local h; h=$(printf '%s|%s' "$1" "$2" | tr -cs 'A-Za-z0-9' '_')
+  printf '%s' "$HOME/.claude/.delegacion-ask.$h.lock"
+}
+deleg_lock_age_s() {  # $1=lockpath → edad en segundos (vacío/return 1 si no existe o sin stat/date)
+  local m now
+  m=$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null) || return 1
+  now=$(date +%s 2>/dev/null) || return 1
+  printf '%s' "$((now - m))"
+}
+
 # fmt_tokens <entero> → "3.7M" / "864.8M" / "12.3K" (humaniza el conteo de tokens)
 fmt_tokens() {
   awk -v t="$1" 'BEGIN{
