@@ -70,7 +70,7 @@ stale=0
 # (1) antigüedad: mtime del archivo vs umbral en horas (env HILO_STALE_HORAS, default 12)
 horas="${HILO_STALE_HORAS:-12}"
 case "$horas" in ''|*[!0-9]*) horas=12;; esac
-mtime=$(stat -f %m "$HILO" 2>/dev/null || stat -c %Y "$HILO" 2>/dev/null || echo "")
+mtime=$(stat -c %Y "$HILO" 2>/dev/null || stat -f %m "$HILO" 2>/dev/null || echo "")   # GNU (Linux) primero; BSD (macOS) de respaldo
 now=$(date +%s 2>/dev/null || echo "")
 if [ -n "$mtime" ] && [ -n "$now" ]; then
   case "$mtime$now" in

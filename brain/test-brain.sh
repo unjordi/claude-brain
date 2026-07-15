@@ -128,11 +128,6 @@ out="$(run_gate "$Q")";      is_ask "$out"    && ok "ventana · agotada → vuel
 # G3 — fan-out PARALELO: el 1er gate del lote pregunta; los HERMANOS (misma sesión+key, aún sin
 # registrar) pasan en SILENCIO (coalescing) para gratis/incluido → mata el flood de N asks. Metered
 # NO se coalesce (un fan-out de PAGO confirma cada uno: un 'no' no debe dejar correr agentes caros).
-# Determinismo en CI: ventana de coalescencia AMPLIA para que la lentitud del runner ENTRE las 2
-# llamadas del hermano no expire el lock (el test prueba la LÓGICA de coalescencia, NO el reloj de
-# pared). Sin esto, un runner lento (>~10s entre llamadas) recicla el lock → falso "flood". Se hace
-# unset al cerrar el bloque G3 para no alterar el test H6 (que usa ventana=0 a propósito).
-export CLAUDE_DELEG_COALESCE_S=3600
 rm -f "$CONS"; rm -rf "$CDIR"/.delegacion-ask.*.lock 2>/dev/null; write_state 19
 B="$(payload BATCH '' sonnet)"   # incluido (ventana 19% < 90%)
 out="$(run_gate "$B")"; is_ask "$out"    && ok "G3 fan-out · 1er gate del lote → pregunta"             || bad "G3: 1er gate no preguntó; got: $out"
@@ -141,7 +136,6 @@ rm -f "$CONS"; rm -rf "$CDIR"/.delegacion-ask.*.lock 2>/dev/null; write_state 99
 M="$(payload BATCHM '' gpt-4o)"  # metered (API externa de pago)
 out="$(run_gate "$M")"; is_ask "$out"    && ok "G3 · metered 1er gate → pregunta"                      || bad "G3 metered 1º → ask; got: $out"
 out="$(run_gate "$M")"; is_ask "$out"    && ok "G3 · metered hermano → SIGUE preguntando (protección)" || bad "G3 metered hermano → debía seguir preguntando; got: $out"
-unset CLAUDE_DELEG_COALESCE_S   # fin del bloque G3: restablece la ventana por defecto (H6 la fija a 0)
 
 # H6 — un ask NEGADO no persiste consentimiento (el registrar NO corre). Antes, dentro de la vieja
 # ventana de 60s, el lock de coalescencia dejaba colar el reintento en SILENCIO. Ahora la ventana es

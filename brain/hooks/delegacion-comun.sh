@@ -66,7 +66,7 @@ deleg_lock_path() {  # $1=sid $2=key → ruta del lock
 }
 deleg_lock_age_s() {  # $1=lockpath → edad en segundos (vacío/return 1 si no existe o sin stat/date)
   local m now
-  m=$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null) || return 1
+  m=$(stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null) || return 1   # GNU (Linux/GitBash) primero; BSD (macOS) de respaldo — en Linux 'stat -f' es *filesystem* y da edad basura
   now=$(date +%s 2>/dev/null) || return 1
   printf '%s' "$((now - m))"
 }
