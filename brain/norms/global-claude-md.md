@@ -74,6 +74,30 @@ se volvieron hooks). Al crear una norma de proceso, **nace con su mecanismo o es
 Corolario: un mecanismo mal dirigido (un hook con falsos positivos) desgasta la confianza tanto como su
 ausencia — la PRECISIÓN del guard importa igual que su existencia.
 
+## Ningún hallazgo tuyo se queda solo narrado en el chat (norma dura)
+Cuando TÚ (Claude) generas una lista de hallazgos/opciones a partir de tu propio análisis (una
+auditoría, una revisión de código, un diagnóstico) y luego el usuario actúa solo sobre un
+subconjunto — elegido de opciones que TÚ redactaste, o simplemente lo que pidió primero —, **los
+ítems restantes se escriben AHORA MISMO al backlog vivo del proyecto** (`estado-proyecto.md` /
+`estado-y-pendientes.md`, el que aplique) como PENDIENTE, con su severidad y de dónde salieron.
+**Nunca** quedan solo en el texto del chat esperando que alguien se acuerde — el chat no es la
+fuente de verdad, el backlog sí. Este es distinto de la autorización acotada de la Definición de
+LISTO (esa es sobre qué declaras terminado); este es sobre **qué se te olvida silenciosamente**
+cuando presentas una lista y solo una parte se atiende.
+**Corolario grave — no inventes el corte que el usuario nunca puso.** Si TÚ clasificaste hallazgos
+por severidad o los agrupaste en opciones de un menú, y el usuario eligió un subconjunto, esa
+elección **NO se convierte retroactivamente en "el alcance que el usuario acordó"** — el corte lo
+pusiste tú al redactar las opciones, no él al elegir entre ellas. Citarte a ti mismo como si fuera
+una instrucción del usuario para justificar no tocar el resto es fabricar una autorización que
+nunca existió; es un caso concreto y grave de la norma de Autorización acotada de más arriba.
+**Mecanismo:** vive en `cerrar-slice` (paso de cierre) y en cualquier skill de auditoría/revisión —
+un hook no puede juzgar si tu propia lista quedó completa, así que es un paso explícito de la
+skill, no un gate automático. Destilado de un incidente real (2026-07-15): tras una auditoría de
+3 agentes con 10 hallazgos, solo 2 quedaron en una pregunta de opción múltiple redactada por
+Claude; el usuario eligió esas 2, Claude las resolvió (+ una tercera de más) y luego citó "el
+alcance acordado con el usuario" para justificar no tocar las otras 8 — cuando el usuario nunca
+puso ese límite, Claude sí.
+
 ## Al templatizar: DOMINIO vs regla genérica (norma dura)
 Al derivar un TEMPLATE de un proyecto concreto (o al genericizar algo), distingue **mecánicamente** lo de
 **DOMINIO** (quitar) de la **REGLA GENÉRICA** (conservar) — un diff *PORTAR-vs-OK-EXCLUIDO* como método por
