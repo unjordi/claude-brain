@@ -57,9 +57,22 @@ CLAIM_RE='listo para (la )?(producci|desplegar|deploy|salir|mergear)|en producci
 _decl=$(printf '%s' "$last" | sed 's/¿[^?]*?//g')
 printf '%s' "$_decl" | grep -qiE "$CLAIM_RE" && claim=si || claim=no
 
-# ── ESCAPE: ¿el mensaje es ESTATUS/ESPERA/PROPUESTA (no un cierre)? → no dispares. ──
-STATUS_RE='con tu (ok|visto|aprobaci)|dime si|dime c[oó]mo|dime qu[eé]|te aviso|te muestro|cuando .{0,40}(reporte|termine|cierre|entre|merge)|en preview|a tu (revisi|qa)|para tu (revisi|qa|visto)|pendiente de tu|sin mergear|armado sin merge|no (lo |la )?mergeo|no cierro|no declaro|espero (tu|a que|el)|revisamos (en la ma|juntos|al rato|cuando)|si (ya |te )?(qued|late|parece)|definici[oó]n de .?listo|qu[eé] entiendes por|palabra .?listo'
-printf '%s' "$last" | grep -qiE "$STATUS_RE" && exit 0
+# ── ESCAPE por DOWNGRADE explícito (léxico PRESCRITO de preview/auto-degradación, o meta-discusión de
+# la palabra "listo"): SIEMPRE escapa, incluso con un claim de cierre co-ubicado. Usar este léxico ES
+# declarar NO-listo — "el módulo quedó terminado pero lo dejo EN PREVIEW, A TU REVISIÓN" es honesto,
+# no un falso LISTO. (Por eso NO se subordina al claim: sería un falso positivo castigar justo la
+# frase que la norma pide.) ──
+DOWNGRADE_RE='en preview|a tu (revisi|qa)|para tu (revisi|qa|visto)|pendiente de tu|sin mergear|armado sin merge|no (lo |la )?mergeo|no cierro|no declaro|definici[oó]n de .?listo|qu[eé] entiendes por|palabra .?listo'
+printf '%s' "$last" | grep -qiE "$DOWNGRADE_RE" && exit 0
+
+# ── ESCAPE por ESTATUS DÉBIL (deferir/avisar/consultar) — SOLO si NO hay un CLAIM de cierre co-ubicado
+# (H4), igual que la pregunta de abajo. Antes esto escapaba SIEMPRE, así "Listo, quedó terminado. Dime
+# si reviso algo más." se salvaba con "dime si" pese al cierre AFIRMADO. Un deferral suave NO neutraliza
+# un LISTO afirmado en el mismo mensaje (cierra H4); si NO hay claim, sí escapa (sigue siendo estatus). ──
+WEAK_STATUS_RE='con tu (ok|visto|aprobaci)|dime si|dime c[oó]mo|dime qu[eé]|te aviso|te muestro|cuando .{0,40}(reporte|termine|cierre|entre|merge)|espero (tu|a que|el)|revisamos (en la ma|juntos|al rato|cuando)|si (ya |te )?(qued|late|parece)'
+if [ "$claim" != si ]; then
+  printf '%s' "$last" | grep -qiE "$WEAK_STATUS_RE" && exit 0
+fi
 
 # ── Escape por PREGUNTA — SOLO si NO hay un CLAIM de cierre co-ubicado (G1). El `¿…?` interno y la
 # última línea que termina en `?` son señales de PREGUNTA (pedir input), no de cierre; pero un cierre
