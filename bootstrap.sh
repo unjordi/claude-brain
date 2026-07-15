@@ -63,8 +63,10 @@ fi
 # clonar/actualizar se hace checkout de esa rama igualando el remoto; sin ella, la rama default.
 REF="${CLAUDE_BRAIN_REF:-}"
 if [[ -d "$DIR/.git" ]]; then
-  say "actualizando el clon en $DIR"; git -C "$DIR" fetch -q origin
-  if [[ -n "$REF" ]]; then git -C "$DIR" checkout -B "$REF" "origin/$REF"; else git -C "$DIR" pull --ff-only; fi
+  say "actualizando el clon en $DIR"; git -C "$DIR" fetch -q --prune origin
+  # Sin REF: alinear SIEMPRE a main (NO `pull` de la rama actual). Un clon que quedó en una rama
+  # vieja/borrada —leftover de dev— rompía el `pull --ff-only` (su upstream ya no existe en el remoto).
+  if [[ -n "$REF" ]]; then git -C "$DIR" checkout -B "$REF" "origin/$REF"; else git -C "$DIR" checkout -B main origin/main; fi
 else
   say "clonando en $DIR"; git clone "$REPO_URL" "$DIR"
   [[ -n "$REF" ]] && { git -C "$DIR" fetch -q origin; git -C "$DIR" checkout -B "$REF" "origin/$REF"; }
