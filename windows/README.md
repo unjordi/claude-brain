@@ -100,7 +100,8 @@ irm https://raw.githubusercontent.com/unjordi/claude-brain/main/bootstrap.ps1 | 
 
 `bootstrap.ps1` winget-installs anything missing (Git — brings Git Bash, jq, Node; and .NET 10 SDK,
 now only a **build fallback** since the widget install downloads the precompiled `ClaudeBrain.exe`),
-clones the repo to `%USERPROFILE%\claude-brain`, and runs the brain + widget installers. If winget
+clones the repo to `%LOCALAPPDATA%\claude-brain-repo` (out of the way, not your visible profile
+folder), and runs the brain + widget installers. If winget
 just installed something, open a fresh terminal and re-run so the new `PATH` is visible. **Or by
 hand** from the repo:
 

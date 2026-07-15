@@ -15,7 +15,8 @@ curl -fsSL https://raw.githubusercontent.com/unjordi/claude-brain/main/bootstrap
 ```
 
 El `bootstrap.sh` instala lo que falte (`git`, `jq`, `node`) con tu gestor de paquetes, clona el
-repo en `~/claude-brain` y corre `install.sh`. **O a mano** (si ya tienes los prereqs):
+repo en `~/.claude-brain` (oculto, no ensucia tu `$HOME`) y corre `install.sh`. **O a mano** (si ya
+tienes los prereqs):
 
 > El widget mide **Claude Code (el CLI `claude`)**: el instalador también lo instala (sáltalo con
 > `--no-claude-code`), pero el **login es tuyo** — corre `claude` y `/login` una vez, o el widget solo

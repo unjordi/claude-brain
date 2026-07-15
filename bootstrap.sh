@@ -13,8 +13,17 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/unjordi/claude-brain"
-DIR="${CLAUDE_BRAIN_DIR:-$HOME/claude-brain}"
+DIR="${CLAUDE_BRAIN_DIR:-$HOME/.claude-brain}"
+OLD_DIR="$HOME/claude-brain"   # legacy (visible): bootstrap.sh clonaba aquí antes de ocultarlo (2026-07-15)
 say() { printf '\033[1;38;5;208m🧠 claude-brain\033[0m » %s\n' "$1"; }
+
+# Migración: si ya existe el clon viejo VISIBLE y el nuevo oculto todavía no, muévelo (no lo dupliques).
+# El clon se necesita para que "Actualizar widget" funcione (guarda su ruta en version.json) — no se
+# borra, solo se oculta para no ensuciar $HOME.
+if [[ -d "$OLD_DIR/.git" && ! -e "$DIR" ]]; then
+  say "migrando el clon de $OLD_DIR a $DIR (ya no vive visible en \$HOME)"
+  mv "$OLD_DIR" "$DIR"
+fi
 
 # ── (1) Prerrequisitos ──────────────────────────────────────────────────────
 # git + jq (guardias) + node/npm (ccusage). En macOS además clang/swift vienen con Xcode CLT.

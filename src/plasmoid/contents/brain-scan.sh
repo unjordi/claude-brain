@@ -72,6 +72,7 @@ heal() {
     "$here/../../brain/install-brain.sh" \
     "$here/../../../brain/install-brain.sh" \
     "$HOME/code/claude-brain/brain/install-brain.sh" \
+    "$HOME/.claude-brain/brain/install-brain.sh" \
     "$HOME/claude-brain/brain/install-brain.sh" \
     "$HOME/src/claude-brain/brain/install-brain.sh" \
     "$HOME/Projects/claude-brain/brain/install-brain.sh"; do

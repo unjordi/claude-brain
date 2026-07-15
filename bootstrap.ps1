@@ -18,8 +18,19 @@ $ErrorActionPreference = 'Stop'
 try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force } catch {}
 
 $repo = 'https://github.com/unjordi/claude-brain'
-$dir  = if ($env:CLAUDE_BRAIN_DIR) { $env:CLAUDE_BRAIN_DIR } else { "$env:USERPROFILE\claude-brain" }
+# %LOCALAPPDATA% (no el perfil visible) para no ensuciar el home del usuario -- paridad con Linux/mac
+# (~/.claude-brain oculto). Nombre "-repo" para no chocar con %LOCALAPPDATA%\claude-brain (cache del
+# daemon: state/stats/account) ni con %LOCALAPPDATA%\Programs\ClaudeBrain (la app instalada).
+$dir  = if ($env:CLAUDE_BRAIN_DIR) { $env:CLAUDE_BRAIN_DIR } else { "$env:LOCALAPPDATA\claude-brain-repo" }
+$oldDir = "$env:USERPROFILE\claude-brain"   # legado (visible): bootstrap.ps1 clonaba aqui antes de ocultarlo (2026-07-15)
 function Say($m) { Write-Host "claude-brain > $m" -ForegroundColor DarkYellow }
+
+# Migracion: si ya existe el clon viejo VISIBLE y el nuevo oculto todavia no, muevelo (no lo dupliques).
+# El clon se necesita para que el autoupdate del widget funcione -- no se borra, solo se oculta.
+if ((Test-Path "$oldDir\.git") -and -not (Test-Path $dir)) {
+  Say "migrando el clon de $oldDir a $dir (ya no vive visible en el perfil)"
+  Move-Item -Path $oldDir -Destination $dir
+}
 
 # -- (1) Prerrequisitos con winget (idempotente) ------------------------------
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
