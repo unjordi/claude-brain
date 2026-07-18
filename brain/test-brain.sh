@@ -491,6 +491,26 @@ is_block "$(dod 'Listo, quedó terminado el módulo.' "$BASHREAD")" && bad "dod 
 # G2(b): el bloqueo de QA-visual-a-ciegas NO se suprime por la palabra "screenshot" en PROSA;
 # solo un tool_use REAL de navegador lo evita (estructura, no substring).
 is_block "$(dod 'Quedó igual al mockup. No corrí screenshot, pero confío en que se ve bien.' "$EDITR")" && ok "dod G2b: 'screenshot' en prosa (sin browser-tool) → sigue bloqueando (a ciegas)" || bad "dod G2b: la palabra 'screenshot' en prosa suprimió el bloqueo visual"
+# P2a (precisión): un PASO MECÁNICO del proceso ("checkpoint hecho", "push hecho", "MR abierto",
+# "memoria actualizada") NO es un cierre de entregable → no dispara (caso real 2026-07-15: el freno
+# saltó por "✅ Listo — checkpoint hecho"). Se enmascara la frase mecánica y el claim se evalúa
+# sobre el residuo.
+is_block "$(dod '✅ Checkpoint hecho' "$EDITR")" && bad "dod P2a: bloqueó '✅ Checkpoint hecho' (paso mecánico, falso positivo)" || ok "dod P2a: '✅ Checkpoint hecho' → no bloquea (paso mecánico)"
+is_block "$(dod '✅ Listo — checkpoint hecho, hilo volcado.' "$EDITR")" && bad "dod P2a: bloqueó '✅ Listo — checkpoint hecho' (el caso real del 2026-07-15)" || ok "dod P2a: '✅ Listo — checkpoint hecho, hilo volcado' → no bloquea (caso real)"
+is_block "$(dod 'Push hecho a la ramita, MR abierto.' "$EDITR")" && bad "dod P2a: bloqueó 'push hecho…MR abierto' (proceso git, falso positivo)" || ok "dod P2a: 'push hecho a la ramita, MR abierto' → no bloquea (proceso git)"
+is_block "$(dod 'Memoria actualizada y bitácora al día. ✅ Hecho el commit.' "$EDITR")" && bad "dod P2a: bloqueó 'memoria actualizada / bitácora al día / hecho el commit'" || ok "dod P2a: 'memoria actualizada, bitácora al día, hecho el commit' → no bloquea"
+# P2a FAIL-SAFE: si la frase mezcla paso mecánico Y claim de ENTREGABLE, el claim manda → bloquea.
+is_block "$(dod 'Push hecho y la feature ya funciona.' "$EDITR")" && ok "dod P2a fail-safe: 'push hecho Y la feature ya funciona' → bloquea (el claim de entregable manda)" || bad "dod P2a fail-safe: el paso mecánico tapó un claim de entregable (evasión)"
+is_block "$(dod 'MR abierto y el endpoint quedó terminado.' "$EDITR")" && ok "dod P2a fail-safe: 'MR abierto Y el endpoint quedó terminado' → bloquea" || bad "dod P2a fail-safe: 'MR abierto' tapó el cierre del endpoint (evasión)"
+# P2b (precisión): celebración SIN entregable no dispara por sí sola — 🎉 dejó de ser gatillo
+# standalone ("quedó el día" no es "quedó listo/terminado" → no hay claim textual); 🏁 sigue siendo cierre.
+is_block "$(dod '🎉 ¡Qué bonito quedó el día!' "$EDITR")" && bad "dod P2b: bloqueó celebración sin entregable ('🎉 qué bonito quedó el día')" || ok "dod P2b: '🎉 ¡qué bonito quedó el día!' → no bloquea (celebración sin entregable)"
+is_block "$(dod '¡Genial! ¡Vamos! ✨🚀' "$EDITR")" && bad "dod P2b: bloqueó interjecciones/emojis sin claim" || ok "dod P2b: interjecciones + emojis sin claim → no bloquea"
+is_block "$(dod '🎉 El módulo quedó listo.' "$EDITR")" && ok "dod P2b fail-safe: '🎉 el módulo quedó listo' → bloquea (el claim textual dispara solo)" || bad "dod P2b fail-safe: el 🎉 dejó pasar un cierre de entregable"
+# Dientes intactos: cierres de ENTREGABLE reales siguen exigiendo la marca (1)/(2).
+is_block "$(dod 'El módulo de auth quedó listo.' "$EDITR")" && ok "dod dientes: 'el módulo de auth quedó listo' → sigue bloqueando" || bad "dod dientes: dejó pasar 'el módulo de auth quedó listo' (aflojado)"
+is_block "$(dod 'Ya funciona el widget.' "$EDITR")" && ok "dod dientes: 'ya funciona el widget' → sigue bloqueando" || bad "dod dientes: dejó pasar 'ya funciona el widget' (aflojado)"
+is_block "$(dod 'Terminamos la migración.' "$EDITR")" && ok "dod dientes: 'terminamos la migración' → sigue bloqueando" || bad "dod dientes: dejó pasar 'terminamos la migración' (aflojado)"
 rm -f "$DODTX"
 
 # ─────────────────────────────────────────────────────────────────────────────
