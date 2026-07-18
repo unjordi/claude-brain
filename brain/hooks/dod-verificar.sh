@@ -12,8 +12,13 @@
 #
 # El hook DISTINGUE el acto de habla:
 #   - Lenguaje de ESTATUS/ESPERA (pido tu OK / te aviso / en preview / cuando reporte / ¿…?) → NO dispara.
-#   - Lenguaje de CIERRE (quedó/está listo/terminado/cerrado/terminamos/de trancazo/🏁🎉/funciona/a la
+#   - Lenguaje de CIERRE (quedó/está listo/terminado/cerrado/terminamos/de trancazo/🏁/funciona/a la
 #     par) tras tocar CÓDIGO en ESTE turno → exige una MARCA CITADA de (1) o (2); si falta, BLOQUEA.
+#   - (P2a) Un PASO MECÁNICO del proceso ("checkpoint hecho", "push hecho", "MR abierto", "memoria
+#     actualizada") NO es un cierre de entregable → no dispara. FAIL-SAFE: si la frase mezcla paso
+#     mecánico Y claim de entregable ("push hecho y la feature ya funciona"), el claim manda → dispara.
+#   - (P2b) CELEBRACIÓN sin entregable (🎉🥳✨🚀, "¡genial!", "¡vamos!") no es claim por sí sola; el 🎉
+#     dejó de ser gatillo standalone (🏁 sí sigue siendo cierre — bandera de meta).
 #   - (B2) Afirmar una OBSERVACIÓN VISUAL (se ve/quedó como el mockup/en Chrome/la pantalla…) SIN haber
 #     corrido una tool de navegador/screenshot en el turno → BLOQUEA (lo declara a ciegas).
 #   - (B4) Si el cierre es de MIGRACIÓN, la prueba acordada es una AUDITORÍA DE PARIDAD, no build+tests.
@@ -49,13 +54,36 @@ last=$(printf '%s\n' "$turn" | jq -rs '[.[] | select((.message.role // .type)=="
 # ── CLAIM de cierre (G1): se computa AQUÍ, antes de los escapes por PREGUNTA, porque una pregunta
 # co-ubicada NO debe anular un cierre afirmado en el MISMO mensaje ("Listo, quedó terminado.
 # ¿Reviso algo más?"). Con claim presente, la pregunta ya no salva el turno → se evalúa el claim. ──
-CLAIM_RE='listo para (la )?(producci|desplegar|deploy|salir|mergear)|en producci[oó]n|(ya |todo |esto |lo |la )?(qued[oó]|est[aá]|dej[eé]) *(listo|lista|terminad|completad|funcionando)|(m[oó]dulo|migraci[oó]n|feature|slice|endpoint|p[aá]gina|tarea)[^.]{0,40}(complet|termin|listo|a la par|de punta a punta)|100% (listo|completo|a la par)|de punta a punta|ya (funciona|jala|sirve)|todo (listo|verde|jalando)|\bcerrad[oa]s?\b|\bcerramos\b|\bterminamos\b|de trancazo|🏁|🎉|✅ *(listo|hecho|terminad|cerrad|complet)'
+CLAIM_RE='listo para (la )?(producci|desplegar|deploy|salir|mergear)|en producci[oó]n|(ya |todo |esto |lo |la )?(qued[oó]|est[aá]|dej[eé]) *(listo|lista|terminad|completad|funcionando)|(m[oó]dulo|migraci[oó]n|feature|slice|endpoint|p[aá]gina|tarea)[^.]{0,40}(complet|termin|listo|a la par|de punta a punta)|100% (listo|completo|a la par)|de punta a punta|ya (funciona|jala|sirve)|todo (listo|verde|jalando)|\bcerrad[oa]s?\b|\bcerramos\b|\bterminamos\b|de trancazo|🏁|✅ *(listo|hecho|terminad|cerrad|complet)'
+# P2b (precisión): 🎉 se QUITÓ del CLAIM_RE como gatillo standalone — un emoji celebratorio sin claim
+# de entregable en la frase ("🎉 ¡qué bonito quedó el día!") es ánimo, no un cierre; si el 🎉 acompaña
+# un cierre real ("🎉 el módulo quedó listo"), el claim textual dispara solo. 🏁 (bandera de meta) SÍ
+# sigue siendo cierre. Las interjecciones (¡genial!/¡vamos!/✨🚀) nunca fueron gatillo — nada que quitar.
 # El claim se evalúa sobre el texto SIN los tramos de pregunta (¿…?): así "¿ya quedó terminado el
 # módulo?" (léxico de cierre DENTRO de una pregunta) NO cuenta como claim, pero "Listo, quedó
 # terminado. ¿Reviso algo más?" (claim AFIRMADO + pregunta aparte) SÍ. G1 = una pregunta co-ubicada
 # no salva un cierre afirmado; una pregunta que SOLO consulta el estado, sí escapa.
 _decl=$(printf '%s' "$last" | sed 's/¿[^?]*?//g')
-printf '%s' "$_decl" | grep -qiE "$CLAIM_RE" && claim=si || claim=no
+
+# ── P2a (precisión): PASOS MECÁNICOS del proceso NO son cierres de entregable. "Checkpoint hecho",
+# "push hecho", "MR abierto", "bitácora al día", "memoria actualizada" reportan el PROCESO
+# (git/memoria/CI), no un entregable — frenarlos es un falso positivo (caso real 2026-07-15:
+# "✅ Listo — checkpoint hecho" exigió confirmación del usuario por un paso mecánico).
+# Mecánica FAIL-SAFE: se ENMASCARAN esas frases (sustantivo de proceso + participio, en ambos
+# órdenes, con lead-in opcional "✅ listo —") y el CLAIM se evalúa sobre el RESIDUO → si la frase
+# mezcla paso mecánico Y claim de entregable ("push hecho y la feature ya funciona"), el claim de
+# entregable SOBREVIVE al enmascarado y SÍ dispara. "el módulo quedó listo" no se toca (módulo no
+# es sustantivo de proceso). NOTA: "deploy" solo cuenta como mecánico si es "deploy del stack de
+# QA" — un "deploy listo" a secas puede ser el entregable y NO se exenta (fail-safe).
+MECH_N='(checkpoints?|commits?|pushe?s?|pull|fetch|rebase|merge requests?|pull requests?|merges?( local(es)?| de la ramita| de la rama)?|mrs?|prs?|(bitacoras?|bitácoras?)|memorias?|worktrees?|ramitas?|ramas?|builds?|tests?|deploys? (del|al) stack( de qa)?|release prs?|pipelines?|hilo( mental)?|estado-proyecto)'
+MECH_D='(hech[oa]s?|list[oa]s?|ok|corrid[oa]s?|aplicad[oa]s?|actualizad[oa]s?|abiert[oa]s?|cread[oa]s?|pushead[oa]s?|subid[oa]s?|mergead[oa]s?|volcad[oa]s?|escrit[oa]s?|al d(i|í)a)'
+# tr 'A-Z' 'a-z' (rango ASCII explícito): byte-safe en BSD/GNU, no corrompe emojis/acentos; el grep
+# posterior ya es -i. sed con delimitador @ (no hay @ en los patrones) y alternación en vez de
+# corchetes multibyte (portable BSD/GNU).
+_mask=$(printf '%s' "$_decl" | tr 'A-Z' 'a-z' | sed -E \
+  -e "s@(^|[^a-z0-9])((✅|☑️|✔️) *)?((listo|hecho|ok) *(—|–|:|,)? *)?((el|la|los|las|tu|mi|un|una) )?${MECH_N}( [^ .,;:!?]+){0,3}( ya)?( qued(o|ó)| est(a|á)n?)? ${MECH_D}@\1@g" \
+  -e "s@(^|[^a-z0-9])((✅|☑️|✔️) *)?${MECH_D}( (el|la|los|las|tu|mi|un|una|del|de la))? ${MECH_N}@\1@g")
+printf '%s' "$_mask" | grep -qiE "$CLAIM_RE" && claim=si || claim=no
 
 # ── ESCAPE por DOWNGRADE explícito (léxico PRESCRITO de preview/auto-degradación, o meta-discusión de
 # la palabra "listo"): SIEMPRE escapa, incluso con un claim de cierre co-ubicado. Usar este léxico ES
