@@ -8,8 +8,11 @@
 #     drama — este candado NO las intercepta. Igual las ramas `epic/*`, `integracion/*` y demás.
 #   - El ÚNICO cruce que pasa por este candado es integrar al `develop` COMPARTIDO (o promover a
 #     `main`) vía MR (`glab mr merge|accept` / `gh pr merge`, incluido armar `--auto-merge`):
-#     BLOQUEA salvo que en el contexto reciente haya una MARCA de confirmación/autorización expresa
-#     del usuario para ESE cierre.
+#     BLOQUEA salvo que haya (a) una MARCA de confirmación expresa del usuario en el contexto
+#     reciente, o (b) una AUTORIZACIÓN DURABLE vigente en disco (.claude/memory/
+#     autorizaciones-vigentes.local.md, scope=merge-develop con vencimiento — la escribe el skill
+#     turno-nocturno al recibir un OK blanket del usuario; sobrevive compactaciones). La vía (b)
+#     JAMÁS cubre releases a main.
 #
 # ALCANCE: SOLO repos COMPARTIDOS (marca `.claude/repo-compartido`, viaja por git). En repos
 # personales/solo (sin la marca) NO gatea nada → cero fricción ahí; ese caso lo cuidan git-branch-guard
@@ -82,8 +85,25 @@ if [ "$destino" = "main" ]; then
 fi
 
 # Destino develop (o desconocido → conservador): confirmación normal. "sigue/avanza" NO cuenta.
-CONF_RE='merg[eé]a|mérga(lo|los)?|dale( el)? merge|haz(lo|le)?( el)? *merge|merge a develop|integra[a-zé ]*a? *develop|s[ií],? merge|ci[eé]rra(lo)?|cierra el slice|ll[eé]va(lo|los)?[a-zé ,]*develop|s[uú]b(e|elo|elos|ir|an|í)[a-zé ,]*develop|m[aá]nda(lo|los)?[a-zé ,]*develop|ya (puedes|podés|puedo) mergear|adelante[a-zé ]*(el )?merge|autoriz|luz verde (para|de|expresa)|visto bueno|aprob(ado|é|ó)?|va! *(merge|mr|develop|cierra)'
+CONF_RE='merg[eé]a|mérga(lo|los)?|dale( el)? merge|haz(lo|le)?( el)? *merge|merge a develop|integra[a-zé ]*a? *develop|s[ií],? merge|ci[eé]rra(lo)?|cierra el slice|ll[eé]va(lo|los)?[a-zé ,]*develop|s[uú]b(e|elo|elos|ir|an|í)[a-zé ,]*develop|m[aá]nda(lo|los)?[a-zé ,]*develop|emp[uú]j(a|á|e)(lo|los|le)?[a-zé ,]*develop|m[eé]te(le|lo|los)?[a-zé ,]*develop|ya (puedes|podés|puedo) mergear|adelante[a-zé ]*(el )?merge|autoriz|luz verde (para|de|expresa)|visto bueno|aprob(ado|é|ó)?|va! *(merge|mr|develop|cierra)'
 printf '%s' "$recent" | grep -qiE "$CONF_RE" && exit 0
+
+# ── Autorización DURABLE (sobrevive compactaciones): grant EXPLÍCITO del usuario persistido a disco
+# (lo escribe el skill turno-nocturno al recibir el OK, con la CITA textual del usuario y un
+# vencimiento). SOLO cubre scope=merge-develop — un release a main NUNCA llega aquí (su early-exit
+# está arriba y NO consulta este archivo). Fail-safe: sin archivo / grant vencido / línea malformada
+# → el freno normal de abajo. Caso real (2026-07-12): un OK blanket ("autorizo todos los merges a
+# develop de aquí a mañana a las 10am") murió al COMPACTARSE el contexto (quedó fuera de la ventana
+# de mensajes que escaneamos) → merges legítimos frenados toda la noche. El grant en disco es la
+# versión durable de ese OK; la cita textual registrada es su evidencia.
+AUTH_FILE="${CLAUDE_PROJECT_DIR:-.}/.claude/memory/autorizaciones-vigentes.local.md"
+if [ -f "$AUTH_FILE" ]; then
+  now_epoch=$(date +%s)
+  grant=$(awk -v now="$now_epoch" '/scope=merge-develop/ && match($0, /vence_epoch=[0-9]+/) {
+      if (substr($0, RSTART+12, RLENGTH-12) + 0 > now) { print; exit }
+    }' "$AUTH_FILE" 2>/dev/null)
+  [ -n "$grant" ] && exit 0
+fi
 
 jq -n --arg r "FRENO (definición de LISTO): integrar a develop por MR exige la confirmación EXPRESA del usuario para ESTE cierre, y no la encuentro en el contexto reciente.
   (a) Si ya te dio el OK explícito, CÍTALO y reintenta.

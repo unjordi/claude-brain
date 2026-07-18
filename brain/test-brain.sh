@@ -268,6 +268,49 @@ dur=$SECONDS
   && ok "cmd H5: glab colgado → timeout interno devuelve vacío en ${dur}s (no cuelga hasta que lo maten)" \
   || bad "cmd H5: la consulta colgada NO fue acotada por timeout (dhang='$dhang' dur=${dur}s)"
 rm -f "${TMPDIR:-/tmp}"/acg-mrdest-* 2>/dev/null
+
+# ── (b1f) confirmar: AUTORIZACIÓN DURABLE en disco (sobrevive compactaciones) + vocabulario "empuja/mete" ──
+# El grant lo escribe el skill turno-nocturno con la CITA textual del usuario y vence_epoch; SOLO
+# cubre scope=merge-develop. Caso real 2026-07-12: un OK blanket murió al compactarse el contexto.
+echo ""
+echo "== (b1f) confirmar-merge-develop: autorización durable (vence_epoch) + vocabulario empuja/mete =="
+AUTHF="$CMREPO/.claude/memory/autorizaciones-vigentes.local.md"
+mkdir -p "$CMREPO/.claude/memory"
+mock_cm_glab develop
+# (1) grant VIGENTE → permite el merge a develop aunque el transcript no traiga OK.
+printf -- '- scope=merge-develop vence_epoch=%s vence="mañana 10am" cita="autorizo todos los merges a develop hasta mañana 10am" registrada=2026-07-18\n' "$(( $(date +%s) + 3600 ))" > "$AUTHF"
+is_silent "$(cm 'glab mr merge 61 --squash --yes' 'sigue avanzando')" \
+  && ok "cmd b1f: grant durable VIGENTE → merge a develop pasa (sobrevive compactación)" \
+  || bad "cmd b1f: grant durable vigente NO destrabó el merge a develop"
+# (2) grant VENCIDO → freno normal.
+printf -- '- scope=merge-develop vence_epoch=%s vence="ayer" cita="autorizo hasta ayer" registrada=2026-07-17\n' "$(( $(date +%s) - 60 ))" > "$AUTHF"
+is_deny "$(cm 'glab mr merge 62 --squash --yes' 'sigue avanzando')" \
+  && ok "cmd b1f: grant VENCIDO → deny (no se estira)" \
+  || bad "cmd b1f: un grant vencido dejó pasar el merge"
+# (3) línea malformada (sin vence_epoch) → freno normal (fail-safe).
+printf -- '- scope=merge-develop cita="sin vencimiento"\n' > "$AUTHF"
+is_deny "$(cm 'glab mr merge 63 --squash --yes' 'sigue avanzando')" \
+  && ok "cmd b1f: grant malformado (sin vence_epoch) → deny (fail-safe)" \
+  || bad "cmd b1f: una línea malformada dejó pasar el merge"
+# (4) EL MÁS IMPORTANTE: grant vigente pero destino MAIN → sigue exigiendo release súper-explícito.
+printf -- '- scope=merge-develop vence_epoch=%s vence="+1h" cita="autorizo todos los merges a develop" registrada=hoy\n' "$(( $(date +%s) + 3600 ))" > "$AUTHF"
+mock_cm_glab main
+is_deny "$(cm 'glab mr merge 64 --yes' 'sigue avanzando')" \
+  && ok "cmd b1f: grant develop vigente + destino MAIN → deny (main intacto, JAMÁS lo cubre el grant)" \
+  || bad "cmd b1f: ¡el grant de develop destrabó un RELEASE a main! (aflojamiento grave)"
+# (5) archivo ausente → comportamiento de siempre.
+rm -f "$AUTHF"
+mock_cm_glab develop
+is_deny "$(cm 'glab mr merge 65 --squash --yes' 'sigue avanzando')" \
+  && ok "cmd b1f: sin archivo de grants → deny normal (sin cambios de baseline)" \
+  || bad "cmd b1f: sin archivo el guard dejó de frenar"
+# (6) vocabulario: "empuja todo a develop" y "mete todo a develop" cuentan como OK explícito.
+CMDCR2=$(grep "^CONF_RE=" "$HOOKS/confirmar-merge-develop.sh" | sed "s/^[^']*'//; s/'\$//")
+printf '%s' "empuja todo lo que ya tienes a develop" | grep -qiE "$CMDCR2" && ok "cmd b1f: reconoce 'empuja todo … a develop'" || bad "cmd b1f: NO reconoce 'empuja … a develop' (falso-FRENO real)"
+printf '%s' "mete todo eso a develop porfa"          | grep -qiE "$CMDCR2" && ok "cmd b1f: reconoce 'mete todo … a develop'"   || bad "cmd b1f: NO reconoce 'mete … a develop'"
+printf '%s' "empújalo cuando puedas, a develop"      | grep -qiE "$CMDCR2" && ok "cmd b1f: reconoce 'empújalo … a develop'"     || bad "cmd b1f: NO reconoce 'empújalo'"
+printf '%s' "no empujes nada todavía"                | grep -qiE "$CMDCR2" && bad "cmd b1f: FALSO POSITIVO con 'no empujes nada' (sin develop)" || ok "cmd b1f: 'empujes' sin develop NO dispara (acotado)"
+rm -f "${TMPDIR:-/tmp}"/acg-mrdest-* 2>/dev/null
 rm -rf "$CMROOT"
 
 # ─────────────────────────────────────────────────────────────────────────────
