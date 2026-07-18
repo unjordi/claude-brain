@@ -40,11 +40,12 @@ echo "==> Stopping app"
 osascript -e 'tell application "Claude Brain Widget" to quit' 2>/dev/null || true
 pkill -f "Claude Brain Widget.app/Contents/MacOS/ClaudeBrain" 2>/dev/null || true
 
-echo "==> Unloading launchd agent"
+echo "==> Unloading launchd agents (fetch + autoarranque del widget)"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+launchctl bootout "gui/$(id -u)/$LABEL.widget" 2>/dev/null || true
 
 echo "==> Removing files"
-rm -f "$PLIST_DEST" "$FETCH_DEST"
+rm -f "$PLIST_DEST" "$FETCH_DEST" "$HOME/Library/LaunchAgents/$LABEL.widget.plist"
 rm -rf "$APP_DEST"
 
 if [[ "$PURGE" -eq 1 ]]; then

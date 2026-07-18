@@ -251,8 +251,30 @@ if [[ "$SKIP_APP" -eq 0 ]]; then
     echo "    installed (compilado) -> $INSTALLED_APP"
   fi
 
-  echo "==> Launching"
-  open "$INSTALLED_APP"
+  echo "==> Registrando AUTOARRANQUE (LaunchAgent del widget) + (re)lanzando"
+  # El widget arranca EN CADA LOGIN vía su propio LaunchAgent (RunAtLoad + open). Antes solo se
+  # abría una vez aquí y el autoarranque quedaba "agrégalo a mano a Login Items" → tras un reboot
+  # el widget NO volvía (bug real, 2026-07-18). launchd es scriptable e idempotente; un login item
+  # vía System Events exigiría permiso de Automation (prompt de TCC) — por eso NO se usa.
+  WIDGET_LABEL="$LABEL.widget"
+  WIDGET_PLIST="$HOME/Library/LaunchAgents/$WIDGET_LABEL.plist"
+  cat > "$WIDGET_PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$WIDGET_LABEL</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/bin/open</string><string>-a</string><string>$INSTALLED_APP</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+</dict></plist>
+PLIST
+  # Matar la instancia VIEJA antes de relanzar: macOS no hot-swappea el binario — sin esto, tras
+  # actualizar seguías viendo el widget anterior en memoria (bug real, 2026-07-15).
+  pkill -f "$APP_NAME.app/Contents/MacOS/" 2>/dev/null || true
+  launchctl bootout "gui/$(id -u)/$WIDGET_LABEL" 2>/dev/null || true
+  # bootstrap con RunAtLoad → lo abre AHORA y en cada login. Fallback: open directo.
+  launchctl bootstrap "gui/$(id -u)" "$WIDGET_PLIST" 2>/dev/null || open "$INSTALLED_APP"
 fi
 
 cat <<EOF
@@ -265,7 +287,7 @@ The Claude-Code brain is installed globally (hooks + delegation-cost governance 
 Next steps:
   - Look for the colored % pill in your menu bar (top-right). Click it for the breakdown.
   - Tune caps in: $LIMITS_DEFAULT
-  - To launch at login: System Settings -> General -> Login Items -> add "Claude Brain Widget".
+  - Autoarranque: YA registrado (LaunchAgent $LABEL.widget) — el widget abre solo en cada login.
 
 Debug:
   launchctl print gui/$(id -u)/$LABEL | grep -E 'state|last exit'
