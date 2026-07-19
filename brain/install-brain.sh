@@ -98,9 +98,11 @@ register_hook PostToolUse Task 'bash "$HOME/.claude/hooks/delegacion-registrar.s
 register_hook PostToolUse Task 'bash "$HOME/.claude/hooks/delegacion-reporte.sh"'   'delegacion-reporte'
 # SessionStart sin matcher (matcher vacío ⇒ se omite la clave ⇒ casa TODAS las fuentes: startup/resume/compact/clear)
 register_hook SessionStart '' 'bash "$HOME/.claude/hooks/rehidratar-hilo.sh"'       'rehidratar-hilo'
+# SessionStart sin matcher — anti-drift: avisa si la copia por-repo del cerebro quedó atrás de la fuente única
+register_hook SessionStart '' 'bash "$HOME/.claude/hooks/aviso-drift-cerebro.sh"'   'aviso-drift-cerebro'
 # PostToolUse sin matcher (casa TODA tool) — watermark anti-auto-compact: avisa de compactar proactivo
 register_hook PostToolUse '' 'bash "$HOME/.claude/hooks/aviso-contexto.sh"'          'aviso-contexto'
-echo "ok: hooks cableados en $GSET (git-branch-guard, merge-squash-guard, confirmar-merge-develop, recordar-dashboard, secret-scan, rama-vieja, proteger-arbol, limite-gasto, delegacion-gate/registrar, rehidratar-hilo, aviso-contexto)"
+echo "ok: hooks cableados en $GSET (git-branch-guard, merge-squash-guard, confirmar-merge-develop, recordar-dashboard, secret-scan, rama-vieja, proteger-arbol, limite-gasto, delegacion-gate/registrar, rehidratar-hilo, aviso-contexto, aviso-drift-cerebro)"
 
 # ── (c) Skills genéricas del cerebro (cerrar-slice, orquestar-fanout, …) ──
 if [ -d "$SRC_SKILLS" ]; then
