@@ -229,7 +229,32 @@ if [[ "$SKIP_PLASMOID" -eq 0 ]]; then
     echo "==> Recargando plasmashell para aplicar los cambios (el panel parpadeará un momento)..."
     kquitapp6 plasmashell >/dev/null 2>&1 || true
     sleep 1
-    ( kstart plasmashell >/dev/null 2>&1 & ) 2>/dev/null || ( plasmashell >/dev/null 2>&1 & ) || true
+    # Relanzamiento ROBUSTO. El patrón viejo `( kstart … & ) || ( plasmashell … & )` tenía un bug:
+    # un subshell con `&` SIEMPRE regresa 0 (el backgrounding "triunfa" aunque el comando no exista)
+    # → si kstart faltaba, el fallback jamás corría y plasmashell quedaba MUERTO (bug real en
+    # CachyOS, 2026-07-18: el update cerró Plasma y no lo levantó). Ahora: candidato elegido con
+    # `command -v` explícito, detach real (setsid+nohup, stdin cerrado — sobrevive a `curl|bash`),
+    # y VERIFICACIÓN con pgrep + reintento directo + aviso ruidoso si aun así no levantó.
+    _kstart=""
+    for _c in kstart kstart6 kstart5; do
+      command -v "$_c" >/dev/null 2>&1 && { _kstart="$_c"; break; }
+    done
+    if [[ -n "$_kstart" ]]; then
+      ( setsid nohup "$_kstart" plasmashell >/dev/null 2>&1 </dev/null & ) || true
+    else
+      ( setsid nohup plasmashell >/dev/null 2>&1 </dev/null & ) || true
+    fi
+    for _i in 1 2 3 4 5; do sleep 1; pgrep -x plasmashell >/dev/null 2>&1 && break; done
+    if ! pgrep -x plasmashell >/dev/null 2>&1; then
+      echo "    (no levantó vía ${_kstart:-directo}; reintento lanzando plasmashell directo…)"
+      ( setsid nohup plasmashell >/dev/null 2>&1 </dev/null & ) || true
+      sleep 2
+    fi
+    if pgrep -x plasmashell >/dev/null 2>&1; then
+      echo "    plasmashell arriba de nuevo ✓"
+    else
+      echo "⚠️  plasmashell NO volvió a levantar — levántalo a mano:  kstart plasmashell   (o:  plasmashell & disown)"
+    fi
   else
     echo "==> Para ver los cambios, recarga plasmashell:  kquitapp6 plasmashell; kstart plasmashell"
     echo "    (o:  just reload-plasmashell  ·  o cierra sesión y vuelve a entrar en Wayland)"

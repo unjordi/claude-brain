@@ -36,11 +36,13 @@ uninstall:
 upgrade-plasmoid:
     kpackagetool6 -t Plasma/Applet -u {{PLASMOID_SRC}}
 
-# Restart plasmashell to pick up a plasmoid change
+# Restart plasmashell to pick up a plasmoid change (relanzamiento robusto: command -v explícito +
+# setsid/nohup + verificación — un `( kstart & )` pelón "triunfa" aunque kstart no exista)
 reload-plasmashell:
-    kquitapp6 plasmashell
+    kquitapp6 plasmashell || true
     sleep 1
-    (kstart plasmashell >/dev/null 2>&1 &)
+    sh -c 'if command -v kstart >/dev/null 2>&1; then setsid nohup kstart plasmashell >/dev/null 2>&1 </dev/null & else setsid nohup plasmashell >/dev/null 2>&1 </dev/null & fi'
+    sh -c 'sleep 2; pgrep -x plasmashell >/dev/null && echo "plasmashell arriba ✓" || echo "⚠️  no levantó — a mano: plasmashell & disown"'
 
 # Run the plasmoid standalone for debugging
 preview:
