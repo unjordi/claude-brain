@@ -24,6 +24,17 @@ default** y mata la redundancia de dónde vive el estado.
 - La lista de **TodoWrite** del harness es **scratch de sesión** — el backlog DURABLE es
   estado-proyecto.md. No confundas una con la otra.
 
+## PREREQUISITO: la sesión debe vivir DENTRO de un repo git
+El fan-out con worktrees aislados **exige que el cwd de la sesión sea un repo git** — Claude Code
+solo sabe crear worktrees vía git. Si lanzas un agente con `isolation: "worktree"` desde una sesión
+cuyo cwd NO es un repo, truena con:
+`Cannot create agent worktree: not in a git repository and no WorktreeCreate hooks are configured`
+(los hooks `WorktreeCreate`/`WorktreeRemove` que menciona el error son para OTROS VCS — no aplican aquí).
+**Regla práctica:** inicia la sesión EN el repo (además así carga sus hooks/`CLAUDE.md` — las sesiones
+se INICIAN en el repo, no se mudan a él, ver abajo). Si el trabajo es multi-repo, ancla la sesión en el
+repo principal y que los agentes creen sus worktrees con `git -C <ruta-del-repo> worktree add …`.
+(Caso real: CachyOS, 2026-07-20.)
+
 ## Regla dura de AISLAMIENTO (lo que evita que un agente te coma trabajo)
 **Todo agente que MUTE archivos o COMMITEE corre en un WORKTREE AISLADO, NUNCA en el árbol de trabajo
 COMPARTIDO/principal.** Spawnéalo con `isolation: "worktree"` (el Agent tool crea un worktree fresco) o
