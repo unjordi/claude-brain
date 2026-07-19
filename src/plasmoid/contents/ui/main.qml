@@ -881,9 +881,12 @@ PlasmoidItem {
     ]
 
     // ---------- Cerebro VIVO: estado real leído de ~/.claude ----------
-    // Espeja BrainInspector.swift. brainState = { present:[], wired:[], hasNorms, skills:[] } o null.
+    // Espeja BrainInspector.swift. brainState = { present:[], wired:[], hasNorms, skills:[], version } o null.
     property var brainState: null
     property string brainScannedAt: ""        // hora de la última lectura (hh:mm)
+    // Versión INSTALADA del brain: sello ~/.claude/.brain-version (lo estampa install-brain.sh, lo
+    // emite brain-scan.sh). "" si no hay sello (instalación vieja) → la UI no muestra versión.
+    readonly property string brainVersion: (brainState && brainState.version) ? ("" + brainState.version) : ""
     property string brainHeal: ""             // "", "running", "ok", "error" (estado del botón-curita)
     property string brainExpandedKey: ""      // "<tier>-<idx>" de la hoja expandida (solo una a la vez)
 
@@ -1780,6 +1783,15 @@ PlasmoidItem {
                             Layout.preferredHeight: Kirigami.Units.iconSizes.small
                         }
                         Kirigami.Heading { level: 3; text: "🧠 Cerebro global"; Layout.fillWidth: true }
+                        // Enlace discreto al MAPA del cerebro: docs/mapa-cerebro.md versionado en el
+                        // repo (GitHub). Abre el navegador del sistema (espeja mapaButton del Swift).
+                        PC3.ToolButton {
+                            text: "🗺 mapa"
+                            onClicked: Qt.openUrlExternally("https://github.com/unjordi/claude-brain/blob/main/docs/mapa-cerebro.md")
+                            PC3.ToolTip.text: "Abre el mapa del cerebro (docs/mapa-cerebro.md del repo) en tu navegador."
+                            PC3.ToolTip.visible: hovered
+                            PC3.ToolTip.delay: 500
+                        }
                     }
                     PC3.Label {
                         Layout.fillWidth: true; opacity: 0.6; wrapMode: Text.WordWrap
@@ -2040,6 +2052,13 @@ PlasmoidItem {
                           ? (health.allGood ? "Cerebro global completo y activo"
                                              : "Tu cerebro global está incompleto")
                           : "leyendo tu ~/.claude…"
+                }
+                // Versión INSTALADA del brain (sello .brain-version), discreta junto al veredicto.
+                PC3.Label {
+                    visible: root.brainVersion !== ""
+                    text: "· v" + root.brainVersion
+                    opacity: 0.5
+                    font.pointSize: Kirigami.Theme.smallFont.pointSize
                 }
                 PC3.Label {
                     visible: root.brainScannedAt !== ""

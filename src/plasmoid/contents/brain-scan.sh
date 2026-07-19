@@ -19,7 +19,7 @@ CLAUDE="$HOME/.claude"
 
 # ── scan: estado real de ~/.claude como JSON ──
 scan() {
-  local present="" wired="" skills="" hasNorms=false f b w x d
+  local present="" wired="" skills="" hasNorms=false version="" f b w x d
 
   # (1) hooks presentes: *.sh en ~/.claude/hooks (basename sin .sh)
   for f in "$CLAUDE"/hooks/*.sh; do
@@ -52,8 +52,14 @@ scan() {
     skills="$skills${skills:+,}\"$b\""
   done
 
-  printf '{"present":[%s],"wired":[%s],"hasNorms":%s,"skills":[%s]}\n' \
-    "$present" "$wired" "$hasNorms" "$skills"
+  # (5) versión instalada del brain: sello ~/.claude/.brain-version (lo estampa install-brain.sh).
+  # Fail-safe: ausente → "" (la UI no muestra versión). Sanitizada a charset semver (JSON seguro).
+  if [ -f "$CLAUDE/.brain-version" ]; then
+    version="$(tr -cd '0-9A-Za-z.+-' < "$CLAUDE/.brain-version" 2>/dev/null | head -c 32)"
+  fi
+
+  printf '{"present":[%s],"wired":[%s],"hasNorms":%s,"skills":[%s],"version":"%s"}\n' \
+    "$present" "$wired" "$hasNorms" "$skills" "$version"
 }
 
 # ── heal: corre install-brain.sh (idempotente) ──

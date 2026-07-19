@@ -115,6 +115,17 @@ if [ -d "$SRC_SKILLS" ]; then
   done
 fi
 
+# ── (c2) Sello de VERSIÓN del cerebro instalado ──
+# El widget (tab Cerebro de las 3 GUIs) lee ~/.claude/.brain-version — NO el repo — para mostrar
+# qué versión del brain quedó instalada en ESTA máquina. Se estampa copiando brain/VERSION.
+# Idempotente: re-correr simplemente re-estampa la versión actual.
+if [ -f "$SCRIPT_DIR/VERSION" ]; then
+  cp -f "$SCRIPT_DIR/VERSION" "$CLAUDE_DIR/.brain-version"
+  echo "ok: versión del cerebro estampada en $CLAUDE_DIR/.brain-version (v$(tr -d '[:space:]' < "$SCRIPT_DIR/VERSION"))"
+else
+  echo "warn: falta $SCRIPT_DIR/VERSION; no estampé .brain-version"
+fi
+
 # ── (d) Dashboard del cerebro en la memoria GLOBAL (slug del HOME) si falta ──
 HOME_SLUG="$(printf '%s' "$HOME" | sed 's/[^a-zA-Z0-9]/-/g')"
 DASH="$CLAUDE_DIR/projects/$HOME_SLUG/memory/dashboard_cerebro.md"
@@ -153,6 +164,6 @@ else
   echo "ok: normas globales del cerebro agregadas a $GCLAUDE"
 fi
 
-echo "listo: cerebro global instalado (hooks + cableado + skill + dashboard + normas)."
+echo "listo: cerebro global instalado (hooks + cableado + skill + sello de versión + dashboard + normas)."
 echo "       Los hooks repo-scoped (sesion-inicio, dod-verificar) viven en"
 echo "       brain/hooks/ como fuente: cópialos al .claude/ de cada repo (se cargan al INICIAR ahí)."

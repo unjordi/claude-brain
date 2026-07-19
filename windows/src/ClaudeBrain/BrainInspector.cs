@@ -26,6 +26,7 @@ public sealed class BrainState
     public bool HasNorms { get; set; }                      // ~/.claude/CLAUDE.md trae marcador/normas
     public HashSet<string> Skills { get; } = new();         // subcarpetas de ~/.claude/skills con SKILL.md
     public List<string> Extras { get; set; } = new();       // hooks cableados fuera del catálogo
+    public string? Version { get; set; }                    // sello ~/.claude/.brain-version; null si no está
     public DateTime ScannedAt { get; set; } = DateTime.Now;
 
     /// Los 8 hooks de tier global que instala install-brain.sh.
@@ -151,7 +152,21 @@ public static class BrainInspector
         }
         catch { /* fail-safe: sin skills */ }
 
-        // (5) Extras: hooks cableados que no reconocemos (ni global ni repo-scoped del catálogo)
+        // (5) Versión instalada del brain: sello ~/.claude/.brain-version (lo estampa
+        //     install-brain.sh copiando brain/VERSION). Fail-safe: ausente/vacío → null
+        //     (instalación previa al sello) y la UI simplemente no muestra versión.
+        try
+        {
+            string verFile = Path.Combine(claude, ".brain-version");
+            if (File.Exists(verFile))
+            {
+                string v = File.ReadAllText(verFile).Trim();
+                if (v.Length > 0) st.Version = v;
+            }
+        }
+        catch { /* fail-safe: sin versión */ }
+
+        // (6) Extras: hooks cableados que no reconocemos (ni global ni repo-scoped del catálogo)
         var known = new HashSet<string>(BrainState.KnownGlobalHooks);
         known.UnionWith(BrainState.KnownRepoHooks);
         st.Extras = st.WiredHooks.Where(h => !known.Contains(h)).OrderBy(h => h).ToList();

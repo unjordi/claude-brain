@@ -75,6 +75,8 @@ public sealed class PopupForm : Form
     // cada hoja (clave→rect de su fila) y el botón-curita. El hit-testing suma _cerebroScroll.
     private readonly List<(string key, Rectangle rect)> _leafHits = new();
     private Rectangle _healHit = Rectangle.Empty;
+    // Enlace "🗺 mapa" del encabezado del Cerebro: abre docs/mapa-cerebro.md del repo en el navegador.
+    private Rectangle _mapHit = Rectangle.Empty;
     // Banner de AUTOUPDATE (winturbo-style): zona clicable (coords lógicas pre-scroll) + timer de
     // respaldo que resetea el estado si el update no completó (p. ej. ff abortado → app sigue viva).
     private Rectangle _updateHit = Rectangle.Empty;
@@ -977,6 +979,7 @@ public sealed class PopupForm : Form
         // Recolectar de cero las zonas clicables de este paint (hit-testing).
         _leafHits.Clear();
         _healHit = Rectangle.Empty;
+        _mapHit = Rectangle.Empty;
         // Salvaguarda: si nunca se leyó el estado (p. ej. paint directo en tab 4), léelo ahora.
         _brainState ??= BrainInspector.Inspect();
 
@@ -992,6 +995,26 @@ public sealed class PopupForm : Form
         using (var h = Px(13.5f, FontStyle.Bold))
         using (var b = new SolidBrush(_fg))
             g.DrawString("Cerebro global", h, b, hx, y + Sc(1));
+
+        // Enlace discreto "🗺 mapa" (a la derecha del encabezado): abre docs/mapa-cerebro.md del repo
+        // en el navegador. Espejo de `mapaButton` en PopoverView.swift; pastilla tenue clicable.
+        using (var mapF = Px(9.5f, FontStyle.Bold))
+        using (var mapEmj = PxFont("Segoe UI Emoji", 9f, FontStyle.Regular))
+        {
+            const string mapLbl = "mapa";
+            int emjW = Sc(16), padX = Sc(7), btnH = Sc(20);
+            int lblW = (int)Math.Ceiling(g.MeasureString(mapLbl, mapF).Width);
+            int btnW = padX + emjW + lblW + padX;
+            var btnR = new Rectangle(right - btnW, y, btnW, btnH);
+            using (var bg = new SolidBrush(Blend(_bg, _fg, 0.06)))
+                FillRounded(g, bg, btnR, Sc(5));
+            using (var fgB = new SolidBrush(Blend(_bg, _fg, 0.7)))
+            {
+                g.DrawString("🗺", mapEmj, fgB, btnR.X + padX, btnR.Y + Sc(3));
+                g.DrawString(mapLbl, mapF, fgB, btnR.X + padX + emjW, btnR.Y + Sc(4));
+            }
+            _mapHit = btnR;   // zona clicable (coords lógicas pre-scroll)
+        }
         y += Sc(24);
 
         // Subtítulo tenue (envuelve a varias líneas).
@@ -1168,7 +1191,18 @@ public sealed class PopupForm : Form
         string msg = allGood ? "Cerebro global completo y activo" : "Tu cerebro global está incompleto";
         using (var tf = Px(10f, FontStyle.Bold))
         using (var tb = new SolidBrush(allGood ? _fg : _red))
+        {
             g.DrawString(msg, tf, tb, cx + Sc(20), cy);
+            // Versión INSTALADA del brain (sello ~/.claude/.brain-version que estampa
+            // install-brain.sh), discreta junto al veredicto. Sin sello → no aparece.
+            if (!string.IsNullOrEmpty(st.Version))
+            {
+                int msgW = (int)Math.Ceiling(g.MeasureString(msg, tf).Width);
+                using var vf = Px(8.5f, FontStyle.Regular);
+                using var vb = new SolidBrush(Blend(_bg, _fg, 0.5));
+                g.DrawString("· v" + st.Version, vf, vb, cx + Sc(20) + msgW, cy + Sc(2));
+            }
+        }
         using (var clf = Px(8.5f, FontStyle.Regular))
         using (var clb = new SolidBrush(Blend(_bg, _fg, 0.4)))
         {
@@ -1463,6 +1497,7 @@ public sealed class PopupForm : Form
         int ly = e.Y + _cerebroScroll;   // el paint aplica TranslateTransform(0, -_cerebroScroll)
         if (!_updateHit.IsEmpty && _updateHit.Contains(e.X, ly)) { StartUpdate(); return; }
         if (!_healing && !_healHit.IsEmpty && _healHit.Contains(e.X, ly)) { StartHeal(); return; }
+        if (!_mapHit.IsEmpty && _mapHit.Contains(e.X, ly)) { OpenBrainMap(); return; }
         foreach (var (key, rect) in _leafHits)
             if (rect.Contains(e.X, ly))
             {
@@ -1470,6 +1505,21 @@ public sealed class PopupForm : Form
                 _content.Invalidate();
                 return;
             }
+    }
+
+    /// Abre el MAPA del cerebro (docs/mapa-cerebro.md versionado en el repo) en el navegador por
+    /// defecto. UseShellExecute=true delega en la asociación de URLs del sistema; fail-safe.
+    private static void OpenBrainMap()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "https://github.com/unjordi/claude-brain/blob/main/docs/mapa-cerebro.md",
+                UseShellExecute = true,
+            });
+        }
+        catch { /* sin navegador/asociación → no rompe el widget */ }
     }
 
     /// Hover en la pestaña Chats: la fila bajo el cursor pone su resumen en el pie (o lo limpia).

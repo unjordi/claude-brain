@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The click-to-open breakdown, hosted in an NSPopover. Mirrors the plasmoid's
@@ -902,6 +903,8 @@ struct PopoverView: View {
                     .foregroundStyle(accent)
                 Text("🧠 Cerebro global")
                     .font(.headline)
+                Spacer(minLength: 0)
+                mapaButton
             }
             Text("Guardarraíles + gobernanza + normas de Claude Code. Viaja por git, aplica en toda máquina. De más duro (arriba) a más leve (abajo). Toca una pieza para ver su evento y un ejemplo.")
                 .font(.caption2)
@@ -928,6 +931,26 @@ struct PopoverView: View {
         .padding(16)
         .onAppear { brainState = BrainInspector.inspect() }
         .task { await updater.checkIfStale() }
+    }
+
+    /// Enlace discreto al MAPA del cerebro: docs/mapa-cerebro.md versionado en el repo (GitHub).
+    /// Abre el navegador con NSWorkspace; misma pastilla tenue que los toggles del widget.
+    private var mapaButton: some View {
+        Button(action: {
+            if let url = URL(string: "https://github.com/unjordi/claude-brain/blob/main/docs/mapa-cerebro.md") {
+                NSWorkspace.shared.open(url)
+            }
+        }) {
+            HStack(spacing: 3) {
+                Text("🗺").font(.system(size: 10))
+                Text("mapa").font(.caption2).fontWeight(.semibold)
+            }
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 5).fill(label.opacity(0.06)))
+            .foregroundStyle(label.opacity(0.7))
+        }
+        .buttonStyle(.plain)
+        .help("Abre el mapa del cerebro (docs/mapa-cerebro.md del repo) en tu navegador.")
     }
 
     /// Banner de AUTOUPDATE (winturbo-style): solo aparece si el repo avanzó respecto al build actual.
@@ -979,6 +1002,13 @@ struct PopoverView: View {
                     Text(allGood ? "Cerebro global completo y activo"
                                  : "Tu cerebro global está incompleto")
                         .font(.caption).fontWeight(.semibold)
+                    // Versión INSTALADA del brain (sello ~/.claude/.brain-version, lo estampa
+                    // install-brain.sh). Discreta; si no hay sello (instalación vieja) no aparece.
+                    if let v = st.version {
+                        Text("· v\(v)")
+                            .font(.caption2)
+                            .foregroundStyle(label.opacity(0.5))
+                    }
                     Spacer(minLength: 0)
                     Text("leído \(Fmt.clock(st.scannedAt))")
                         .font(.system(size: 9)).foregroundStyle(label.opacity(0.4))

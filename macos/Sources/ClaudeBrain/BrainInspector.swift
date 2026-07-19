@@ -44,6 +44,7 @@ struct BrainState {
     var hasNorms: Bool = false            // ~/.claude/CLAUDE.md trae el marcador BEGIN claude-brain
     var skills: Set<String> = []          // subcarpetas de ~/.claude/skills con SKILL.md
     var extras: [String] = []             // hooks cableados que no están en el catálogo conocido
+    var version: String? = nil            // sello de ~/.claude/.brain-version (install-brain.sh); nil si no está
     var scannedAt: Date = Date()
 
     /// Los 5 hooks de tier global que instala install-brain.sh.
@@ -129,7 +130,16 @@ enum BrainInspector {
             }
         }
 
-        // (5) Extras: hooks cableados que no reconocemos (ni global ni repo-scoped del catálogo)
+        // (5) Versión instalada: sello ~/.claude/.brain-version (lo estampa install-brain.sh copiando
+        //     brain/VERSION). Fail-safe: ausente/vacío → nil (instalación previa al sello) y la UI
+        //     simplemente no muestra versión.
+        let versionFile = claude.appendingPathComponent(".brain-version")
+        if let raw = try? String(contentsOf: versionFile, encoding: .utf8) {
+            let v = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !v.isEmpty { st.version = v }
+        }
+
+        // (6) Extras: hooks cableados que no reconocemos (ni global ni repo-scoped del catálogo)
         let known = BrainState.knownGlobalHooks.union(BrainState.knownRepoHooks)
         st.extras = st.wiredHooks.subtracting(known).sorted()
 
