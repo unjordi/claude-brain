@@ -631,6 +631,67 @@ printf '%s' "$(ad)" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null 
   && ok "aviso-drift: con drift NO cachea — re-avisa en la siguiente sesión" || bad "aviso-drift: cacheó un chequeo CON drift (se calló)"
 rm -rf "$ADFIX"
 
+# ── (b5c) aviso-drift v2: AUTO-APPLY en la mini-develop (Develop<Usuario>) · aviso en ramita ──
+AD2FIX="$(mktemp -d "${TMPDIR:-/tmp}/brain-ad2.XXXXXX")"
+AD2REPO="$AD2FIX/repo"; AD2HOME="$AD2FIX/home"; AD2BRAIN="$AD2FIX/clon"
+mkdir -p "$AD2REPO/.claude/hooks" "$AD2HOME" "$AD2BRAIN/brain"
+git -C "$AD2REPO" init -q >/dev/null 2>&1
+git -C "$AD2REPO" config user.email t@t >/dev/null 2>&1; git -C "$AD2REPO" config user.name Tester >/dev/null 2>&1
+: > "$AD2REPO/.claude/hooks/.brain-version"
+git -C "$AD2REPO" add -A >/dev/null 2>&1; git -C "$AD2REPO" commit -qm base >/dev/null 2>&1
+# stub del sync: dry-run reporta drift; con --apply ESCRIBE el hook nuevo en el repo destino
+cat > "$AD2BRAIN/brain/sincronizar-cerebro.sh" <<'STUB'
+#!/usr/bin/env bash
+repo="$1"
+[ "${2:-}" = "--apply" ] && printf 'x\n' > "$repo/.claude/hooks/hook-nuevo.sh"
+echo "  NUEVO      hook-nuevo.sh (hook)"
+echo "==> resumen: 1 nuevos · 0 a actualizar · 8 ya al día · 7 hooks cableados (kind=hook)"
+STUB
+ad2() { printf '%s' '{"source":"startup"}' | HOME="$AD2HOME" CLAUDE_BRAIN_DIR="$AD2BRAIN" CLAUDE_PROJECT_DIR="$AD2REPO" bash "$HOOKS/aviso-drift-cerebro.sh"; }
+# (1) en una RAMITA (no mini): NO auto-aplica — avisa y no crea commits
+git -C "$AD2REPO" checkout -q -b feat/x >/dev/null 2>&1
+n0=$(git -C "$AD2REPO" rev-list --count HEAD)
+printf '%s' "$(ad2)" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'DRIFT DEL CEREBRO' \
+  && ok "aviso-drift v2: en ramita → AVISA (no auto-aplica)" || bad "aviso-drift v2: en ramita no avisó"
+{ [ "$(git -C "$AD2REPO" rev-list --count HEAD)" = "$n0" ] && [ ! -f "$AD2REPO/.claude/hooks/hook-nuevo.sh" ]; } \
+  && ok "aviso-drift v2: en ramita NO tocó el árbol ni commiteó" || bad "aviso-drift v2: ¡escribió/commiteó en una ramita de feature!"
+# (2) en la MINI-DEVELOP con .claude/ limpio: auto-aplica + commit (push sin remoto → tolerado)
+git -C "$AD2REPO" checkout -q -b DevelopTester >/dev/null 2>&1
+ad2out="$(ad2)"
+printf '%s' "$ad2out" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'AUTO-SINCRONIZADO' \
+  && ok "aviso-drift v2: en mini-develop limpia → AUTO-SINCRONIZA y lo anuncia" || bad "aviso-drift v2: no auto-sincronizó en la mini; got: $ad2out"
+{ [ -f "$AD2REPO/.claude/hooks/hook-nuevo.sh" ] && git -C "$AD2REPO" log -1 --format=%s | grep -q 'auto-sync'; } \
+  && ok "aviso-drift v2: el apply escribió y el commit de auto-sync existe" || bad "aviso-drift v2: falta el archivo aplicado o el commit"
+[ -z "$(git -C "$AD2REPO" status --porcelain)" ] \
+  && ok "aviso-drift v2: el árbol quedó LIMPIO tras el auto-sync (todo commiteado)" || bad "aviso-drift v2: dejó el árbol sucio"
+# (3) en la mini pero con .claude/ SUCIO: no auto-aplica (solo avisa, no mezcla cambios)
+printf 'sucio\n' >> "$AD2REPO/.claude/hooks/.brain-version"
+printf '%s' "$(ad2)" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'DRIFT DEL CEREBRO' \
+  && ok "aviso-drift v2: mini con .claude/ sucio → solo avisa (no mezcla cambios)" || bad "aviso-drift v2: auto-aplicó sobre un .claude/ sucio"
+rm -rf "$AD2FIX"
+
+# ── (b5d) sembrar-mini-develop: crea la rama desde origin/develop sin tocar el worktree ──
+SMFIX="$(mktemp -d "${TMPDIR:-/tmp}/brain-sm.XXXXXX")"
+SMBARE="$SMFIX/remoto.git"; SMREPO="$SMFIX/clon"
+git init -q --bare "$SMBARE" >/dev/null 2>&1
+git clone -q "$SMBARE" "$SMREPO" >/dev/null 2>&1
+git -C "$SMREPO" config user.email t@t >/dev/null 2>&1; git -C "$SMREPO" config user.name Tester >/dev/null 2>&1
+printf 'base\n' > "$SMREPO/a.txt"; git -C "$SMREPO" add a.txt >/dev/null 2>&1; git -C "$SMREPO" commit -qm base >/dev/null 2>&1
+git -C "$SMREPO" branch -M develop >/dev/null 2>&1; git -C "$SMREPO" push -qu origin develop >/dev/null 2>&1
+git -C "$SMREPO" checkout -q -b feat/trabajo >/dev/null 2>&1   # parado en una ramita (no debe moverse)
+smout=$(CLAUDE_PROJECT_DIR="$SMREPO" bash "$SCRIPT_DIR/sembrar-mini-develop.sh" 2>&1)
+git -C "$SMREPO" ls-remote --exit-code origin DevelopTester >/dev/null 2>&1 \
+  && ok "sembrar-mini: creó DevelopTester en el remoto desde origin/develop (nombre derivado del git user)" \
+  || bad "sembrar-mini: no creó la rama remota; out: $smout"
+[ "$(git -C "$SMREPO" rev-parse --abbrev-ref HEAD)" = "feat/trabajo" ] \
+  && ok "sembrar-mini: NO movió la rama actual del worktree" || bad "sembrar-mini: cambió la rama del usuario"
+smout2=$(CLAUDE_PROJECT_DIR="$SMREPO" bash "$SCRIPT_DIR/sembrar-mini-develop.sh" 2>&1)
+printf '%s' "$smout2" | grep -q "ya existe" && ok "sembrar-mini: idempotente (2ª corrida no duplica)" || bad "sembrar-mini: la 2ª corrida no fue idempotente; out: $smout2"
+smout3=$(CLAUDE_PROJECT_DIR="$SMREPO" bash "$SCRIPT_DIR/sembrar-mini-develop.sh" develop 2>&1) && rc3=0 || rc3=$?
+{ [ "$rc3" -ne 0 ] && printf '%s' "$smout3" | grep -q "rama base"; } \
+  && ok "sembrar-mini: rechaza 'develop' como nombre de mini (protege las bases)" || bad "sembrar-mini: aceptó develop como mini"
+rm -rf "$SMFIX"
+
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "== (b6) aviso-contexto: avisa al cruzar banda, debounce, y se resetea con el baseline (compact) =="

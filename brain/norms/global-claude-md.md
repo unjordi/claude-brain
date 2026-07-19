@@ -205,11 +205,22 @@ Enforced por: ramas protegidas server-side + los hooks `git-branch-guard`, `merg
 > cae en el clasificador auto-mode genérico → más fricción en git (merge/borrado/config). Al tocar un repo
 > así: siémbrale `develop` + los hooks del template, o documenta qué acciones esperar bloqueadas ahí.
 
-## Modelo MINI-DEVELOP (iterar sin fricción)
-Para trabajar horas/días sin pedir permiso a cada paso: mergea las ramitas de feature **con `git merge`
-LOCAL** a una rama de INTEGRACIÓN de larga vida (`integracion/<sprint>` o `epic/<tema>`) — ahí rompes y
-arreglas a gusto, reconstruyes, sin fricción. El `git merge` local NO pasa por ningún candado. El ÚNICO
-cruce que exige tu confirmación expresa es integrar esa rama a `develop`/`main` por MR/PR.
+## Modelo MINI-DEVELOP (iterar sin fricción — INSTITUCIONAL en repos compartidos)
+El día a día de cada dev vive en su **rama personal de integración** — su "mini-develop", convención
+**`Develop<Usuario>`** (p. ej. `DevelopAna`) — sacada de `develop`. Ahí se itera horas/días SIN pedir
+permiso a cada paso: las ramitas de feature se mergean a TU mini con **`git merge` LOCAL** o MR con
+auto-merge (ninguno pasa por candado), rompes/arreglas/reconstruyes a gusto. El ÚNICO cruce que exige
+confirmación expresa del usuario es integrar la mini (o cualquier rama) a `develop`/`main` por MR/PR
+— `develop` es integración COORDINADA, `main` es release.
+- **Sembrado self-service**: cada dev crea la suya UNA vez por repo con `sembrar-mini-develop.sh`
+  (script del cerebro): la crea desde `origin/develop`, la pushea y en GitLab la **protege server-side**
+  (push/merge=Developer, no borrable por accidente — una mini-develop borrada ya costó trabajo real).
+  Nadie siembra la mini de otro: se crean solas cuando cada quien empieza a trabajar.
+- Las ramas temáticas de integración (`integracion/<sprint>`, `epic/<tema>`) siguen valiendo como
+  "minis de tema" con las mismas libertades.
+- **Tu mini es también donde el cerebro se auto-cura**: el hook `aviso-drift-cerebro`, al abrir sesión
+  parado en tu mini-develop con `.claude/` limpio, sincroniza la copia por-repo del cerebro SOLO
+  (apply+commit+push a tu mini) — llega a `develop` con tu siguiente integración coordinada.
 
 ## Consentimiento de costo de delegación (norma dura)
 Reclutar un agente (Task/subagente) cuesta según su nivel: **gratis** (local), **incluido** (Claude
