@@ -56,6 +56,32 @@ if [ "$total" -eq 0 ]; then
 fi
 
 detalle=$(printf '%s\n' "$out" | grep -E '(NUEVO|ACTUALIZA|RETIRARÍA)' | sed 's/^[[:space:]]*/    /' | head -12)
+
+# ── AUTO-APPLY en TU mini-develop (v2 — con el modelo MINI-DEVELOP institucionalizado): si la sesión
+# abre parada EN una mini-develop (convención Develop<Usuario>) y .claude/ está LIMPIO, el cerebro se
+# actualiza SOLO: apply + commit + push a tu mini (permitido: es tu rama personal; el cambio llega a
+# develop con tu siguiente integración coordinada). En cualquier otra rama, o con .claude/ sucio, o si
+# cualquier paso falla → cae al AVISO de abajo (fail-safe: nunca ensucia una ramita de feature).
+cur=$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+case "$cur" in
+  Develop?*)
+    if [ -z "$(git -C "$ROOT" status --porcelain -- .claude/ 2>/dev/null)" ] \
+       && bash "$SYNC" "$ROOT" --apply >/dev/null 2>&1 \
+       && git -C "$ROOT" add .claude/hooks >/dev/null 2>&1 \
+       && git -C "$ROOT" commit -q -m "chore(cerebro): auto-sync de la copia por-repo (aviso-drift, $total archivo(s) al día)" >/dev/null 2>&1; then
+      git -C "$ROOT" push -q origin "$cur" >/dev/null 2>&1 || true
+      sha=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo "?")
+      ctx="🧬✅ CEREBRO AUTO-SINCRONIZADO en tu mini-develop ($cur, commit $sha): la copia por-repo estaba $total archivo(s) atrás y se puso al día SOLA (apply+commit+push). Llegará al develop compartido con tu próxima integración coordinada. Qué cambió:
+$detalle"
+      if command -v jq >/dev/null 2>&1; then
+        jq -n --arg c "$ctx" '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:$c}}'
+      else
+        printf '%s\n' "$ctx"
+      fi
+      exit 0
+    fi;;
+esac
+
 ctx="🧠⚠️ DRIFT DEL CEREBRO POR-REPO: la copia en .claude/hooks/ de ESTE repo está ATRÁS de la fuente única del cerebro ($total archivo(s)):
 $detalle
 Qué hacer: PROPÓN al usuario propagar por el flujo — worktree/ramita desde develop → \`bash $SYNC <worktree> --apply\` → commit → MR a develop. NO edites .claude/hooks/ directo en el árbol de trabajo (en repos compartidos viaja por git y se mezclaría a commits de feature). Nota: en ESTA máquina la copia GLOBAL ya manda (dedupe), pero el drift por-repo afecta a colegas y clones sin bootstrap."
