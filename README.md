@@ -20,7 +20,7 @@ Un `install-brain.sh` y tu máquina queda con el candado puesto. Idempotente y a
 
 |  |  |  |  |
 |:--|:--|:--|:--|
-| **13** · hooks globales | **2** · hooks por-repo | **206** · pruebas verdes | **3** · plataformas |
+| **13** · hooks globales | **2** · hooks por-repo | **207** · pruebas verdes | **3** · plataformas |
 
 > El cerebro **no es propietario**: no trae skills de proyecto (ni .NET, ni repos de empresa) — solo
 > hooks agnósticos, normas y una skill genérica `cerrar-slice` que cualquier proyecto puede adoptar.
@@ -66,6 +66,7 @@ Puerta por OS: **Linux/KDE** → `./install.sh` · **macOS** → [`macos/`](maco
 
 El cerebro se ordena por *dureza*: arriba lo que te **bloquea** sin negociar; abajo lo que apenas
 **sugiere**. Cada pieza sabe qué evento la dispara. Esta es, tal cual, la pestaña “Cerebro” del widget.
+📍 **Versión navegable** (flowcharts por capa, renderizados aquí mismo): [`docs/mapa-cerebro.md`](docs/mapa-cerebro.md).
 
 > **¿Por qué unos bloquean y otros no?** Es cosa del *mecanismo*, no del tema. Un **hook** es un script
 > que el CLI corre SOLO, en un evento, **fuera de tu turno** → por eso puede **denegar** una acción (un
@@ -110,12 +111,13 @@ El cerebro se ordena por *dureza*: arriba lo que te **bloquea** sin negociar; ab
 ├─ 💾 checkpoint               vuelca el HILO a memoria para compactar sin perderlo (proactivo)
 ├─ 💧 rehidratar-hilo          relee el HILO a mano (gemelo del hook; respaldo si un update del CLI rompe el auto-rehidratado)
 ├─ 🧵 orquestar-fanout         fan-out sin niñera: asigna del backlog, auto-reporta y limpia al cerrar
+├─ 🗺️ diagramar                diagramas por destino: .dot→dot2yed→yEd (editar a mano) · Mermaid en .md versionado (verse en GitHub)
 └─ 🌙 turno-nocturno           protocolo del turno de noche: eco del contrato, decide-dentro-de-la-cerca, grants durables a disco
 ```
 
 Los hooks **por-repo** son fuente en [`brain/hooks/`](brain/hooks/) que cada repo copia a su propio
 `.claude/` y cablea en su `settings.json` — se cargan solo cuando una sesión *inicia* en ese repo. El
-cerebro **se autoprueba**: [`brain/test-brain.sh`](brain/test-brain.sh) corre 206 checks contra un
+cerebro **se autoprueba**: [`brain/test-brain.sh`](brain/test-brain.sh) corre 207 checks contra un
 `$HOME` aislado, y la CI repite `bash -n` + `jq empty` + `shellcheck` en cada push. Tras un fan-out,
 el helper [`limpiar-worktrees.sh`](brain/hooks/limpiar-worktrees.sh) barre los worktrees de ramas ya
 mergeadas y deja anotado en la bitácora el pendiente de los que sigan vivos.
