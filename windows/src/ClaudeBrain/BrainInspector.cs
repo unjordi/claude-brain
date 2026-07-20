@@ -29,18 +29,22 @@ public sealed class BrainState
     public string? Version { get; set; }                    // sello ~/.claude/.brain-version; null si no está
     public DateTime ScannedAt { get; set; } = DateTime.Now;
 
-    /// Los 8 hooks de tier global que instala install-brain.sh.
+    /// Hooks de tier {global, both} (kind=hook) que install-brain.sh cablea en el ~/.claude global.
+    /// DEBE coincidir con brain/hooks/MANIFEST {global,both}; lo verifica el drift-check del widget
+    /// (test-brain.sh, chequeo e-widget). Al agregar/mover un hook en el MANIFEST, refleja aquí.
     public static readonly HashSet<string> KnownGlobalHooks = new()
     {
-        "git-branch-guard", "merge-squash-guard", "recordar-dashboard",
-        "secret-scan", "rama-vieja", "limite-gasto",
-        "delegacion-gate", "delegacion-registrar",
+        "git-branch-guard", "merge-squash-guard", "confirmar-merge-develop",
+        "recordar-dashboard", "secret-scan", "rama-vieja", "proteger-arbol",
+        "limite-gasto", "delegacion-gate", "delegacion-registrar", "delegacion-reporte",
+        "rehidratar-hilo", "aviso-contexto", "aviso-drift-cerebro",
     };
 
-    /// Los hooks repo-scoped (fuente en brain/hooks, no globales) — pueden aparecer cableados en un repo.
+    /// Hooks de tier repo (kind=hook): viajan por-repo, se cargan si la sesión INICIA en el repo.
+    /// DEBE coincidir con brain/hooks/MANIFEST {repo} (lo verifica test-brain.sh).
     public static readonly HashSet<string> KnownRepoHooks = new()
     {
-        "sesion-inicio", "dod-verificar", "confirmar-merge-develop",
+        "sesion-inicio", "dod-verificar",
     };
 
     /// Estado real de una pieza (por nombre) contra la evidencia leída. Espejo de `status(_:_:)` de Swift.
@@ -54,7 +58,8 @@ public sealed class BrainState
         if (KnownRepoHooks.Contains(name)) return BrainStatus.RepoScoped;
         return name switch
         {
-            "cerrar-slice" => Skills.Contains("cerrar-slice") ? BrainStatus.Installed : BrainStatus.Absent,
+            "cerrar-slice" or "checkpoint" or "diagramar" or "orquestar-fanout" or "turno-nocturno"
+                => Skills.Contains(name) ? BrainStatus.Installed : BrainStatus.Absent,
             "Definition of Done" or "Doc <= realidad" or "Flujo de git" or "Costo de delegación"
                 => HasNorms ? BrainStatus.Installed : BrainStatus.Absent,
             _ => BrainStatus.Absent,

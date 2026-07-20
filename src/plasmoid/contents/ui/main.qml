@@ -845,7 +845,22 @@ PlasmoidItem {
                   detail: "Antes de un push, si la ramita está muchos commits detrás de origin/develop (base vieja → el MR trae ruido/conflictos), avisa —no bloquea— y sugiere rebasar. Umbral configurable (RAMA_VIEJA_UMBRAL, def 40)." },
                 { emoji: "📝", name: "delegacion-registrar",      desc: "registra el consentimiento (materializa el “pregunta 1×”)",
                   event: "PostToolUse · Task",
-                  detail: "Tras un consentimiento aprobado lo registra para no volver a preguntar (1× por máquina o por workflow, según el nivel de costo). Materializa el 'pregunta una sola vez'." }
+                  detail: "Tras un consentimiento aprobado lo registra para no volver a preguntar (1× por máquina o por workflow, según el nivel de costo). Materializa el 'pregunta una sola vez'." },
+                { emoji: "📮", name: "delegacion-reporte",        desc: "un agente de fan-out terminó → recuerda bitácora + estado, sin niñera",
+                  event: "PostToolUse · Task",
+                  detail: "Cuando un subagente (Task) termina, recuerda al orquestador registrar su avance sin niñera: appendar una línea a bitacora.md (append-only, parallel-safe), cerrar el ítem en estado-proyecto.md y limpiar su worktree. No bloquea." },
+                { emoji: "🧵", name: "rehidratar-hilo",           desc: "al retomar/tras compactar reinyecta el hilo mental de la tarea",
+                  event: "SessionStart",
+                  detail: "Al abrir/retomar sesión o tras compactar, relee .claude/memory/hilo-mental-actual.md y lo reinyecta por additionalContext (canal fiable de SessionStart). Es la mitad 'leer' del par con el skill checkpoint (la mitad 'escribir'). Silencioso si el archivo no existe." },
+                { emoji: "♻️", name: "aviso-drift-cerebro",       desc: "la copia del cerebro por-repo quedó atrás de la fuente → aviso",
+                  event: "SessionStart",
+                  detail: "Al iniciar sesión en un repo con el cerebro por-repo instalado, compara esa copia contra la fuente única (sincronizar-cerebro.sh en dry-run, diff por contenido) y, si quedó atrás, avisa para que Claude proponga propagar por el flujo (ramita→MR). No escribe al árbol en repos compartidos. Throttle 6h si salió limpio." },
+                { emoji: "⏳", name: "aviso-contexto",            desc: "el contexto se está llenando → ordena checkpoint y propón /compact",
+                  event: "PostToolUse",
+                  detail: "Vigila cuánto creció el contexto desde el último /compact y, al cruzar bandas por debajo del auto-compact, inyecta un aviso escalado (heads-up → checkpoint ahora → inminente) para volcar el hilo con checkpoint y compactar proactivamente. Convierte el auto-compact-sorpresa en caso raro." },
+                { emoji: "🌳", name: "proteger-arbol",            desc: "git destructivo que orfanaría commits sin pushear → aviso (no bloquea)",
+                  event: "PreToolUse · Bash",
+                  detail: "Antes de un git destructivo (reset --hard, rebase, checkout -f, branch -D) que podría orfanar commits sin pushear en el árbol de trabajo, avisa —no bloquea. Antídoto a un caso real: un agente de fan-out reseteó HEAD en el árbol compartido y dejó huérfano un commit del orquestador." }
             ]
         },
         {
@@ -870,9 +885,21 @@ PlasmoidItem {
             emoji: "💡", title: "Skills", color: "#3aa76d",
             subtitle: "herramientas opt-in — las invocas tú",
             items: [
+                { emoji: "💾", name: "checkpoint", desc: "vuelca el hilo mental a disco para compactar sin perderlo",
+                  event: "skill · opt-in",
+                  detail: "Vuelca lo efímero del chat (el hilo: qué haces ahora, la decisión abierta, el siguiente paso) a hilo-mental-actual.md, para poder compactar cuanto quieras sin perder el hilo. Es la mitad 'escribir' del par con el hook rehidratar-hilo (la mitad 'leer'). Córrelo antes de un /compact o en una pausa natural." },
                 { emoji: "📦", name: "cerrar-slice", desc: "build+tests+memoria al día + MR con resumen curado por slice",
                   event: "skill · opt-in",
-                  detail: "Ritual de cierre de un slice: build+tests verdes, memoria al día (bitácora), MR con resumen curado en prosa, y el Paso 5 de cosechar lo genérico de vuelta al cerebro global." }
+                  detail: "Ritual de cierre de un slice: build+tests verdes, memoria al día (bitácora), MR con resumen curado en prosa, y el Paso 5 de cosechar lo genérico de vuelta al cerebro global." },
+                { emoji: "📐", name: "diagramar", desc: "diagrama según su DESTINO: yEd editable (.dot→graphml) o Mermaid versionado",
+                  event: "skill · opt-in",
+                  detail: "Produce un diagrama eligiendo el flujo según su destino: para EDITAR a mano, modela en .dot (Graphviz) → .graphml de yEd; para VERSE en GitHub/docs, Mermaid en un .md versionado. Regla dura: un diagrama entregable nunca queda solo como artefacto local gitignorado ni widget efímero del chat." },
+                { emoji: "🐝", name: "orquestar-fanout", desc: "fan-out de agentes sin niñera (estado en 2 archivos + contrato de reporte)",
+                  event: "skill · opt-in",
+                  detail: "Orquestar trabajo paralelizable en varios agentes SIN niñera: asigna ítems autocontenidos del backlog y, al terminar cada agente, su avance queda registrado (bitácora) y su worktree limpio automáticamente. Modelo de estado sin redundancia: estado-proyecto = backlog vivo, bitácora = pasado append-only." },
+                { emoji: "🌙", name: "turno-nocturno", desc: "Claude trabaja solo de noche: contrato medible, decide-o-parquea, checkpoint c/2h",
+                  event: "skill · opt-in",
+                  detail: "Protocolo para dejar a Claude trabajando SOLO de noche: eco del contrato antes de empezar (alcance, criterio de cierre MEDIBLE, lo intocable, dónde queda visible el resultado), preflight de herramientas/quota, regla de decisión (dentro del alcance decide y sigue; fuera, parquea y brinca), autorización durable a disco y checkpoint cada ~2h." }
             ]
         }
     ]
@@ -888,8 +915,9 @@ PlasmoidItem {
     property string brainExpandedKey: ""      // "<tier>-<idx>" de la hoja expandida (solo una a la vez)
 
     // Catálogo conocido (mismos conjuntos que BrainState.knownGlobalHooks / knownRepoHooks del Swift).
-    readonly property var brainGlobalHooks: ["git-branch-guard","merge-squash-guard","recordar-dashboard","secret-scan","rama-vieja","limite-gasto","delegacion-gate","delegacion-registrar"]
-    readonly property var brainRepoHooks:   ["sesion-inicio","dod-verificar","confirmar-merge-develop"]
+    // DEBE coincidir con brain/hooks/MANIFEST; lo verifica el drift-check del widget (test-brain.sh).
+    readonly property var brainGlobalHooks: ["git-branch-guard","merge-squash-guard","confirmar-merge-develop","recordar-dashboard","secret-scan","rama-vieja","proteger-arbol","limite-gasto","delegacion-gate","delegacion-registrar","delegacion-reporte","rehidratar-hilo","aviso-contexto","aviso-drift-cerebro"]
+    readonly property var brainRepoHooks:   ["sesion-inicio","dod-verificar"]
 
     // Ruta del helper bash, resuelta relativa a este main.qml (…/contents/ui/ → …/contents/brain-scan.sh).
     readonly property string brainScript: {
@@ -971,7 +999,8 @@ PlasmoidItem {
             return p && w ? "installed" : (p ? "presentNotWired" : "absent")
         }
         if (inArr(root.brainRepoHooks, name)) return "repoScoped"
-        if (name === "cerrar-slice") return inArr(st.skills, "cerrar-slice") ? "installed" : "absent"
+        if (["cerrar-slice","checkpoint","diagramar","orquestar-fanout","turno-nocturno"].indexOf(name) !== -1)
+            return inArr(st.skills, name) ? "installed" : "absent"
         if (name === "Definition of Done" || name === "Doc <= realidad"
             || name === "Flujo de git" || name === "Costo de delegación")
             return st.hasNorms ? "installed" : "absent"

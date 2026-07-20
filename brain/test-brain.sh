@@ -929,6 +929,58 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
+echo "== (e3) drift-check WIDGET: el catálogo curado del widget coincide con el MANIFEST + skills (antídoto al que un hook nuevo caiga en OTROS y a una skill sin tile) =="
+# El widget (Windows/C#, macOS/Swift, plasmoid/QML) trae un catálogo CURADO de piezas del cerebro:
+#   (1) los conjuntos known-global / known-repo que clasifican cada hook (si un hook NO está aquí,
+#       cae en la sección "OTROS" → drift real que ya nos mordió), y
+#   (2) los tiles de display (uno por hook/skill). Esta 3ª lista quedaba FUERA del drift-check e2.
+# Invariante: known-global == MANIFEST{global,both}·hook · known-repo == MANIFEST{repo}·hook ·
+#             y todo hook del MANIFEST + toda skill de brain/skills tiene un tile en el archivo de display.
+ROOT="$SCRIPT_DIR/.."
+if [ ! -f "$MF" ]; then
+  bad "drift-widget: falta el MANIFEST"
+else
+  mf_global=$(awk '$1!~/^#/ && NF>=3 && ($2=="global"||$2=="both") && $3=="hook"{print $1}' "$MF" | sort -u)
+  mf_repo=$(awk '$1!~/^#/ && NF>=3 && $2=="repo" && $3=="hook"{print $1}' "$MF" | sort -u)
+  mf_hooks=$(printf '%s\n%s\n' "$mf_global" "$mf_repo" | grep -v '^$' | sort -u)
+  wskills=$(for d in "$SCRIPT_DIR"/skills/*/; do [ -f "${d}SKILL.md" ] && basename "$d"; done | sort -u)
+  # quoted tokens con al menos un guion (todos los hooks lo tienen → no captura keywords ni comentarios)
+  qtok() { grep -oE '"[a-z][a-z0-9]*(-[a-z0-9]+)+"' | tr -d '"' | sort -u; }
+  cmp_set() {  # label  what  got  want
+    if [ "$3" = "$4" ]; then ok "drift-widget[$1]: $2 == MANIFEST"
+    else bad "drift-widget[$1]: $2 DIFIERE de MANIFEST · sobran/faltan: $(comm -3 <(printf '%s\n' "$3") <(printf '%s\n' "$4") | tr '\t' '~' | tr '\n' ' ')"; fi
+  }
+  cover() {  # label  display_file
+    miss=0
+    for n in $mf_hooks $wskills; do
+      grep -qF "\"$n\"" "$2" || { bad "drift-widget[$1]: '$n' (MANIFEST/skill) sin tile en $(basename "$2")"; miss=1; }
+    done
+    [ "$miss" = 0 ] && ok "drift-widget[$1]: todo hook del MANIFEST y toda skill tienen tile"
+  }
+  # (Windows / C#) known-sets en BrainInspector.cs · tiles en PopupForm.cs
+  CS="$ROOT/windows/src/ClaudeBrain/BrainInspector.cs"; CSD="$ROOT/windows/src/ClaudeBrain/PopupForm.cs"
+  if [ -f "$CS" ] && [ -f "$CSD" ]; then
+    cmp_set win "known-global" "$(sed -n '/KnownGlobalHooks = new()/,/};/p' "$CS" | qtok)" "$mf_global"
+    cmp_set win "known-repo"   "$(sed -n '/KnownRepoHooks = new()/,/};/p'   "$CS" | qtok)" "$mf_repo"
+    cover   win "$CSD"
+  else bad "drift-widget[win]: no encuentro BrainInspector.cs / PopupForm.cs"; fi
+  # (macOS / Swift) known-sets en BrainInspector.swift · tiles en PopoverView.swift
+  SW="$ROOT/macos/Sources/ClaudeBrain/BrainInspector.swift"; SWD="$ROOT/macos/Sources/ClaudeBrain/PopoverView.swift"
+  if [ -f "$SW" ] && [ -f "$SWD" ]; then
+    cmp_set mac "known-global" "$(sed -n '/knownGlobalHooks: Set<String> = \[/,/\]/p' "$SW" | qtok)" "$mf_global"
+    cmp_set mac "known-repo"   "$(sed -n '/knownRepoHooks: Set<String> = \[/,/\]/p'   "$SW" | qtok)" "$mf_repo"
+    cover   mac "$SWD"
+  else bad "drift-widget[mac]: no encuentro BrainInspector.swift / PopoverView.swift"; fi
+  # (plasmoid / QML) known-sets y tiles en el mismo main.qml
+  QML="$ROOT/src/plasmoid/contents/ui/main.qml"
+  if [ -f "$QML" ]; then
+    cmp_set qml "known-global" "$(grep 'brainGlobalHooks:' "$QML" | qtok)" "$mf_global"
+    cmp_set qml "known-repo"   "$(grep 'brainRepoHooks:'   "$QML" | qtok)" "$mf_repo"
+    cover   qml "$QML"
+  else bad "drift-widget[qml]: no encuentro main.qml"; fi
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "==> resultado: $PASS PASS · $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
