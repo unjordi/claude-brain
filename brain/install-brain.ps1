@@ -7,20 +7,29 @@
 # Correr tras clonar:  pwsh -File brain\install-brain.ps1
 $ErrorActionPreference = 'Continue'
 
-# -- Dependencia dura: bash (Git Bash en Windows) --
-$bash = Get-Command bash -ErrorAction SilentlyContinue
-if (-not $bash) {
-  foreach ($p in @("$env:ProgramFiles\Git\bin\bash.exe","${env:ProgramFiles(x86)}\Git\bin\bash.exe","$env:LOCALAPPDATA\Programs\Git\bin\bash.exe")) {
-    if (Test-Path $p) { $bash = $p; break }
-  }
+# -- Dependencia dura: GIT BASH (NO el bash de WSL) --
+# OJO: `Get-Command bash` en una maquina con WSL devuelve C:\Windows\System32\bash.exe (el lanzador
+# de WSL), que NO entiende rutas Windows (C:/... no existe en WSL, seria /mnt/c/...) ni trae las
+# herramientas del cerebro (jq, etc.) -> el instalador fallaba con "No such file or directory" y
+# "jq no disponible" (bug real Windows+WSL, 2026-07-20). Por eso buscamos PRIMERO el bash.exe de Git
+# for Windows en sus ubicaciones conocidas, y solo caemos al 'bash' del PATH si NO es el de System32.
+$bash = $null
+foreach ($p in @("$env:ProgramFiles\Git\bin\bash.exe","${env:ProgramFiles(x86)}\Git\bin\bash.exe","$env:LOCALAPPDATA\Programs\Git\bin\bash.exe")) {
+  if (Test-Path $p) { $bash = $p; break }
 }
 if (-not $bash) {
-  Write-Host "ERROR: no encuentro 'bash'. Los hooks del cerebro corren bajo bash en todas las plataformas."
+  $cmd = Get-Command bash -ErrorAction SilentlyContinue
+  # Ignora el bash de WSL (System32\bash.exe): no sirve para los hooks del cerebro.
+  if ($cmd -and $cmd.Source -and ($cmd.Source -notlike "*\System32\*")) { $bash = $cmd.Source }
+}
+if (-not $bash) {
+  Write-Host "ERROR: no encuentro Git Bash. Los hooks del cerebro corren bajo bash (Git Bash, NO WSL)."
   Write-Host "  En Windows instala Git for Windows (trae Git Bash):  winget install Git.Git"
+  Write-Host "  (Si 'bash' te resuelve al de WSL en System32, este instalador ahora lo ignora a proposito.)"
   Write-Host "  Luego re-corre: pwsh -File brain\install-brain.ps1"
   exit 1
 }
-$bashExe = if ($bash -is [System.Management.Automation.CommandInfo]) { $bash.Source } else { $bash }
+$bashExe = $bash
 
 # -- PATH: asegurar que 'bash' quede en el PATH de USUARIO (persistente) --
 # Git for Windows / winget ponen git.exe (Git\cmd) en el PATH, pero NO bash.exe (vive en Git\bin).
