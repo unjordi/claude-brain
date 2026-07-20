@@ -53,8 +53,21 @@ foreach ($p in $pkgs) {
   }
 }
 if ($installedSomething) {
-  Say 'winget instalo prereqs nuevos -> el PATH de ESTA terminal quiza no los ve todavia.'
-  Say 'Si el paso siguiente falla por "git/jq/dotnet no encontrado", ABRE UNA TERMINAL NUEVA y re-corre el mismo comando.'
+  # winget actualiza el PATH persistente (Machine/User) + su carpeta de Links, pero el PATH de ESTE
+  # proceso quedo capturado al arrancar y NO ve lo recien instalado -> los pasos (2) y (3) fallaban
+  # ("git/jq no encontrado") en la MISMA corrida y obligaban a abrir otra terminal. Refrescamos el
+  # PATH del proceso releyendo Machine+User del registro (+ la carpeta Links de winget), asi git/jq/
+  # dotnet/node quedan visibles YA, en esta misma corrida. Idempotente.
+  $machinePath = [Environment]::GetEnvironmentVariable('PATH','Machine')
+  $userPath    = [Environment]::GetEnvironmentVariable('PATH','User')
+  $wingetLinks = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'
+  $env:PATH = (@($machinePath, $userPath, $wingetLinks) | Where-Object { $_ } ) -join ';'
+  $faltan = @($pkgs | Where-Object { -not (Get-Command $_.cmd -ErrorAction SilentlyContinue) } | ForEach-Object { $_.cmd })
+  if ($faltan.Count -gt 0) {
+    Say "OJO: tras refrescar el PATH aun no veo: $($faltan -join ', '). ABRE UNA TERMINAL NUEVA y re-corre el mismo comando."
+  } else {
+    Say 'PATH refrescado en esta corrida -> git/jq/dotnet/node ya visibles (sin abrir otra terminal).'
+  }
 }
 
 # -- (2) Clonar o actualizar --------------------------------------------------

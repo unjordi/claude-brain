@@ -246,6 +246,9 @@ public sealed class PopupForm : Form
 
         using var font = Px(12.5f, FontStyle.Regular);
         using var fontB = Px(12.5f, FontStyle.Bold);
+        // Los íconos de pestaña son EMOJI: la fuente por defecto (Px = "Segoe UI") NO los trae y en
+        // GDI+ salen como cajita. "Segoe UI Emoji" sí los renderiza (mismo patrón que PaintMachineToggle).
+        using var iconFont = PxFont("Segoe UI Emoji", 12.5f, FontStyle.Regular);
 
         var tabs = RailTabs();
         for (int pos = 0; pos < tabs.Length; pos++)
@@ -272,7 +275,7 @@ public sealed class PopupForm : Form
             using var brush = new SolidBrush(col);
             var sf = new StringFormat { LineAlignment = StringAlignment.Center, Alignment = StringAlignment.Near };
             // ícono de la pestaña (mismo estilo tintado que ⟳/⏻; paridad con el riel de macOS)
-            g.DrawString(TabIcons[idx], font, brush,
+            g.DrawString(TabIcons[idx], iconFont, brush,
                 new RectangleF(r.X + Sc(11), r.Y, Sc(20), r.Height), sf);
             g.DrawString(TabNames[idx], active ? fontB : font, brush,
                 new RectangleF(r.X + Sc(32), r.Y, r.Width - Sc(34), r.Height), sf);
@@ -282,8 +285,21 @@ public sealed class PopupForm : Form
         var (refreshR, quitR) = BottomButtons();
         using (var b1 = new SolidBrush(Blend(_bg, _fg, 0.7)))
             g.DrawString("⟳", Px(15f, FontStyle.Regular), b1, refreshR, Center());
-        using (var b2 = new SolidBrush(Blend(_bg, _fg, 0.45)))
-            g.DrawString("⏻", Px(13f, FontStyle.Regular), b2, quitR, Center());
+        // Glifo de "salir" (encendido) dibujado A MANO con GDI+: anillo con hueco arriba + línea
+        // vertical. Fuente-INDEPENDIENTE — el carácter ⏻ (U+23FB) no lo trae ni Segoe UI Emoji ni
+        // Segoe UI Symbol en algunas máquinas Windows (salía como recuadro). Vectorial = idéntico
+        // en cualquier Windows, sin tofu posible.
+        {
+            float d = Sc(11);                                  // diámetro del anillo
+            float cx = quitR.X + quitR.Width / 2f;
+            float cy = quitR.Y + quitR.Height / 2f;
+            using var powerPen = new Pen(Blend(_bg, _fg, 0.45), Math.Max(1f, Sc(1.4f)))
+            { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            // anillo con hueco de ~60° centrado arriba (empieza en -60° y barre 300° en sentido horario)
+            g.DrawArc(powerPen, cx - d / 2f, cy - d / 2f, d, d, -60f, 300f);
+            // barra vertical: de arriba del anillo hacia su centro
+            g.DrawLine(powerPen, cx, cy - d / 2f - Sc(1), cx, cy);
+        }
     }
 
     private (RectangleF refresh, RectangleF quit) BottomButtons()
@@ -983,14 +999,25 @@ public sealed class PopupForm : Form
         // Salvaguarda: si nunca se leyó el estado (p. ej. paint directo en tab 4), léelo ahora.
         _brainState ??= BrainInspector.Inspect();
 
-        // Encabezado de marca: destello acento + 🧠 Cerebro global.
-        using (var spFont = Px(12f, FontStyle.Bold))
-        using (var spBrush = new SolidBrush(_accent))
-            g.DrawString("✦", spFont, spBrush, pad, y + Sc(1));
-        int hx = pad + Sc(16);
-        using (var emj = PxFont("Segoe UI Emoji", 13f, FontStyle.Regular))
-        using (var b = new SolidBrush(_fg))
-            g.DrawString("🧠", emj, b, hx, y);
+        // Encabezado de marca: ícono claude-brain (ya incluye el destello) + "Cerebro global".
+        int hx = pad;
+        // El ícono de marca (icon-small.svg rasterizado, vía BrandIcon) en vez del emoji 🧠: GDI+ no
+        // dibuja SVG, así que es un PNG embebido. Si por lo que sea no decodifica, cae al emoji.
+        var brainIcon = BrandIcon.Small();
+        if (brainIcon != null)
+        {
+            var prevInterp = g.InterpolationMode;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            int isz = Sc(18);
+            g.DrawImage(brainIcon, new Rectangle(hx, y + Sc(1), isz, isz));
+            g.InterpolationMode = prevInterp;
+        }
+        else
+        {
+            using var emj = PxFont("Segoe UI Emoji", 13f, FontStyle.Regular);
+            using var bEmj = new SolidBrush(_fg);
+            g.DrawString("🧠", emj, bEmj, hx, y);
+        }
         hx += Sc(22);
         using (var h = Px(13.5f, FontStyle.Bold))
         using (var b = new SolidBrush(_fg))
@@ -1803,9 +1830,6 @@ public sealed class PopupForm : Form
             new("🧭", "sesion-inicio", "al abrir/retomar reinyecta rama + norma de git + orden de leer memoria",
                 "SessionStart",
                 "Al abrir/retomar sesión o tras compactar, reinyecta la rama actual, la norma de git y la orden de leer MEMORY/estado. Antídoto a 'se me va la onda al cambiar de sesión o compu'."),
-            new("💾", "precompact-volcar-estado", "antes de compactar, vuelca avance/decisiones/pendientes a memoria",
-                "PreCompact",
-                "Justo antes de que el contexto se compacte, te obliga a volcar avance/decisiones/pendientes a la memoria, para no perder el hilo en un sprint largo."),
             new("📊", "recordar-dashboard", "antes de un push, recuerda actualizar el dashboard del cerebro",
                 "PreToolUse · Bash",
                 "Antes de un `git push` recuerda (no bloquea) actualizar el dashboard del cerebro: una línea a la bitácora + ajustar el mapa si cambió el layout de repos/proyectos."),
@@ -1815,6 +1839,21 @@ public sealed class PopupForm : Form
             new("📝", "delegacion-registrar", "registra el consentimiento (materializa el “pregunta 1×”)",
                 "PostToolUse · Task",
                 "Tras un consentimiento aprobado lo registra para no volver a preguntar (1× por máquina o por workflow, según el nivel de costo). Materializa el 'pregunta una sola vez'."),
+            new("📮", "delegacion-reporte", "un agente de fan-out terminó → recuerda bitácora + estado, sin niñera",
+                "PostToolUse · Task",
+                "Cuando un subagente (Task) termina, recuerda al orquestador registrar su avance sin niñera: appendar una línea a bitacora.md (append-only, parallel-safe), cerrar el ítem en estado-proyecto.md y limpiar su worktree. No bloquea."),
+            new("🧵", "rehidratar-hilo", "al retomar/tras compactar reinyecta el hilo mental de la tarea",
+                "SessionStart",
+                "Al abrir/retomar sesión o tras compactar, relee .claude/memory/hilo-mental-actual.md y lo reinyecta por additionalContext (canal fiable de SessionStart). Es la mitad 'leer' del par con el skill checkpoint (la mitad 'escribir'). Silencioso si el archivo no existe."),
+            new("♻️", "aviso-drift-cerebro", "la copia del cerebro por-repo quedó atrás de la fuente → aviso",
+                "SessionStart",
+                "Al iniciar sesión en un repo con el cerebro por-repo instalado, compara esa copia contra la fuente única (sincronizar-cerebro.sh en dry-run, diff por contenido) y, si quedó atrás, avisa para que Claude proponga propagar por el flujo (ramita→MR). No escribe al árbol en repos compartidos. Throttle 6h si salió limpio."),
+            new("⏳", "aviso-contexto", "el contexto se está llenando → ordena checkpoint y propón /compact",
+                "PostToolUse",
+                "Vigila cuánto creció el contexto desde el último /compact y, al cruzar bandas por debajo del auto-compact, inyecta un aviso escalado (heads-up → checkpoint ahora → inminente) para volcar el hilo con checkpoint y compactar proactivamente. Convierte el auto-compact-sorpresa en caso raro."),
+            new("🌳", "proteger-arbol", "git destructivo que orfanaría commits sin pushear → aviso (no bloquea)",
+                "PreToolUse · Bash",
+                "Antes de un git destructivo (reset --hard, rebase, checkout -f, branch -D) que podría orfanar commits sin pushear en el árbol de trabajo, avisa —no bloquea. Antídoto a un caso real: un agente de fan-out reseteó HEAD en el árbol compartido y dejó huérfano un commit del orquestador."),
         ]),
         new("📜", "Normas", Fmt.Hex("#4a90d9"), "reglas que Claude se autoimpone (CLAUDE.md)",
         [
@@ -1833,9 +1872,21 @@ public sealed class PopupForm : Form
         ]),
         new("💡", "Skills", Fmt.Hex("#3aa76d"), "herramientas opt-in — las invocas tú",
         [
+            new("💾", "checkpoint", "vuelca el hilo mental a disco para compactar sin perderlo",
+                "skill · opt-in",
+                "Vuelca lo efímero del chat (el hilo: qué haces ahora, la decisión abierta, el siguiente paso) a hilo-mental-actual.md, para poder compactar cuanto quieras sin perder el hilo. Es la mitad 'escribir' del par con el hook rehidratar-hilo (la mitad 'leer'). Córrelo antes de un /compact o en una pausa natural."),
             new("📦", "cerrar-slice", "build+tests+memoria al día + MR con resumen curado por slice",
                 "skill · opt-in",
                 "Ritual de cierre de un slice: build+tests verdes, memoria al día (bitácora), MR con resumen curado en prosa, y el Paso 5 de cosechar lo genérico de vuelta al cerebro global."),
+            new("📐", "diagramar", "diagrama según su DESTINO: yEd editable (.dot→graphml) o Mermaid versionado",
+                "skill · opt-in",
+                "Produce un diagrama eligiendo el flujo según su destino: para EDITAR a mano, modela en .dot (Graphviz) → .graphml de yEd; para VERSE en GitHub/docs, Mermaid en un .md versionado. Regla dura: un diagrama entregable nunca queda solo como artefacto local gitignorado ni widget efímero del chat."),
+            new("🐝", "orquestar-fanout", "fan-out de agentes sin niñera (estado en 2 archivos + contrato de reporte)",
+                "skill · opt-in",
+                "Orquestar trabajo paralelizable en varios agentes SIN niñera: asigna ítems autocontenidos del backlog y, al terminar cada agente, su avance queda registrado (bitácora) y su worktree limpio automáticamente. Modelo de estado sin redundancia: estado-proyecto = backlog vivo, bitácora = pasado append-only."),
+            new("🌙", "turno-nocturno", "Claude trabaja solo de noche: contrato medible, decide-o-parquea, checkpoint c/2h",
+                "skill · opt-in",
+                "Protocolo para dejar a Claude trabajando SOLO de noche: eco del contrato antes de empezar (alcance, criterio de cierre MEDIBLE, lo intocable, dónde queda visible el resultado), preflight de herramientas/quota, regla de decisión (dentro del alcance decide y sigue; fuera, parquea y brinca), autorización durable a disco y checkpoint cada ~2h."),
         ]),
     ];
 

@@ -7,20 +7,29 @@
 # Correr tras clonar:  pwsh -File brain\install-brain.ps1
 $ErrorActionPreference = 'Continue'
 
-# -- Dependencia dura: bash (Git Bash en Windows) --
-$bash = Get-Command bash -ErrorAction SilentlyContinue
-if (-not $bash) {
-  foreach ($p in @("$env:ProgramFiles\Git\bin\bash.exe","${env:ProgramFiles(x86)}\Git\bin\bash.exe","$env:LOCALAPPDATA\Programs\Git\bin\bash.exe")) {
-    if (Test-Path $p) { $bash = $p; break }
-  }
+# -- Dependencia dura: GIT BASH (NO el bash de WSL) --
+# OJO: `Get-Command bash` en una maquina con WSL devuelve C:\Windows\System32\bash.exe (el lanzador
+# de WSL), que NO entiende rutas Windows (C:/... no existe en WSL, seria /mnt/c/...) ni trae las
+# herramientas del cerebro (jq, etc.) -> el instalador fallaba con "No such file or directory" y
+# "jq no disponible" (bug real Windows+WSL, 2026-07-20). Por eso buscamos PRIMERO el bash.exe de Git
+# for Windows en sus ubicaciones conocidas, y solo caemos al 'bash' del PATH si NO es el de System32.
+$bash = $null
+foreach ($p in @("$env:ProgramFiles\Git\bin\bash.exe","${env:ProgramFiles(x86)}\Git\bin\bash.exe","$env:LOCALAPPDATA\Programs\Git\bin\bash.exe")) {
+  if (Test-Path $p) { $bash = $p; break }
 }
 if (-not $bash) {
-  Write-Host "ERROR: no encuentro 'bash'. Los hooks del cerebro corren bajo bash en todas las plataformas."
+  $cmd = Get-Command bash -ErrorAction SilentlyContinue
+  # Ignora el bash de WSL (System32\bash.exe): no sirve para los hooks del cerebro.
+  if ($cmd -and $cmd.Source -and ($cmd.Source -notlike "*\System32\*")) { $bash = $cmd.Source }
+}
+if (-not $bash) {
+  Write-Host "ERROR: no encuentro Git Bash. Los hooks del cerebro corren bajo bash (Git Bash, NO WSL)."
   Write-Host "  En Windows instala Git for Windows (trae Git Bash):  winget install Git.Git"
+  Write-Host "  (Si 'bash' te resuelve al de WSL en System32, este instalador ahora lo ignora a proposito.)"
   Write-Host "  Luego re-corre: pwsh -File brain\install-brain.ps1"
   exit 1
 }
-$bashExe = if ($bash -is [System.Management.Automation.CommandInfo]) { $bash.Source } else { $bash }
+$bashExe = $bash
 
 # -- PATH: asegurar que 'bash' quede en el PATH de USUARIO (persistente) --
 # Git for Windows / winget ponen git.exe (Git\cmd) en el PATH, pero NO bash.exe (vive en Git\bin).
@@ -35,6 +44,18 @@ if (($userPath -split ';') -notcontains $gitBin) {
   [Environment]::SetEnvironmentVariable('PATH', ($userPath.TrimEnd(';') + ';' + $gitBin), 'User')
   $env:PATH = $env:PATH.TrimEnd(';') + ';' + $gitBin   # visible ya en esta sesion
   $script:pathChanged = $true
+}
+
+# -- Forzar que Claude Code (CLI) use ESTE Git Bash, NO el de WSL --
+# En una maquina con WSL, 'bash' del PATH resuelve a System32\bash.exe (WSL); Claude Code lo ve como
+# "Git Bash no disponible" y corre los hooks con WSL/PowerShell -> los .sh (rutas Windows, jq) fallan
+# y los guardrails NO aplican. La env var oficial CLAUDE_CODE_GIT_BASH_PATH apunta a Claude Code al
+# bash.exe de Git Bash explicitamente, sin depender del orden del PATH (persistente, por usuario).
+# (Fuente: docs de Claude Code, troubleshoot-install.) Bug real diagnosticado 2026-07-20 (Windows+WSL).
+if ([Environment]::GetEnvironmentVariable('CLAUDE_CODE_GIT_BASH_PATH','User') -ne $bashExe) {
+  [Environment]::SetEnvironmentVariable('CLAUDE_CODE_GIT_BASH_PATH', $bashExe, 'User')
+  $env:CLAUDE_CODE_GIT_BASH_PATH = $bashExe
+  Write-Host "==> claude-brain: CLAUDE_CODE_GIT_BASH_PATH -> $bashExe (Claude Code usara Git Bash, no WSL)"
 }
 
 # -- Auto-sanar CRLF: Git for Windows (core.autocrlf=true) clona los .sh con CRLF y bash muere con el \r --
@@ -53,7 +74,17 @@ Get-ChildItem -Path $RepoRoot -Recurse -Filter *.sh -File -ErrorAction SilentlyC
 if ($fixed -gt 0) { Write-Host "==> claude-brain: normalice a LF $fixed script(s) .sh que venian con CRLF (fix Git-for-Windows)" }
 
 # -- Dependencia de los hooks: jq (sin jq los guards fallan abierto y no puedo cablear settings.json) --
-& $bashExe -lc "command -v jq >/dev/null 2>&1"
+# jq lo instala winget en %LOCALAPPDATA%\Microsoft\WinGet\Links (u otra carpeta): ese dir SI esta en el
+# PATH de Windows y PowerShell lo ve, pero un bash de LOGIN (-l) reconstruye su PATH desde /etc/profile
+# y puede NO incluirlo. Resolvemos jq desde PowerShell y prependemos su carpeta a $env:PATH del proceso,
+# para que el bash hijo (que hereda este PATH) lo vea igual que PowerShell. Verificamos con un bash
+# NO-login (-c), el MISMO modo con que abajo corre install-brain.sh (el check refleja el run).
+$jqCmd = Get-Command jq -ErrorAction SilentlyContinue
+if ($jqCmd) {
+  $jqDir = Split-Path -Parent $jqCmd.Source
+  if (($env:PATH -split ';') -notcontains $jqDir) { $env:PATH = $jqDir + ';' + $env:PATH }
+}
+& $bashExe -c "command -v jq >/dev/null 2>&1"
 if ($LASTEXITCODE -ne 0) {
   Write-Host "ADVERTENCIA: 'jq' no esta disponible en bash. Los hooks lo REQUIEREN (sin jq el"
   Write-Host "  git-branch-guard falla abierto y el instalador no cablea el settings.json)."
@@ -68,7 +99,11 @@ if (-not (Test-Path $Installer)) {
   exit 1
 }
 Write-Host "==> claude-brain: delegando en bash $Installer"
-& $bashExe "$Installer"
+# Pasar la ruta a bash con '/' (NO '\'): bash lee cada '\U','\A','\L'... de una ruta Windows como
+# secuencia de escape y se COME los backslashes -> "No such file or directory" y el instalador real
+# nunca corre (bug real en Windows, 2026-07-20). Una ruta con forward-slashes (C:/Users/.../
+# install-brain.sh) la entiende Git Bash sin ambiguedad.
+& $bashExe ($Installer -replace '\\','/')
 $rc = $LASTEXITCODE
 if ($script:pathChanged) {
   Write-Host ""
