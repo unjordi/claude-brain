@@ -286,7 +286,7 @@ public sealed class PopupForm : Form
         using (var b1 = new SolidBrush(Blend(_bg, _fg, 0.7)))
             g.DrawString("⟳", Px(15f, FontStyle.Regular), b1, refreshR, Center());
         using (var b2 = new SolidBrush(Blend(_bg, _fg, 0.45)))
-            g.DrawString("⏻", PxFont("Segoe UI Emoji", 13f, FontStyle.Regular), b2, quitR, Center());
+            g.DrawString("⏻", PxFont("Segoe UI Symbol", 13f, FontStyle.Regular), b2, quitR, Center());
     }
 
     private (RectangleF refresh, RectangleF quit) BottomButtons()
