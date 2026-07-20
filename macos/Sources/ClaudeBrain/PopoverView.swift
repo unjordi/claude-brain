@@ -896,12 +896,18 @@ struct PopoverView: View {
     /// Contenido ESTÁTICO (refleja `brain/`); se mantiene a mano cuando cambian las piezas.
     private var cerebroTab: some View {
         VStack(alignment: .leading, spacing: 14) {
-            // Encabezado de marca: destello Claude + 🧠.
+            // Encabezado de marca: destello Claude + ícono claude-brain (icon-small).
             HStack(spacing: 7) {
                 Image(systemName: "sparkle")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(accent)
-                Text("🧠 Cerebro global")
+                if let brand = BrandIcon.small {
+                    Image(nsImage: brand)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 18, height: 18)
+                }
+                Text("Cerebro global")
                     .font(.headline)
                 Spacer(minLength: 0)
                 mapaButton
@@ -1263,9 +1269,6 @@ struct PopoverView: View {
                     BrainItem("🧭", "sesion-inicio", "al abrir/retomar reinyecta rama + norma de git + orden de leer memoria",
                               "SessionStart",
                               "Al abrir/retomar sesión o tras compactar, reinyecta la rama actual, la norma de git y la orden de leer MEMORY/estado. Antídoto a 'se me va la onda al cambiar de sesión o compu'."),
-                    BrainItem("💾", "precompact-volcar-estado", "antes de compactar, vuelca avance/decisiones/pendientes a memoria",
-                              "PreCompact",
-                              "Justo antes de que el contexto se compacte, te obliga a volcar avance/decisiones/pendientes a la memoria, para no perder el hilo en un sprint largo."),
                     BrainItem("📊", "recordar-dashboard", "antes de un push, recuerda actualizar el dashboard del cerebro",
                               "PreToolUse · Bash",
                               "Antes de un `git push` recuerda (no bloquea) actualizar el dashboard del cerebro: una línea a la bitácora + ajustar el mapa si cambió el layout de repos/proyectos."),

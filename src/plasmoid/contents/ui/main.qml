@@ -837,9 +837,6 @@ PlasmoidItem {
                 { emoji: "🧭", name: "sesion-inicio",             desc: "al abrir/retomar reinyecta rama + norma de git + orden de leer memoria",
                   event: "SessionStart",
                   detail: "Al abrir/retomar sesión o tras compactar, reinyecta la rama actual, la norma de git y la orden de leer MEMORY/estado. Antídoto a 'se me va la onda al cambiar de sesión o compu'." },
-                { emoji: "💾", name: "precompact-volcar-estado",  desc: "antes de compactar, vuelca avance/decisiones/pendientes a memoria",
-                  event: "PreCompact",
-                  detail: "Justo antes de que el contexto se compacte, te obliga a volcar avance/decisiones/pendientes a la memoria, para no perder el hilo en un sprint largo." },
                 { emoji: "📊", name: "recordar-dashboard",        desc: "antes de un push, recuerda actualizar el dashboard del cerebro",
                   event: "PreToolUse · Bash",
                   detail: "Antes de un `git push` recuerda (no bloquea) actualizar el dashboard del cerebro: una línea a la bitácora + ajustar el mapa si cambió el layout de repos/proyectos." },
@@ -892,7 +889,7 @@ PlasmoidItem {
 
     // Catálogo conocido (mismos conjuntos que BrainState.knownGlobalHooks / knownRepoHooks del Swift).
     readonly property var brainGlobalHooks: ["git-branch-guard","merge-squash-guard","recordar-dashboard","secret-scan","rama-vieja","limite-gasto","delegacion-gate","delegacion-registrar"]
-    readonly property var brainRepoHooks:   ["sesion-inicio","precompact-volcar-estado","dod-verificar","confirmar-merge-develop"]
+    readonly property var brainRepoHooks:   ["sesion-inicio","dod-verificar","confirmar-merge-develop"]
 
     // Ruta del helper bash, resuelta relativa a este main.qml (…/contents/ui/ → …/contents/brain-scan.sh).
     readonly property string brainScript: {
@@ -1782,7 +1779,15 @@ PlasmoidItem {
                             Layout.preferredWidth: Kirigami.Units.iconSizes.small
                             Layout.preferredHeight: Kirigami.Units.iconSizes.small
                         }
-                        Kirigami.Heading { level: 3; text: "🧠 Cerebro global"; Layout.fillWidth: true }
+                        Image {
+                            source: Qt.resolvedUrl("brand-icon.svg")
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                            fillMode: Image.PreserveAspectFit
+                            smooth: true
+                            sourceSize.width: 64; sourceSize.height: 64
+                        }
+                        Kirigami.Heading { level: 3; text: "Cerebro global"; Layout.fillWidth: true }
                         // Enlace discreto al MAPA del cerebro: docs/mapa-cerebro.md versionado en el
                         // repo (GitHub). Abre el navegador del sistema (espeja mapaButton del Swift).
                         PC3.ToolButton {

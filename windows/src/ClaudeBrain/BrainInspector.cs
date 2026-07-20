@@ -40,7 +40,7 @@ public sealed class BrainState
     /// Los hooks repo-scoped (fuente en brain/hooks, no globales) — pueden aparecer cableados en un repo.
     public static readonly HashSet<string> KnownRepoHooks = new()
     {
-        "sesion-inicio", "precompact-volcar-estado", "dod-verificar", "confirmar-merge-develop",
+        "sesion-inicio", "dod-verificar", "confirmar-merge-develop",
     };
 
     /// Estado real de una pieza (por nombre) contra la evidencia leída. Espejo de `status(_:_:)` de Swift.

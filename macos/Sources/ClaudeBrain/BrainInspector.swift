@@ -55,7 +55,7 @@ struct BrainState {
     ]
     /// Los hooks repo-scoped (fuente en brain/hooks, no globales) — pueden aparecer cableados en un repo.
     static let knownRepoHooks: Set<String> = [
-        "sesion-inicio", "precompact-volcar-estado", "dod-verificar", "confirmar-merge-develop",
+        "sesion-inicio", "dod-verificar", "confirmar-merge-develop",
     ]
 
     /// # de piezas GLOBALES esperadas que FALTAN: hooks no (presentes+cableados) + normas + la skill.
