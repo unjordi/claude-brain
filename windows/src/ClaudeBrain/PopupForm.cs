@@ -246,6 +246,9 @@ public sealed class PopupForm : Form
 
         using var font = Px(12.5f, FontStyle.Regular);
         using var fontB = Px(12.5f, FontStyle.Bold);
+        // Los íconos de pestaña son EMOJI: la fuente por defecto (Px = "Segoe UI") NO los trae y en
+        // GDI+ salen como cajita. "Segoe UI Emoji" sí los renderiza (mismo patrón que PaintMachineToggle).
+        using var iconFont = PxFont("Segoe UI Emoji", 12.5f, FontStyle.Regular);
 
         var tabs = RailTabs();
         for (int pos = 0; pos < tabs.Length; pos++)
@@ -272,7 +275,7 @@ public sealed class PopupForm : Form
             using var brush = new SolidBrush(col);
             var sf = new StringFormat { LineAlignment = StringAlignment.Center, Alignment = StringAlignment.Near };
             // ícono de la pestaña (mismo estilo tintado que ⟳/⏻; paridad con el riel de macOS)
-            g.DrawString(TabIcons[idx], font, brush,
+            g.DrawString(TabIcons[idx], iconFont, brush,
                 new RectangleF(r.X + Sc(11), r.Y, Sc(20), r.Height), sf);
             g.DrawString(TabNames[idx], active ? fontB : font, brush,
                 new RectangleF(r.X + Sc(32), r.Y, r.Width - Sc(34), r.Height), sf);
@@ -283,7 +286,7 @@ public sealed class PopupForm : Form
         using (var b1 = new SolidBrush(Blend(_bg, _fg, 0.7)))
             g.DrawString("⟳", Px(15f, FontStyle.Regular), b1, refreshR, Center());
         using (var b2 = new SolidBrush(Blend(_bg, _fg, 0.45)))
-            g.DrawString("⏻", Px(13f, FontStyle.Regular), b2, quitR, Center());
+            g.DrawString("⏻", PxFont("Segoe UI Emoji", 13f, FontStyle.Regular), b2, quitR, Center());
     }
 
     private (RectangleF refresh, RectangleF quit) BottomButtons()
