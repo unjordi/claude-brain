@@ -164,6 +164,12 @@ else
   echo "ok: normas globales del cerebro agregadas a $GCLAUDE"
 fi
 
+# fetch.prune global: que `git fetch` borre solos los refs remotos ya eliminados (surface de las ramas
+# `: gone`). Es lo que mantiene fresco el marcador que usa limpiar-ramas.sh. Idempotente y no destructivo.
+if [ "$(git config --global --get fetch.prune 2>/dev/null)" != "true" ]; then
+  git config --global fetch.prune true 2>/dev/null && echo "ok: git config --global fetch.prune=true (ramas remotas borradas se limpian solas al hacer fetch)"
+fi
+
 echo "listo: cerebro global instalado (hooks + cableado + skill + sello de versión + dashboard + normas)."
 echo "       Los hooks repo-scoped (sesion-inicio, dod-verificar) viven en"
 echo "       brain/hooks/ como fuente: cópialos al .claude/ de cada repo (se cargan al INICIAR ahí)."

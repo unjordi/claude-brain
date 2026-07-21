@@ -141,6 +141,7 @@ flowchart TB
     PA["🌳 proteger-arbol<br/>git destructivo que orfanaría commits<br/>en el árbol compartido → AVISA"]
     REP["📮 delegacion-reporte (PostToolUse/Task)<br/>al terminar: recuerda appendear bitácora (>>)<br/>+ actualizar estado-proyecto + limpiar worktree"]
     LW["🧹 limpiar-worktrees.sh (script)<br/>barre worktrees de ramas mergeadas;<br/>los vivos quedan anotados en bitácora"]
+    LR["🧹 limpiar-ramas.sh (script)<br/>barre RAMAS LOCALES ya integradas (squash-safe);<br/>conserva trabajo vivo + protegidas"]
     FRENO["⛔ FRENO DURO<br/>sin cupo del plan NI saldo:<br/>el agente moriría a medias"]
 
     TASK --> LG
@@ -151,6 +152,7 @@ flowchart TB
     PA -.->|"vigila el árbol compartido"| WT
     WT --> REP
     REP --> LW
+    LW --> LR
 
     style LG fill:#7f1d1d,color:#fff
     style FRENO fill:#7f1d1d,color:#fff
@@ -159,6 +161,7 @@ flowchart TB
     style REP fill:#78350f,color:#fff
     style PA fill:#78350f,color:#fff
     style LW fill:#374151,color:#fff
+    style LR fill:#374151,color:#fff
 ```
 
 El estilo de orquestación (fan-out + supervisión, 2 archivos de estado sin redundancia) lo guía
@@ -178,7 +181,7 @@ flowchart LR
 
     subgraph tiers["Tiers declarados"]
         BOTH["tier <b>both</b> — global + por-repo<br/>(con cláusula de dedupe:<br/>la copia del repo cede a la global)<br/><br/>hooks: git-branch-guard ·<br/>merge-squash-guard ·<br/>confirmar-merge-develop ·<br/>recordar-dashboard · secret-scan<br/>libs: analizar-comando-git ·<br/>detectar-secretos"]
-        GLOBAL["tier <b>global</b> — solo ~/.claude<br/><br/>hooks: proteger-arbol · rama-vieja ·<br/>limite-gasto · rehidratar-hilo ·<br/>aviso-contexto · aviso-drift-cerebro ·<br/>delegacion-gate · delegacion-registrar ·<br/>delegacion-reporte<br/>lib: delegacion-comun<br/>script: limpiar-worktrees"]
+        GLOBAL["tier <b>global</b> — solo ~/.claude<br/><br/>hooks: proteger-arbol · rama-vieja ·<br/>limite-gasto · rehidratar-hilo ·<br/>aviso-contexto · aviso-drift-cerebro ·<br/>delegacion-gate · delegacion-registrar ·<br/>delegacion-reporte<br/>lib: delegacion-comun · ramas-zombie<br/>script: limpiar-worktrees · limpiar-ramas"]
         REPO["tier <b>repo</b> — solo &lt;repo&gt;/.claude<br/>(se cargan si la sesión INICIA ahí)<br/><br/>hooks: dod-verificar · sesion-inicio"]
     end
 

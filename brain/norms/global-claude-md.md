@@ -259,8 +259,11 @@ sesiones de Claude tocan en paralelo: sus entradas de bitácora van al FINAL con
 CURADAS (Mapa/Cabos) se editan, y esas rara vez. El mismo dato NO se escribe en 3 lados; el estado "actual" se DERIVA. La lista de
 TodoWrite es SCRATCH de sesión — el backlog DURABLE es estado-proyecto.md. Lo recuerda el hook
 `delegacion-reporte` (PostToolUse/Task); los worktrees zombies los barre `limpiar-worktrees.sh` (borra
-los de ramas mergeadas, deja los vivos anotando su pendiente en la bitácora). **Señal de que te
-desviaste:** el usuario tuvo que PEDIRTE que actualizaras bitácora/estado, o se acumularon worktrees zombies.
+los de ramas mergeadas, deja los vivos anotando su pendiente en la bitácora) y las **ramas locales** ya
+integradas las barre `limpiar-ramas.sh` (antídoto a la acumulación de ramitas squasheadas: el squash
+rompe `git branch -d` y `fetch --prune` no toca locales; conserva el trabajo vivo y las protegidas).
+**Señal de que te desviaste:** el usuario tuvo que PEDIRTE que actualizaras bitácora/estado, o se
+acumularon worktrees/ramas zombies.
 
 # Compact instructions
 

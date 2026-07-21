@@ -37,7 +37,9 @@ delegacion-gate          global  hook
 delegacion-registrar     global  hook
 delegacion-reporte       global  hook
 limpiar-worktrees        global  script
+limpiar-ramas            global  script
 delegacion-comun         global  lib
+ramas-zombie             global  lib
 
 dod-verificar            repo    hook
 sesion-inicio            repo    hook

@@ -467,6 +467,35 @@ printf '%s' "$out" | grep -q 'DEJADO.*feat/viva'  && ok "G7: ramita viva no inte
 rm -rf "$G7ROOT"
 
 # ─────────────────────────────────────────────────────────────────────────────
+echo "== (b3c) limpiar-ramas: barre ramas LOCALES integradas (squash) y CONSERVA trabajo vivo + protegidas =="
+# El squash rompe `git branch -d` (la rama no queda de ancestro) y `fetch --prune` no toca ramas locales
+# → se acumulan. limpiar-ramas usa la MISMA lib zombie (ramas-zombie.sh) que limpiar-worktrees.
+LRROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-lr.XXXXXX")"; LRREPO="$LRROOT/repo"; mkdir -p "$LRREPO"
+git -C "$LRREPO" init -q >/dev/null 2>&1
+git -C "$LRREPO" symbolic-ref HEAD refs/heads/miDevelop >/dev/null 2>&1
+git -C "$LRREPO" config user.email t@t >/dev/null 2>&1; git -C "$LRREPO" config user.name tester >/dev/null 2>&1
+printf 'base\n' > "$LRREPO/base.txt"; git -C "$LRREPO" add base.txt >/dev/null 2>&1; git -C "$LRREPO" commit -qm base >/dev/null 2>&1
+# (1) rama integrada por squash local → zombie por cherry → debe borrarse
+git -C "$LRREPO" checkout -q -b feat/hecha >/dev/null 2>&1
+printf 'x\n' > "$LRREPO/f.txt"; git -C "$LRREPO" add f.txt >/dev/null 2>&1; git -C "$LRREPO" commit -qm hecha >/dev/null 2>&1
+git -C "$LRREPO" checkout -q miDevelop >/dev/null 2>&1
+git -C "$LRREPO" merge --squash feat/hecha >/dev/null 2>&1; git -C "$LRREPO" commit -qm "squash feat/hecha" >/dev/null 2>&1
+# (2) rama viva con commits únicos → conservar
+git -C "$LRREPO" checkout -q -b feat/viva miDevelop >/dev/null 2>&1
+printf 'y\n' > "$LRREPO/g.txt"; git -C "$LRREPO" add g.txt >/dev/null 2>&1; git -C "$LRREPO" commit -qm viva >/dev/null 2>&1
+# (3) rama keep/ integrada (contenido en base) PERO protegida → conservar pese a ser zombie
+git -C "$LRREPO" checkout -q -b keep/respaldo miDevelop >/dev/null 2>&1
+git -C "$LRREPO" checkout -q miDevelop >/dev/null 2>&1
+lrout="$(cd "$LRREPO" && CLAUDE_INTEGRACION_BASE=miDevelop bash "$HOOKS/limpiar-ramas.sh" --dry-run --no-fetch 2>&1)"
+printf '%s' "$lrout" | grep -q 'borraría: feat/hecha'      && ok "b3c: rama squash-integrada → se barrería"                  || bad "b3c: no marcó feat/hecha para borrar; got: $lrout"
+printf '%s' "$lrout" | grep -q 'CONSERVADA.*feat/viva'     && ok "b3c: rama con trabajo sin integrar → conservada"            || bad "b3c: no conservó feat/viva; got: $lrout"
+printf '%s\n' "$lrout" | grep -v '^limpiar-ramas:' | grep -q 'miDevelop' && bad "b3c: tocó la base/rama actual miDevelop; got: $lrout" || ok "b3c: la base/rama actual (miDevelop) NO se lista para borrar ni conservar"
+printf '%s' "$lrout" | grep -q 'keep/respaldo' && bad "b3c: keep/respaldo NO debe tocarse (protegida)" || ok "b3c: keep/* protegida (no se lista)"
+# teeth: sin la protección, keep/respaldo sería zombie (ancestro de base) — confirma que la protección es la que lo salva
+git -C "$LRREPO" merge-base --is-ancestor keep/respaldo miDevelop 2>/dev/null && ok "b3c(teeth): keep/respaldo ES ancestro de base (zombie real) → solo la protección lo conserva" || bad "b3c(teeth): keep/respaldo no era ancestro (test mal armado)"
+rm -rf "$LRROOT"
+
+# ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "== (b3c) git-branch-guard: bloquea push/merge REAL a main/develop, NO una MENCIÓN entrecomillada =="
 # HOME AISLADO SIN copia global del hook: si no, la cláusula de dedupe doble-cableado (la copia del
@@ -859,7 +888,10 @@ cerrar-slice|checkpoint
 cerrar-slice|rehidratar-hilo
 checkpoint|rehidratar-hilo
 aviso-contexto|rehidratar-hilo
-aviso-contexto|checkpoint"
+aviso-contexto|checkpoint
+limpiar-ramas|limpiar-worktrees
+limpiar-ramas|ramas-zombie
+limpiar-worktrees|ramas-zombie"
 ce_els=()
 for d in "$SCRIPT_DIR"/skills/*/; do [ -d "$d" ] && ce_els+=("$(basename "$d")"); done
 for h in "$HOOKS"/*.sh; do [ -e "$h" ] && ce_els+=("$(basename "$h" .sh)"); done

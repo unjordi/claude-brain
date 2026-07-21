@@ -117,10 +117,14 @@ El cerebro se ordena por *dureza*: arriba lo que te **bloquea** sin negociar; ab
 
 Los hooks **por-repo** son fuente en [`brain/hooks/`](brain/hooks/) que cada repo copia a su propio
 `.claude/` y cablea en su `settings.json` — se cargan solo cuando una sesión *inicia* en ese repo. El
-cerebro **se autoprueba**: [`brain/test-brain.sh`](brain/test-brain.sh) corre 208 checks contra un
+cerebro **se autoprueba**: [`brain/test-brain.sh`](brain/test-brain.sh) corre 224 checks contra un
 `$HOME` aislado, y la CI repite `bash -n` + `jq empty` + `shellcheck` en cada push. Tras un fan-out,
 el helper [`limpiar-worktrees.sh`](brain/hooks/limpiar-worktrees.sh) barre los worktrees de ramas ya
-mergeadas y deja anotado en la bitácora el pendiente de los que sigan vivos.
+mergeadas y deja anotado en la bitácora el pendiente de los que sigan vivos; y
+[`limpiar-ramas.sh`](brain/hooks/limpiar-ramas.sh) barre las **ramas locales** ya integradas (antídoto
+a la acumulación de ramitas squasheadas: el squash rompe `git branch -d` y `fetch --prune` no toca
+locales). Ambos comparten la lógica "zombie" ([`ramas-zombie.sh`](brain/hooks/ramas-zombie.sh)) → una
+sola definición de "mergeada".
 
 ### 🗺️ El mapa del cerebro — fuente de verdad visual
 
