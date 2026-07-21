@@ -1013,6 +1013,24 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
+echo "== (e4) Windows: bootstrap.ps1 exporta CLAUDE_BRAIN_DIR (los hooks bash hallan la fuente) =="
+# En Windows el clon-fuente vive en %LOCALAPPDATA%\claude-brain-repo, NO en ~/.claude-brain (default de
+# Mac/Linux). Si bootstrap.ps1 no exporta CLAUDE_BRAIN_DIR, el hook bash aviso-drift-cerebro cae a
+# $HOME/.claude-brain (inexistente) y el auto-sync por-repo falla MUDO. Guard de regresión.
+BPS="$SCRIPT_DIR/../bootstrap.ps1"
+if [ -f "$BPS" ]; then
+  grep -q "SetEnvironmentVariable('CLAUDE_BRAIN_DIR'" "$BPS" \
+    && ok "e4: bootstrap.ps1 exporta CLAUDE_BRAIN_DIR (User env)" \
+    || bad "e4: bootstrap.ps1 NO exporta CLAUDE_BRAIN_DIR → en Windows el auto-sync del cerebro falla mudo"
+  # y debe guardarlo en FORWARD-SLASH (bash se atraganta con los backslashes de Windows)
+  grep -qE "dirBash = .dir -replace|CLAUDE_BRAIN_DIR', .\\\$dirBash" "$BPS" \
+    && ok "e4: la ruta se exporta en forward-slash (no backslashes que rompen bash)" \
+    || bad "e4: CLAUDE_BRAIN_DIR podría exportarse con backslashes (bash no los resuelve)"
+else
+  bad "e4: no encuentro bootstrap.ps1"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "==> resultado: $PASS PASS · $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
