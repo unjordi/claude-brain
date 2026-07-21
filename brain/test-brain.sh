@@ -721,6 +721,35 @@ smout3=$(CLAUDE_PROJECT_DIR="$SMREPO" bash "$SCRIPT_DIR/sembrar-mini-develop.sh"
   && ok "sembrar-mini: rechaza 'develop' como nombre de mini (protege las bases)" || bad "sembrar-mini: aceptó develop como mini"
 rm -rf "$SMFIX"
 
+# ── (b5e) barrer-ramas: TRIGGER throttled del barrido de ramas (fail-open, lanza, throttle) ──
+echo ""
+echo "== (b5e) barrer-ramas: da trigger al barrido (fail-open sin git/remoto; lanza; throttle) =="
+BRFIX="$(mktemp -d "${TMPDIR:-/tmp}/brain-br.XXXXXX")"
+BRHOME="$BRFIX/home"; BRHOOKS="$BRFIX/hooks"; BRREPO="$BRFIX/repo"
+mkdir -p "$BRHOME" "$BRHOOKS" "$BRREPO"
+# Copia el hook + un STUB de limpiar-ramas junto a él: dirname resuelve a ESTA carpeta → usa el stub (sin red).
+cp "$HOOKS/barrer-ramas.sh" "$BRHOOKS/barrer-ramas.sh"
+printf '#!/usr/bin/env bash\ntouch "%s/.barrido"\n' "$BRFIX" > "$BRHOOKS/limpiar-ramas.sh"; chmod +x "$BRHOOKS/limpiar-ramas.sh"
+br() { printf '%s' '{"source":"startup"}' | HOME="$BRHOME" CLAUDE_PROJECT_DIR="$BRREPO" bash "$BRHOOKS/barrer-ramas.sh"; }
+# (1) no es repo git → silencio (fail-open, no estorba)
+is_silent "$(br)" && ok "barrer-ramas: no-git → silencio" || bad "barrer-ramas: habló fuera de un repo git"
+git -C "$BRREPO" init -q >/dev/null 2>&1
+# (2) repo SIN remoto → silencio (sin remoto no hay ramas squasheadas-y-borradas que barrer)
+is_silent "$(br)" && ok "barrer-ramas: repo sin remoto → silencio" || bad "barrer-ramas: habló sin remoto"
+git -C "$BRREPO" remote add origin /tmp/fake-no-red >/dev/null 2>&1   # URL fake: el hook nunca la contacta
+# (3) con remoto y sin stamp → LANZA: SessionStart válido + escribe el stamp de throttle
+brout="$(br)"
+printf '%s' "$brout" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' >/dev/null 2>&1 \
+  && ok "barrer-ramas: con remoto y sin throttle → emite SessionStart válido" || bad "barrer-ramas: JSON inválido; got: $brout"
+printf '%s' "$brout" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'Barriendo ramas' \
+  && ok "barrer-ramas: el aviso anuncia el barrido" || bad "barrer-ramas: el aviso no menciona el barrido"
+brslug=$(printf '%s' "$BRREPO" | cksum | awk '{print $1}')
+[ -f "$BRHOME/.claude/memory/.barrer-ramas/$brslug" ] \
+  && ok "barrer-ramas: escribió el stamp de throttle" || bad "barrer-ramas: no escribió el stamp"
+# (4) throttle: 2ª corrida inmediata → silencio (stamp fresco)
+is_silent "$(br)" && ok "barrer-ramas: throttle — 2ª corrida inmediata → silencio" || bad "barrer-ramas: no respetó el throttle"
+rm -rf "$BRFIX"
+
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "== (b6) aviso-contexto: avisa al cruzar banda, debounce, y se resetea con el baseline (compact) =="

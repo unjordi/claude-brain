@@ -37,7 +37,7 @@ public sealed class BrainState
         "git-branch-guard", "merge-squash-guard", "confirmar-merge-develop",
         "recordar-dashboard", "secret-scan", "rama-vieja", "proteger-arbol",
         "limite-gasto", "delegacion-gate", "delegacion-registrar", "delegacion-reporte",
-        "rehidratar-hilo", "aviso-contexto", "aviso-drift-cerebro",
+        "rehidratar-hilo", "aviso-contexto", "aviso-drift-cerebro", "barrer-ramas",
     };
 
     /// Hooks de tier repo (kind=hook): viajan por-repo, se cargan si la sesión INICIA en el repo.
