@@ -221,6 +221,13 @@ confirmación expresa del usuario es integrar la mini (o cualquier rama) a `deve
 - **Tu mini es también donde el cerebro se auto-cura**: el hook `aviso-drift-cerebro`, al abrir sesión
   parado en tu mini-develop con `.claude/` limpio, sincroniza la copia por-repo del cerebro SOLO
   (apply+commit+push a tu mini) — llega a `develop` con tu siguiente integración coordinada.
+- **El folder de trabajo VISIBLE del dev vive SIEMPRE en su mini-develop** — es su superficie ESTABLE de
+  QA ("lo que le doy a revisar es mi mini, siempre"): refleja "todo lo integrado" sin que nadie le mueva
+  la rama bajo los pies. **Corolario para la IA (norma dura):** Claude trabaja en **worktrees de FEATURE**
+  y **MERGEA hacia la mini**; **NUNCA saca la mini-develop del dev en un worktree propio** — una rama de
+  git solo puede estar *checked-out* en UN worktree a la vez, y esa rama la POSEE el folder visible del
+  dev. Para integrar: merge de la ramita → mini (local o por push) y el folder la ve (`pull`, o lo hace
+  Claude). Aísla en worktrees de feature, integra hacia la mini, jamás compitas por el checkout de la mini.
 
 ## Consentimiento de costo de delegación (norma dura)
 Reclutar un agente (Task/subagente) cuesta según su nivel: **gratis** (local), **incluido** (Claude
