@@ -750,6 +750,82 @@ brslug=$(printf '%s' "$BRREPO" | cksum | awk '{print $1}')
 is_silent "$(br)" && ok "barrer-ramas: throttle — 2ª corrida inmediata → silencio" || bad "barrer-ramas: no respetó el throttle"
 rm -rf "$BRFIX"
 
+# ── (b5g) recordar-cosechar: nudge "trabajaste y no cosechaste" (fail-open; heurístico; throttle; cosechado→silencio) ──
+echo ""
+echo "== (b5g) recordar-cosechar: nudge de cosecha (fail-open sin git; hubo trabajo+sin cosechar → avisa; throttle; cosechado → silencio) =="
+RCFIX="$(mktemp -d "${TMPDIR:-/tmp}/brain-rc.XXXXXX")"
+RCHOME="$RCFIX/home"; RCREPO="$RCFIX/repo"
+mkdir -p "$RCHOME" "$RCREPO"
+rc() { printf '%s' '{}' | HOME="$RCHOME" CLAUDE_PROJECT_DIR="$RCREPO" bash "$HOOKS/recordar-cosechar.sh"; }
+# (1) no es repo git → silencio (fail-open)
+is_silent "$(rc)" && ok "recordar-cosechar: no-git → silencio" || bad "recordar-cosechar: habló fuera de un repo git"
+git -C "$RCREPO" init -q >/dev/null 2>&1
+git -C "$RCREPO" config user.email t@t >/dev/null 2>&1; git -C "$RCREPO" config user.name tester >/dev/null 2>&1
+# (2) repo con sistema de memoria pero SIN trabajo (sin commits recientes, sin cambios de código) → silencio
+mkdir -p "$RCREPO/.claude/memory"
+is_silent "$(rc)" && ok "recordar-cosechar: sin trabajo sustantivo → silencio" || bad "recordar-cosechar: habló sin trabajo"
+# (3) hubo trabajo (archivo de código sin commitear) y aprendizajes.md sin tocar → AVISA + escribe stamp del día
+printf 'class X {}\n' > "$RCREPO/Foo.cs"
+rcout="$(rc)"
+printf '%s' "$rcout" | jq -e '.hookSpecificOutput.hookEventName == "Stop"' >/dev/null 2>&1 \
+  && ok "recordar-cosechar: trabajo sin cosechar → emite Stop válido" || bad "recordar-cosechar: JSON inválido; got: $rcout"
+printf '%s' "$rcout" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'cosechar-sesion' \
+  && ok "recordar-cosechar: el aviso sugiere /cosechar-sesion" || bad "recordar-cosechar: el aviso no nombra la skill"
+rcslug=$(printf '%s' "$RCREPO" | cksum | awk '{print $1}')
+[ -f "$RCHOME/.claude/memory/.recordar-cosechar/$rcslug" ] \
+  && ok "recordar-cosechar: escribió el stamp del día" || bad "recordar-cosechar: no escribió el stamp"
+# (4) throttle: 2ª corrida el mismo día → silencio
+is_silent "$(rc)" && ok "recordar-cosechar: throttle — 2ª corrida mismo día → silencio" || bad "recordar-cosechar: no respetó el throttle diario"
+# (5) cosechado (aprendizajes.md modificado sin commitear) → silencio aunque haya trabajo (limpiamos el stamp)
+rm -rf "$RCHOME/.claude/memory/.recordar-cosechar"
+printf '## 2026-07-21 · aportó: unjordi · algo\nprosa\n\n' >> "$RCREPO/.claude/memory/aprendizajes.md"
+is_silent "$(rc)" && ok "recordar-cosechar: ya se cosechó (log tocado) → silencio" || bad "recordar-cosechar: avisó aunque ya se había cosechado"
+rm -rf "$RCFIX"
+
+# ── (b5h) recordar-unificar-cerebro: gemelo hacia arriba (fail-open; delta≥umbral → avisa; en develop → silencio; throttle) ──
+echo ""
+echo "== (b5h) recordar-unificar-cerebro: aviso de aprendizajes sin unificar (fail-open; delta vs origin/develop; umbral; throttle) =="
+RUFIX="$(mktemp -d "${TMPDIR:-/tmp}/brain-ru.XXXXXX")"
+RUHOME="$RUFIX/home"; RUREPO="$RUFIX/repo"
+mkdir -p "$RUHOME" "$RUREPO"
+ru() { printf '%s' '{"source":"startup"}' | HOME="$RUHOME" CLAUDE_PROJECT_DIR="$RUREPO" bash "$HOOKS/recordar-unificar-cerebro.sh"; }
+# (1) no es repo git → silencio (fail-open)
+is_silent "$(ru)" && ok "recordar-unificar: no-git → silencio" || bad "recordar-unificar: habló fuera de un repo git"
+git -C "$RUREPO" init -q >/dev/null 2>&1
+git -C "$RUREPO" config user.email t@t >/dev/null 2>&1; git -C "$RUREPO" config user.name tester >/dev/null 2>&1
+mkdir -p "$RUREPO/.claude/memory"
+printf 'base\n' > "$RUREPO/.claude/memory/aprendizajes.md"
+git -C "$RUREPO" add -A >/dev/null 2>&1; git -C "$RUREPO" commit -qm base >/dev/null 2>&1
+git -C "$RUREPO" branch -M develop >/dev/null 2>&1
+# (2) sin origin/develop → silencio (fail-open, no hay base de comparación)
+is_silent "$(ru)" && ok "recordar-unificar: sin origin/develop → silencio" || bad "recordar-unificar: habló sin base origin/develop"
+git -C "$RUREPO" update-ref refs/remotes/origin/develop "$(git -C "$RUREPO" rev-parse HEAD)" >/dev/null 2>&1
+# (3) parado EN develop → silencio (no es una mini que unificar)
+is_silent "$(ru)" && ok "recordar-unificar: en develop → silencio" || bad "recordar-unificar: avisó estando en develop"
+# rama personal con delta en .claude/ (aprendizaje nuevo)
+git -C "$RUREPO" checkout -q -b DevelopTester >/dev/null 2>&1
+printf 'aprendizaje nuevo\n' >> "$RUREPO/.claude/memory/aprendizajes.md"
+git -C "$RUREPO" add -A >/dev/null 2>&1; git -C "$RUREPO" commit -qm cosecha >/dev/null 2>&1
+# (4) delta ≥ umbral (bajamos el umbral de archivos a 1) → AVISA + stamp; nombra unificar y aprendizajes
+ruout="$(printf '%s' '{"source":"startup"}' | HOME="$RUHOME" CLAUDE_PROJECT_DIR="$RUREPO" RECORDAR_UNIFICAR_ARCHIVOS=1 bash "$HOOKS/recordar-unificar-cerebro.sh")"
+printf '%s' "$ruout" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' >/dev/null 2>&1 \
+  && ok "recordar-unificar: delta ≥ umbral → emite SessionStart válido" || bad "recordar-unificar: JSON inválido; got: $ruout"
+printf '%s' "$ruout" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'unificar-cerebro' \
+  && ok "recordar-unificar: el aviso sugiere /unificar-cerebro" || bad "recordar-unificar: el aviso no nombra la skill"
+printf '%s' "$ruout" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'aprendizajes' \
+  && ok "recordar-unificar: el aviso resalta aprendizajes.md en el delta" || bad "recordar-unificar: no mencionó aprendizajes"
+ruslug=$(printf '%s' "$RUREPO" | cksum | awk '{print $1}')
+[ -f "$RUHOME/.claude/memory/.recordar-unificar/$ruslug" ] \
+  && ok "recordar-unificar: escribió el stamp del día" || bad "recordar-unificar: no escribió el stamp"
+# (5) throttle: 2ª corrida mismo día → silencio
+is_silent "$(printf '%s' '{"source":"startup"}' | HOME="$RUHOME" CLAUDE_PROJECT_DIR="$RUREPO" RECORDAR_UNIFICAR_ARCHIVOS=1 bash "$HOOKS/recordar-unificar-cerebro.sh")" \
+  && ok "recordar-unificar: throttle — 2ª corrida mismo día → silencio" || bad "recordar-unificar: no respetó el throttle diario"
+# (6) bajo umbral (subimos umbrales muy alto) → silencio aunque haya delta (limpiamos el stamp)
+rm -rf "$RUHOME/.claude/memory/.recordar-unificar"
+is_silent "$(printf '%s' '{"source":"startup"}' | HOME="$RUHOME" CLAUDE_PROJECT_DIR="$RUREPO" RECORDAR_UNIFICAR_ARCHIVOS=99 RECORDAR_UNIFICAR_DIAS=999 bash "$HOOKS/recordar-unificar-cerebro.sh")" \
+  && ok "recordar-unificar: delta bajo umbral → silencio" || bad "recordar-unificar: avisó bajo el umbral"
+rm -rf "$RUFIX"
+
 # ── (b5f) verificar-cerebro: DOCTOR de instalación por-máquina (sano→exit 0, roto→exit 1) ──
 echo ""
 echo "== (b5f) verificar-cerebro: doctor por-máquina (hooks instalados+cableados+jq) =="
@@ -946,7 +1022,10 @@ aviso-contexto|rehidratar-hilo
 aviso-contexto|checkpoint
 limpiar-ramas|limpiar-worktrees
 limpiar-ramas|ramas-zombie
-limpiar-worktrees|ramas-zombie"
+limpiar-worktrees|ramas-zombie
+cosechar-sesion|recordar-cosechar
+recordar-unificar-cerebro|unificar-cerebro
+cosechar-sesion|unificar-cerebro"
 ce_els=()
 for d in "$SCRIPT_DIR"/skills/*/; do [ -d "$d" ] && ce_els+=("$(basename "$d")"); done
 for h in "$HOOKS"/*.sh; do [ -e "$h" ] && ce_els+=("$(basename "$h" .sh)"); done

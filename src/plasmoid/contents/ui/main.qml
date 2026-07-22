@@ -858,6 +858,12 @@ PlasmoidItem {
                 { emoji: "🧹", name: "barrer-ramas",            desc: "barre ramas locales ya integradas (zombies squash-safe) en 2º plano",
                   event: "SessionStart",
                   detail: "Al iniciar sesión en un repo con remoto, y como mucho cada 24h, lanza limpiar-ramas.sh en segundo plano para borrar las ramas locales ya integradas (MR mergeado con --squash → remota borrada, o commits ya en la base por equivalencia de parche). Conserva todo trabajo sin integrar; nunca toca la actual/base/develop/main/Develop*/keep/*." },
+                { emoji: "🧺", name: "recordar-cosechar",       desc: "trabajaste y no cosechaste aprendizajes → sugiere /cosechar-sesion",
+                  event: "Stop",
+                  detail: "Al terminar un turno, si hubo trabajo sustantivo reciente en el repo (commits en las últimas horas o cambios de código sin commitear) pero .claude/memory/aprendizajes.md no se tocó, sugiere —no bloquea— correr /cosechar-sesion antes de cerrar si aprendiste algo durable. Throttle fuerte: 1×/día por repo. Fail-open." },
+                { emoji: "🪢", name: "recordar-unificar-cerebro", desc: "tu mini acumuló aprendizajes sin unificar a develop → aviso",
+                  event: "SessionStart",
+                  detail: "Gemelo hacia arriba de aviso-drift-cerebro: al iniciar sesión cuenta el delta de .claude/ (sobre todo aprendizajes.md) de tu rama vs origin/develop y, si supera el umbral (≥5 archivos o >7 días, tunable por env), avisa —no bloquea— para correr /unificar-cerebro cuando quieras integrarlos. No escribe al árbol. Throttle 1×/día por repo." },
                 { emoji: "⏳", name: "aviso-contexto",            desc: "el contexto se está llenando → ordena checkpoint y propón /compact",
                   event: "PostToolUse",
                   detail: "Vigila cuánto creció el contexto desde el último /compact y, al cruzar bandas por debajo del auto-compact, inyecta un aviso escalado (heads-up → checkpoint ahora → inminente) para volcar el hilo con checkpoint y compactar proactivamente. Convierte el auto-compact-sorpresa en caso raro." },
@@ -902,7 +908,13 @@ PlasmoidItem {
                   detail: "Orquestar trabajo paralelizable en varios agentes SIN niñera: asigna ítems autocontenidos del backlog y, al terminar cada agente, su avance queda registrado (bitácora) y su worktree limpio automáticamente. Modelo de estado sin redundancia: estado-proyecto = backlog vivo, bitácora = pasado append-only." },
                 { emoji: "🌙", name: "turno-nocturno", desc: "Claude trabaja solo de noche: contrato medible, decide-o-parquea, checkpoint c/2h",
                   event: "skill · opt-in",
-                  detail: "Protocolo para dejar a Claude trabajando SOLO de noche: eco del contrato antes de empezar (alcance, criterio de cierre MEDIBLE, lo intocable, dónde queda visible el resultado), preflight de herramientas/quota, regla de decisión (dentro del alcance decide y sigue; fuera, parquea y brinca), autorización durable a disco y checkpoint cada ~2h." }
+                  detail: "Protocolo para dejar a Claude trabajando SOLO de noche: eco del contrato antes de empezar (alcance, criterio de cierre MEDIBLE, lo intocable, dónde queda visible el resultado), preflight de herramientas/quota, regla de decisión (dentro del alcance decide y sigue; fuera, parquea y brinca), autorización durable a disco y checkpoint cada ~2h." },
+                { emoji: "🌾", name: "cosechar-sesion", desc: "cosecha local: extrae aprendizajes de tu sesión al inbox del equipo",
+                  event: "skill · opt-in",
+                  detail: "Al cerrar el día, revisa TU propio transcript y appendea los aprendizajes durables (feedback del usuario, lecciones de proceso, gotchas) al FINAL de .claude/memory/aprendizajes.md con atribución (aportó: handle). Separa el grano de la paja (no cosecha trivialidades). Alimenta el inbox append-only (merge=union). NO cierra slice ni hace git." },
+                { emoji: "🧩", name: "unificar-cerebro", desc: "reconciliación semanal del cerebro del equipo mini→develop",
+                  event: "skill · opt-in",
+                  detail: "Hermana de cerrar-slice: junta aprendizajes+memorias de las minis hacia develop sin perder atribución/voz ni tocar guardrails. Inventaría el delta, baja primero el brain canónico, resuelve por clase, CURA el log (trenza solapes acreditando a ambos + gradúa lo maduro), verifica test-brain+lint, integra por el carril existente (OK explícito, sin auto-merge, con squash) y anota bitácora." }
             ]
         }
     ]
@@ -920,7 +932,7 @@ PlasmoidItem {
     // Catálogo conocido (mismos conjuntos que BrainState.knownGlobalHooks / knownRepoHooks del Swift).
     // DEBE coincidir con brain/hooks/MANIFEST; lo verifica el drift-check del widget (test-brain.sh).
     readonly property var brainGlobalHooks: ["git-branch-guard","merge-squash-guard","confirmar-merge-develop","recordar-dashboard","secret-scan","rama-vieja","proteger-arbol","limite-gasto","delegacion-gate","delegacion-registrar","delegacion-reporte","rehidratar-hilo","aviso-contexto","aviso-drift-cerebro","barrer-ramas"]
-    readonly property var brainRepoHooks:   ["sesion-inicio","dod-verificar"]
+    readonly property var brainRepoHooks:   ["sesion-inicio","dod-verificar","recordar-cosechar","recordar-unificar-cerebro"]
 
     // Ruta del helper bash, resuelta relativa a este main.qml (…/contents/ui/ → …/contents/brain-scan.sh).
     readonly property string brainScript: {
@@ -1002,7 +1014,7 @@ PlasmoidItem {
             return p && w ? "installed" : (p ? "presentNotWired" : "absent")
         }
         if (inArr(root.brainRepoHooks, name)) return "repoScoped"
-        if (["cerrar-slice","checkpoint","diagramar","orquestar-fanout","turno-nocturno"].indexOf(name) !== -1)
+        if (["cerrar-slice","checkpoint","diagramar","orquestar-fanout","turno-nocturno","cosechar-sesion","unificar-cerebro"].indexOf(name) !== -1)
             return inArr(st.skills, name) ? "installed" : "absent"
         if (name === "Definition of Done" || name === "Doc <= realidad"
             || name === "Flujo de git" || name === "Costo de delegación")

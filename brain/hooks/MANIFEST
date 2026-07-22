@@ -45,3 +45,5 @@ ramas-zombie             global  lib
 
 dod-verificar            repo    hook
 sesion-inicio            repo    hook
+recordar-cosechar        repo    hook
+recordar-unificar-cerebro repo   hook

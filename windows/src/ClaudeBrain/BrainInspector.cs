@@ -44,7 +44,7 @@ public sealed class BrainState
     /// DEBE coincidir con brain/hooks/MANIFEST {repo} (lo verifica test-brain.sh).
     public static readonly HashSet<string> KnownRepoHooks = new()
     {
-        "sesion-inicio", "dod-verificar",
+        "sesion-inicio", "dod-verificar", "recordar-cosechar", "recordar-unificar-cerebro",
     };
 
     /// Estado real de una pieza (por nombre) contra la evidencia leída. Espejo de `status(_:_:)` de Swift.
@@ -59,6 +59,7 @@ public sealed class BrainState
         return name switch
         {
             "cerrar-slice" or "checkpoint" or "diagramar" or "orquestar-fanout" or "turno-nocturno"
+                or "cosechar-sesion" or "unificar-cerebro"
                 => Skills.Contains(name) ? BrainStatus.Installed : BrainStatus.Absent,
             "Definition of Done" or "Doc <= realidad" or "Flujo de git" or "Costo de delegación"
                 => HasNorms ? BrainStatus.Installed : BrainStatus.Absent,
