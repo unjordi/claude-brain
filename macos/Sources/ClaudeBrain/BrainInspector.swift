@@ -54,12 +54,12 @@ struct BrainState {
         "git-branch-guard", "merge-squash-guard", "confirmar-merge-develop",
         "recordar-dashboard", "secret-scan", "rama-vieja", "proteger-arbol",
         "limite-gasto", "delegacion-gate", "delegacion-registrar", "delegacion-reporte",
-        "rehidratar-hilo", "aviso-contexto", "aviso-drift-cerebro",
+        "rehidratar-hilo", "aviso-contexto", "aviso-drift-cerebro", "barrer-ramas",
     ]
     /// Hooks de tier repo (kind=hook): viajan por-repo, se cargan si la sesión INICIA en el repo.
     /// DEBE coincidir con brain/hooks/MANIFEST {repo} (lo verifica test-brain.sh).
     static let knownRepoHooks: Set<String> = [
-        "sesion-inicio", "dod-verificar",
+        "sesion-inicio", "dod-verificar", "recordar-cosechar", "recordar-unificar-cerebro",
     ]
 
     /// # de piezas GLOBALES esperadas que FALTAN: hooks no (presentes+cableados) + normas + la skill.

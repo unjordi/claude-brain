@@ -72,10 +72,16 @@ if [ -n "$tpath" ] && [ -f "$tpath" ]; then
     | .[-10:] | join("  ")' 2>/dev/null)
 fi
 
+# RELEASE_RE: lenguaje de release-a-main. Se usa en AMBAS ramas — exige release para main, y TAMBIÉN
+# vale como confirmación del merge INTERMEDIO a develop (un release a main pasa forzosamente por
+# develop, así que autorizar el release autoriza su paso a develop). Antídoto al falso-negativo del
+# 2026-07-20: "ya puedes empujar el brain a main" frenó el PR intermedio a develop porque el CONF_RE
+# de develop no reconocía lenguaje de release. La autorización de release es MÁS fuerte, no menos.
+RELEASE_RE='hasta main|\brelease\b|(a|hacia|hast[ao]) main|liber(a|ar|alo|é)|promue?v(e|er)[a-zé ]*main|merge[a-zé ]* a? *main'
+
 if [ "$destino" = "main" ]; then
   # RELEASE a main: exige autorización SUPER explícita de release. Un 'mergea' genérico (que vale
   # para develop) NO autoriza un release a main.
-  RELEASE_RE='hasta main|\brelease\b|(a|hacia|hast[ao]) main|liber(a|ar|alo|é)|promue?v(e|er)[a-zé ]*main|merge[a-zé ]* a? *main'
   printf '%s' "$recent" | grep -qiE "$RELEASE_RE" && exit 0
   jq -n --arg r "FRENO (RELEASE a main): promover develop→main es una decisión de RELEASE que exige autorización SUPER explícita del usuario para ESTE release (p. ej. 'release a main', 'hasta main', 'libera'), y no la encuentro en el contexto reciente.
   (a) Si ya la dio, CÍTALA y reintenta.
@@ -87,6 +93,8 @@ fi
 # Destino develop (o desconocido → conservador): confirmación normal. "sigue/avanza" NO cuenta.
 CONF_RE='merg[eé]a|mérga(lo|los)?|dale( el)? merge|haz(lo|le)?( el)? *merge|merge a develop|integra[a-zé ]*a? *develop|s[ií],? merge|ci[eé]rra(lo)?|cierra el slice|ll[eé]va(lo|los)?[a-zé ,]*develop|s[uú]b(e|elo|elos|ir|an|í)[a-zé ,]*develop|m[aá]nda(lo|los)?[a-zé ,]*develop|emp[uú]j(a|á|e)(lo|los|le)?[a-zé ,]*develop|m[eé]te(le|lo|los)?[a-zé ,]*develop|ya (puedes|podés|puedo) mergear|adelante[a-zé ]*(el )?merge|autoriz|luz verde (para|de|expresa)|visto bueno|aprob(ado|é|ó)?|va! *(merge|mr|develop|cierra)'
 printf '%s' "$recent" | grep -qiE "$CONF_RE" && exit 0
+# Un OK de RELEASE-a-main también cubre este paso intermedio a develop (el release pasa por develop).
+printf '%s' "$recent" | grep -qiE "$RELEASE_RE" && exit 0
 
 # ── Autorización DURABLE (sobrevive compactaciones): grant EXPLÍCITO del usuario persistido a disco
 # (lo escribe el skill turno-nocturno al recibir el OK, con la CITA textual del usuario y un

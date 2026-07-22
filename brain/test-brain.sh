@@ -251,6 +251,18 @@ is_silent "$(cm 'glab mr merge 5 --yes && git status' 'ya lo revisé, mérgalo')
 # Baseline: merge a develop SIN OK → deny.
 is_deny "$(cm 'glab mr merge 5 --yes' 'sigue avanzando')" \
   && ok "cmd: merge a develop sin OK ('sigue' NO cuenta) → deny" || bad "cmd: no bloqueó merge a develop sin OK"
+# FIX 2026-07-20 (precisión): una autorización de RELEASE-a-main también cubre el merge INTERMEDIO a
+# develop (el release pasa forzosamente por develop). Antes daba falso-negativo: "empujar el brain a
+# main" frenaba el PR intermedio a develop porque el CONF_RE de develop no reconocía lenguaje de release.
+is_silent "$(cm 'glab mr merge 62 --squash --yes' 'ya puedes empujar el brain a main')" \
+  && ok "cmd: merge a develop con OK de RELEASE-a-main → pasa (el release cubre su paso a develop)" \
+  || bad "cmd: falso-negativo — 'empujar a main' NO destrabó el merge intermedio a develop"
+# Blindaje (NO se afloja el camino inverso): un OK de develop NUNCA autoriza un RELEASE a main.
+mock_cm_glab main
+is_deny "$(cm 'glab mr merge 63 --yes' 'mérgalo a develop')" \
+  && ok "cmd: 'mérgalo a develop' NO autoriza un RELEASE a main (main sigue exigiendo release explícito)" \
+  || bad "cmd: AFLOJAMIENTO GRAVE — un OK de develop destrabó un release a main"
+mock_cm_glab develop
 # H5 (lib): caché por MR-id → la 2ª consulta NO re-llama a la red (comparte destino entre squash+confirmar).
 d1=$(PATH="$CMBIN:$PATH" CLAUDE_PROJECT_DIR="$CMREPO" bash -c '. "'"$HOOKS"'/analizar-comando-git.sh"; acg_destino_de_mr "glab mr merge 123"')
 mock_cm_glab main   # si re-llamara, ahora diría main; la caché debe seguir dando develop
@@ -721,6 +733,137 @@ smout3=$(CLAUDE_PROJECT_DIR="$SMREPO" bash "$SCRIPT_DIR/sembrar-mini-develop.sh"
   && ok "sembrar-mini: rechaza 'develop' como nombre de mini (protege las bases)" || bad "sembrar-mini: aceptó develop como mini"
 rm -rf "$SMFIX"
 
+# ── (b5e) barrer-ramas: TRIGGER throttled del barrido de ramas (fail-open, lanza, throttle) ──
+echo ""
+echo "== (b5e) barrer-ramas: da trigger al barrido (fail-open sin git/remoto; lanza; throttle) =="
+BRFIX="$(mktemp -d "${TMPDIR:-/tmp}/brain-br.XXXXXX")"
+BRHOME="$BRFIX/home"; BRHOOKS="$BRFIX/hooks"; BRREPO="$BRFIX/repo"
+mkdir -p "$BRHOME" "$BRHOOKS" "$BRREPO"
+# Copia el hook + un STUB de limpiar-ramas junto a él: dirname resuelve a ESTA carpeta → usa el stub (sin red).
+cp "$HOOKS/barrer-ramas.sh" "$BRHOOKS/barrer-ramas.sh"
+printf '#!/usr/bin/env bash\ntouch "%s/.barrido"\n' "$BRFIX" > "$BRHOOKS/limpiar-ramas.sh"; chmod +x "$BRHOOKS/limpiar-ramas.sh"
+br() { printf '%s' '{"source":"startup"}' | HOME="$BRHOME" CLAUDE_PROJECT_DIR="$BRREPO" bash "$BRHOOKS/barrer-ramas.sh"; }
+# (1) no es repo git → silencio (fail-open, no estorba)
+is_silent "$(br)" && ok "barrer-ramas: no-git → silencio" || bad "barrer-ramas: habló fuera de un repo git"
+git -C "$BRREPO" init -q >/dev/null 2>&1
+# (2) repo SIN remoto → silencio (sin remoto no hay ramas squasheadas-y-borradas que barrer)
+is_silent "$(br)" && ok "barrer-ramas: repo sin remoto → silencio" || bad "barrer-ramas: habló sin remoto"
+git -C "$BRREPO" remote add origin /tmp/fake-no-red >/dev/null 2>&1   # URL fake: el hook nunca la contacta
+# (3) con remoto y sin stamp → LANZA: SessionStart válido + escribe el stamp de throttle
+brout="$(br)"
+printf '%s' "$brout" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' >/dev/null 2>&1 \
+  && ok "barrer-ramas: con remoto y sin throttle → emite SessionStart válido" || bad "barrer-ramas: JSON inválido; got: $brout"
+printf '%s' "$brout" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'Barriendo ramas' \
+  && ok "barrer-ramas: el aviso anuncia el barrido" || bad "barrer-ramas: el aviso no menciona el barrido"
+brslug=$(printf '%s' "$BRREPO" | cksum | awk '{print $1}')
+[ -f "$BRHOME/.claude/memory/.barrer-ramas/$brslug" ] \
+  && ok "barrer-ramas: escribió el stamp de throttle" || bad "barrer-ramas: no escribió el stamp"
+# (4) throttle: 2ª corrida inmediata → silencio (stamp fresco)
+is_silent "$(br)" && ok "barrer-ramas: throttle — 2ª corrida inmediata → silencio" || bad "barrer-ramas: no respetó el throttle"
+rm -rf "$BRFIX"
+
+# ── (b5g) recordar-cosechar: nudge "trabajaste y no cosechaste" (fail-open; heurístico; throttle; cosechado→silencio) ──
+echo ""
+echo "== (b5g) recordar-cosechar: nudge de cosecha (fail-open sin git; hubo trabajo+sin cosechar → avisa; throttle; cosechado → silencio) =="
+RCFIX="$(mktemp -d "${TMPDIR:-/tmp}/brain-rc.XXXXXX")"
+RCHOME="$RCFIX/home"; RCREPO="$RCFIX/repo"
+mkdir -p "$RCHOME" "$RCREPO"
+rc() { printf '%s' '{}' | HOME="$RCHOME" CLAUDE_PROJECT_DIR="$RCREPO" bash "$HOOKS/recordar-cosechar.sh"; }
+# (1) no es repo git → silencio (fail-open)
+is_silent "$(rc)" && ok "recordar-cosechar: no-git → silencio" || bad "recordar-cosechar: habló fuera de un repo git"
+git -C "$RCREPO" init -q >/dev/null 2>&1
+git -C "$RCREPO" config user.email t@t >/dev/null 2>&1; git -C "$RCREPO" config user.name tester >/dev/null 2>&1
+# (2) repo con sistema de memoria pero SIN trabajo (sin commits recientes, sin cambios de código) → silencio
+mkdir -p "$RCREPO/.claude/memory"
+is_silent "$(rc)" && ok "recordar-cosechar: sin trabajo sustantivo → silencio" || bad "recordar-cosechar: habló sin trabajo"
+# (3) hubo trabajo (archivo de código sin commitear) y aprendizajes.md sin tocar → AVISA + escribe stamp del día
+printf 'class X {}\n' > "$RCREPO/Foo.cs"
+rcout="$(rc)"
+printf '%s' "$rcout" | jq -e '.hookSpecificOutput.hookEventName == "Stop"' >/dev/null 2>&1 \
+  && ok "recordar-cosechar: trabajo sin cosechar → emite Stop válido" || bad "recordar-cosechar: JSON inválido; got: $rcout"
+printf '%s' "$rcout" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'cosechar-sesion' \
+  && ok "recordar-cosechar: el aviso sugiere /cosechar-sesion" || bad "recordar-cosechar: el aviso no nombra la skill"
+rcslug=$(printf '%s' "$RCREPO" | cksum | awk '{print $1}')
+[ -f "$RCHOME/.claude/memory/.recordar-cosechar/$rcslug" ] \
+  && ok "recordar-cosechar: escribió el stamp del día" || bad "recordar-cosechar: no escribió el stamp"
+# (4) throttle: 2ª corrida el mismo día → silencio
+is_silent "$(rc)" && ok "recordar-cosechar: throttle — 2ª corrida mismo día → silencio" || bad "recordar-cosechar: no respetó el throttle diario"
+# (5) cosechado (aprendizajes.md modificado sin commitear) → silencio aunque haya trabajo (limpiamos el stamp)
+rm -rf "$RCHOME/.claude/memory/.recordar-cosechar"
+printf '## 2026-07-21 · aportó: unjordi · algo\nprosa\n\n' >> "$RCREPO/.claude/memory/aprendizajes.md"
+is_silent "$(rc)" && ok "recordar-cosechar: ya se cosechó (log tocado) → silencio" || bad "recordar-cosechar: avisó aunque ya se había cosechado"
+rm -rf "$RCFIX"
+
+# ── (b5h) recordar-unificar-cerebro: gemelo hacia arriba (fail-open; delta≥umbral → avisa; en develop → silencio; throttle) ──
+echo ""
+echo "== (b5h) recordar-unificar-cerebro: aviso de aprendizajes sin unificar (fail-open; delta vs origin/develop; umbral; throttle) =="
+RUFIX="$(mktemp -d "${TMPDIR:-/tmp}/brain-ru.XXXXXX")"
+RUHOME="$RUFIX/home"; RUREPO="$RUFIX/repo"
+mkdir -p "$RUHOME" "$RUREPO"
+ru() { printf '%s' '{"source":"startup"}' | HOME="$RUHOME" CLAUDE_PROJECT_DIR="$RUREPO" bash "$HOOKS/recordar-unificar-cerebro.sh"; }
+# (1) no es repo git → silencio (fail-open)
+is_silent "$(ru)" && ok "recordar-unificar: no-git → silencio" || bad "recordar-unificar: habló fuera de un repo git"
+git -C "$RUREPO" init -q >/dev/null 2>&1
+git -C "$RUREPO" config user.email t@t >/dev/null 2>&1; git -C "$RUREPO" config user.name tester >/dev/null 2>&1
+mkdir -p "$RUREPO/.claude/memory"
+printf 'base\n' > "$RUREPO/.claude/memory/aprendizajes.md"
+git -C "$RUREPO" add -A >/dev/null 2>&1; git -C "$RUREPO" commit -qm base >/dev/null 2>&1
+git -C "$RUREPO" branch -M develop >/dev/null 2>&1
+# (2) sin origin/develop → silencio (fail-open, no hay base de comparación)
+is_silent "$(ru)" && ok "recordar-unificar: sin origin/develop → silencio" || bad "recordar-unificar: habló sin base origin/develop"
+git -C "$RUREPO" update-ref refs/remotes/origin/develop "$(git -C "$RUREPO" rev-parse HEAD)" >/dev/null 2>&1
+# (3) parado EN develop → silencio (no es una mini que unificar)
+is_silent "$(ru)" && ok "recordar-unificar: en develop → silencio" || bad "recordar-unificar: avisó estando en develop"
+# rama personal con delta en .claude/ (aprendizaje nuevo)
+git -C "$RUREPO" checkout -q -b DevelopTester >/dev/null 2>&1
+printf 'aprendizaje nuevo\n' >> "$RUREPO/.claude/memory/aprendizajes.md"
+git -C "$RUREPO" add -A >/dev/null 2>&1; git -C "$RUREPO" commit -qm cosecha >/dev/null 2>&1
+# (4) delta ≥ umbral (bajamos el umbral de archivos a 1) → AVISA + stamp; nombra unificar y aprendizajes
+ruout="$(printf '%s' '{"source":"startup"}' | HOME="$RUHOME" CLAUDE_PROJECT_DIR="$RUREPO" RECORDAR_UNIFICAR_ARCHIVOS=1 bash "$HOOKS/recordar-unificar-cerebro.sh")"
+printf '%s' "$ruout" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' >/dev/null 2>&1 \
+  && ok "recordar-unificar: delta ≥ umbral → emite SessionStart válido" || bad "recordar-unificar: JSON inválido; got: $ruout"
+printf '%s' "$ruout" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'unificar-cerebro' \
+  && ok "recordar-unificar: el aviso sugiere /unificar-cerebro" || bad "recordar-unificar: el aviso no nombra la skill"
+printf '%s' "$ruout" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'aprendizajes' \
+  && ok "recordar-unificar: el aviso resalta aprendizajes.md en el delta" || bad "recordar-unificar: no mencionó aprendizajes"
+ruslug=$(printf '%s' "$RUREPO" | cksum | awk '{print $1}')
+[ -f "$RUHOME/.claude/memory/.recordar-unificar/$ruslug" ] \
+  && ok "recordar-unificar: escribió el stamp del día" || bad "recordar-unificar: no escribió el stamp"
+# (5) throttle: 2ª corrida mismo día → silencio
+is_silent "$(printf '%s' '{"source":"startup"}' | HOME="$RUHOME" CLAUDE_PROJECT_DIR="$RUREPO" RECORDAR_UNIFICAR_ARCHIVOS=1 bash "$HOOKS/recordar-unificar-cerebro.sh")" \
+  && ok "recordar-unificar: throttle — 2ª corrida mismo día → silencio" || bad "recordar-unificar: no respetó el throttle diario"
+# (6) bajo umbral (subimos umbrales muy alto) → silencio aunque haya delta (limpiamos el stamp)
+rm -rf "$RUHOME/.claude/memory/.recordar-unificar"
+is_silent "$(printf '%s' '{"source":"startup"}' | HOME="$RUHOME" CLAUDE_PROJECT_DIR="$RUREPO" RECORDAR_UNIFICAR_ARCHIVOS=99 RECORDAR_UNIFICAR_DIAS=999 bash "$HOOKS/recordar-unificar-cerebro.sh")" \
+  && ok "recordar-unificar: delta bajo umbral → silencio" || bad "recordar-unificar: avisó bajo el umbral"
+rm -rf "$RUFIX"
+
+# ── (b5f) verificar-cerebro: DOCTOR de instalación por-máquina (sano→exit 0, roto→exit 1) ──
+echo ""
+echo "== (b5f) verificar-cerebro: doctor por-máquina (hooks instalados+cableados+jq) =="
+VCFIX="$(mktemp -d "${TMPDIR:-/tmp}/brain-vc.XXXXXX")"
+VCHOME="$VCFIX/home"; VCBRAIN="$VCFIX/clon"
+mkdir -p "$VCHOME/.claude/hooks" "$VCBRAIN/brain/hooks"
+# MANIFEST minimal CONTROLADO: un hook global (se exige instalado+cableado) + un script (no se exige cableado)
+printf '%s\n' 'foo   global  hook' 'baz   global  script' > "$VCBRAIN/brain/hooks/MANIFEST"
+vc() { HOME="$VCHOME" CLAUDE_BRAIN_DIR="$VCBRAIN" bash "$HOOKS/verificar-cerebro.sh" "${1:-}"; }
+# (1) SANO: foo.sh instalado + cableado en settings.json → exit 0 y dice "sano"
+: > "$VCHOME/.claude/hooks/foo.sh"
+printf '{"hooks":{"SessionStart":[{"hooks":[{"command":"bash foo.sh"}]}]}}' > "$VCHOME/.claude/settings.json"
+vout="$(vc 2>&1)"; vrc=$?
+{ [ "$vrc" = 0 ] && printf '%s' "$vout" | grep -q 'sano'; } \
+  && ok "verificar-cerebro: instalación sana → exit 0" || bad "verificar-cerebro: esperaba sano/0; rc=$vrc; out=$vout"
+# (2) ROTO: el hook existe pero NO está cableado en settings.json → exit 1 y lo señala
+printf '{"hooks":{}}' > "$VCHOME/.claude/settings.json"
+vout2="$(vc 2>&1)"; vrc2=$?
+{ [ "$vrc2" = 1 ] && printf '%s' "$vout2" | grep -q 'NO cableado'; } \
+  && ok "verificar-cerebro: hook sin cablear → exit 1 + lo señala" || bad "verificar-cerebro: esperaba fallo/1 por cableado; rc=$vrc2"
+# (3) ROTO: falta el .sh instalado → exit 1
+rm -f "$VCHOME/.claude/hooks/foo.sh"
+printf '{"hooks":{"SessionStart":[{"hooks":[{"command":"bash foo.sh"}]}]}}' > "$VCHOME/.claude/settings.json"
+if vc >/dev/null 2>&1; then bad "verificar-cerebro: esperaba fallo/1 por .sh faltante"; else ok "verificar-cerebro: hook sin instalar → exit 1"; fi
+rm -rf "$VCFIX"
+
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "== (b6) aviso-contexto: avisa al cruzar banda, debounce, y se resetea con el baseline (compact) =="
@@ -891,7 +1034,10 @@ aviso-contexto|rehidratar-hilo
 aviso-contexto|checkpoint
 limpiar-ramas|limpiar-worktrees
 limpiar-ramas|ramas-zombie
-limpiar-worktrees|ramas-zombie"
+limpiar-worktrees|ramas-zombie
+cosechar-sesion|recordar-cosechar
+recordar-unificar-cerebro|unificar-cerebro
+cosechar-sesion|unificar-cerebro"
 ce_els=()
 for d in "$SCRIPT_DIR"/skills/*/; do [ -d "$d" ] && ce_els+=("$(basename "$d")"); done
 for h in "$HOOKS"/*.sh; do [ -e "$h" ] && ce_els+=("$(basename "$h" .sh)"); done
@@ -1041,6 +1187,22 @@ bash "$SYNC" "$E5T" 2>/dev/null | grep -qE '==> resumen:.*[1-9][0-9]* retirado' 
   && ok "e5: el dry-run REPORTA el retirado en el resumen (aviso-drift lo cuenta como drift)" \
   || ok "e5: (sin retirados pendientes tras el apply — esperado)"
 rm -rf "$E5T"
+echo "== (e4) Windows: bootstrap.ps1 exporta CLAUDE_BRAIN_DIR (los hooks bash hallan la fuente) =="
+# En Windows el clon-fuente vive en %LOCALAPPDATA%\claude-brain-repo, NO en ~/.claude-brain (default de
+# Mac/Linux). Si bootstrap.ps1 no exporta CLAUDE_BRAIN_DIR, el hook bash aviso-drift-cerebro cae a
+# $HOME/.claude-brain (inexistente) y el auto-sync por-repo falla MUDO. Guard de regresión.
+BPS="$SCRIPT_DIR/../bootstrap.ps1"
+if [ -f "$BPS" ]; then
+  grep -q "SetEnvironmentVariable('CLAUDE_BRAIN_DIR'" "$BPS" \
+    && ok "e4: bootstrap.ps1 exporta CLAUDE_BRAIN_DIR (User env)" \
+    || bad "e4: bootstrap.ps1 NO exporta CLAUDE_BRAIN_DIR → en Windows el auto-sync del cerebro falla mudo"
+  # y debe guardarlo en FORWARD-SLASH (bash se atraganta con los backslashes de Windows)
+  grep -qE "dirBash = .dir -replace|CLAUDE_BRAIN_DIR', .\\\$dirBash" "$BPS" \
+    && ok "e4: la ruta se exporta en forward-slash (no backslashes que rompen bash)" \
+    || bad "e4: CLAUDE_BRAIN_DIR podría exportarse con backslashes (bash no los resuelve)"
+else
+  bad "e4: no encuentro bootstrap.ps1"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""

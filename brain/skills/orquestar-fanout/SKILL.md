@@ -54,14 +54,29 @@ antes de un git destructivo que orfanaría commits sin pushear).
 > *"al iniciar, `git reset --hard <rama-objetivo>` en TU worktree aislado para nacer sobre la base correcta"*
 > — es seguro porque es tu worktree AISLADO (no el compartido). Disparará `proteger-arbol` (aviso, no bloqueo):
 > es un falso positivo conocido en worktree aislado (backlog H14). Fix de raíz = harness (backlog H15).
+>
+> **El workaround NO basta por sí solo — el ORQUESTADOR verifica la BASE, no la cree (lección REAL, C7, 2026-07-21).**
+> Un agente reportó "reseteé a `DevelopUnjordi`" pero su commit salió con **parent = tip de `main`**
+> (el reset no ocurrió, o falló en silencio): al nacer sobre `main` NO vio infra que sí existía en
+> `develop` y **rehízo trabajo redundante**. El auto-reporte del agente sobre su propia base es
+> exactamente lo que NO es evidencia. **Antes de integrar el commit de un agente, el orquestador
+> COMPRUEBA su linaje con git** (no confía en la prosa del reporte):
+> `git merge-base --is-ancestor <commit>^ <rama-objetivo>` (¿su padre YA está en mi rama?) y
+> `git log --oneline -1 <commit>^` / `git show --stat <commit>` (¿el padre y el diff son los esperados?).
+> Si el padre resultó ser `main` (u otra base equivocada) → **NO integres**: descarta la rama y rehaz
+> el ítem sobre la base correcta. **Integra por CHERRY-PICK del delta** (no `merge`) cuando la base del
+> agente pueda estar vieja — el merge arrastraría el árbol viejo; el cherry-pick trae solo el cambio neto.
 
 ## Con agentes ACTIVOS — reglas anti-desastre (destiladas de un caso real, 2026-07)
 - **El sub-agente es TERMINAL.** Su prompt DEBE decírselo: *"eres terminal — cuando tu turno acaba NADA
   tuyo sigue corriendo; NO puedes 'lanzar en background' ni esperar notificaciones. Ejecuta el trabajo
   COMPLETO en ESTE turno."* (En un caso real un agente se despidió creyendo que dejó algo "corriendo en background"
   — no había hecho nada, esperaba una notificación que jamás llegaría.)
-- **Verifica ANTES de creer.** El reporte de un agente NO es evidencia: el orquestador comprueba el
-  resultado real (git status/worktree/archivo existe/compila) **read-only** antes de marcar el ítem hecho.
+- **Verifica ANTES de creer — incluida la BASE del commit.** El reporte de un agente NO es evidencia: el
+  orquestador comprueba el resultado real (git status/worktree/archivo existe/compila) **read-only** antes
+  de marcar el ítem hecho — **y verifica el LINAJE del commit** (que su padre esté sobre la rama-objetivo,
+  no sobre `main`; ver el GOTCHA de base equivocada arriba) ANTES de integrar. Un "reseteé a la rama X" del
+  agente es justo lo que hay que comprobar, no creer (caso C7, 2026-07-21).
   El prompt del agente exige *"ENTREGA el artefacto ejecutado y verificado, NO un plan ni un stub; si no
   puedes completarlo, dilo explícito"* (agentes devolvieron esqueletos en vez del trabajo real).
 - **NUNCA publiques/deployes desde el worktree de un agente.** Los worktrees NO heredan archivos
@@ -91,6 +106,8 @@ antes de un git destructivo que orfanaría commits sin pushear).
    y **cada agente que toque código va en su WORKTREE AISLADO** (ver regla dura arriba).
 2. **Contrato del agente:** cada agente DEVUELVE, además del trabajo:
    - `qué hizo` (el cambio neto),
+   - `base`: la rama y el **SHA real** sobre los que construyó, **verificado con git** (`git rev-parse HEAD^`,
+     `git rev-parse --abbrev-ref HEAD`), NO asumido — el orquestador lo re-verifica antes de integrar (ver GOTCHA de base),
    - `línea-de-bitácora` curada (prosa, no el pegote de commits),
    - `pendiente` que deje para otro (o "ninguno"),
    - `worktree`: `limpio` (rama mergeada) o `dejado-con-<nota>`.

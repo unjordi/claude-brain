@@ -42,7 +42,7 @@ flowchart LR
 
     GBG["🚧 git-branch-guard<br/>push/merge directo a develop·main<br/>→ DENEGADO, redirige a ramita"]
     MSG["🔗 merge-squash-guard<br/>MR a develop sin --squash → DENEGADO<br/>(destino main = exento: release sin squash)"]
-    CMD["✋ confirmar-merge-develop<br/>merge sin OK expreso → DENEGADO<br/>target-aware: develop pide OK normal,<br/>main exige marca de RELEASE"]
+    CMD["✋ confirmar-merge-develop<br/>merge sin OK expreso → DENEGADO<br/>target-aware: develop pide OK normal,<br/>main exige marca de RELEASE<br/>(un OK de release también cubre su paso a develop)"]
     SS["🕵️ secret-scan<br/>commit/push con secreto → DENEGADO"]
     RV["🕰️ rama-vieja<br/>base vieja al push → AVISA"]
     RD["📊 recordar-dashboard<br/>al push: dashboard + doc=realidad → RECUERDA"]

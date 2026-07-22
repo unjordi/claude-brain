@@ -1220,7 +1220,8 @@ struct PopoverView: View {
         }
         if BrainState.knownRepoHooks.contains(name) { return .repoScoped }
         switch name {
-        case "cerrar-slice", "checkpoint", "diagramar", "orquestar-fanout", "turno-nocturno":
+        case "cerrar-slice", "checkpoint", "diagramar", "orquestar-fanout", "turno-nocturno",
+             "cosechar-sesion", "unificar-cerebro":
             return st.skills.contains(name) ? .installed : .absent
         case "Definition of Done", "Doc <= realidad", "Flujo de git", "Costo de delegación":
             return st.hasNorms ? .installed : .absent
@@ -1284,6 +1285,15 @@ struct PopoverView: View {
                     BrainItem("♻️", "aviso-drift-cerebro", "la copia del cerebro por-repo quedó atrás de la fuente → aviso",
                               "SessionStart",
                               "Al iniciar sesión en un repo con el cerebro por-repo instalado, compara esa copia contra la fuente única (sincronizar-cerebro.sh en dry-run, diff por contenido) y, si quedó atrás, avisa para que Claude proponga propagar por el flujo (ramita→MR). No escribe al árbol en repos compartidos. Throttle 6h si salió limpio."),
+                    BrainItem("🧹", "barrer-ramas", "barre ramas locales ya integradas (zombies squash-safe) en 2º plano",
+                              "SessionStart",
+                              "Al iniciar sesión en un repo con remoto, y como mucho cada 24h, lanza limpiar-ramas.sh en segundo plano para borrar las ramas locales ya integradas (MR mergeado con --squash → remota borrada, o commits ya en la base por equivalencia de parche). Conserva todo trabajo sin integrar; nunca toca la actual/base/develop/main/Develop*/keep/*."),
+                    BrainItem("🧺", "recordar-cosechar", "trabajaste y no cosechaste aprendizajes → sugiere /cosechar-sesion",
+                              "Stop",
+                              "Al terminar un turno, si hubo trabajo sustantivo reciente en el repo (commits en las últimas horas o cambios de código sin commitear) pero .claude/memory/aprendizajes.md no se tocó, sugiere —no bloquea— correr /cosechar-sesion antes de cerrar si aprendiste algo durable. Throttle fuerte: 1×/día por repo. Fail-open."),
+                    BrainItem("🪢", "recordar-unificar-cerebro", "tu mini acumuló aprendizajes sin unificar a develop → aviso",
+                              "SessionStart",
+                              "Gemelo hacia arriba de aviso-drift-cerebro: al iniciar sesión cuenta el delta de .claude/ (sobre todo aprendizajes.md) de tu rama vs origin/develop y, si supera el umbral (≥5 archivos o >7 días, tunable por env), avisa —no bloquea— para correr /unificar-cerebro cuando quieras integrarlos. No escribe al árbol. Throttle 1×/día por repo."),
                     BrainItem("⏳", "aviso-contexto", "el contexto se está llenando → ordena checkpoint y propón /compact",
                               "PostToolUse",
                               "Vigila cuánto creció el contexto desde el último /compact y, al cruzar bandas por debajo del auto-compact, inyecta un aviso escalado (heads-up → checkpoint ahora → inminente) para volcar el hilo con checkpoint y compactar proactivamente. Convierte el auto-compact-sorpresa en caso raro."),
@@ -1327,6 +1337,12 @@ struct PopoverView: View {
                     BrainItem("🌙", "turno-nocturno", "Claude trabaja solo de noche: contrato medible, decide-o-parquea, checkpoint c/2h",
                               "skill · opt-in",
                               "Protocolo para dejar a Claude trabajando SOLO de noche: eco del contrato antes de empezar (alcance, criterio de cierre MEDIBLE, lo intocable, dónde queda visible el resultado), preflight de herramientas/quota, regla de decisión (dentro del alcance decide y sigue; fuera, parquea y brinca), autorización durable a disco y checkpoint cada ~2h."),
+                    BrainItem("🌾", "cosechar-sesion", "cosecha local: extrae aprendizajes de tu sesión al inbox del equipo",
+                              "skill · opt-in",
+                              "Al cerrar el día, revisa TU propio transcript y appendea los aprendizajes durables (feedback del usuario, lecciones de proceso, gotchas) al FINAL de .claude/memory/aprendizajes.md con atribución (aportó: handle). Separa el grano de la paja (no cosecha trivialidades). Alimenta el inbox append-only (merge=union). NO cierra slice ni hace git."),
+                    BrainItem("🧩", "unificar-cerebro", "reconciliación semanal del cerebro del equipo mini→develop",
+                              "skill · opt-in",
+                              "Hermana de cerrar-slice: junta aprendizajes+memorias de las minis hacia develop sin perder atribución/voz ni tocar guardrails. Inventaría el delta, baja primero el brain canónico, resuelve por clase, CURA el log (trenza solapes acreditando a ambos + gradúa lo maduro), verifica test-brain+lint, integra por el carril existente (OK explícito, sin auto-merge, con squash) y anota bitácora."),
                 ]),
         ]
     }

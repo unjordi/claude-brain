@@ -71,6 +71,8 @@ ev_de() {
     git-branch-guard|merge-squash-guard|confirmar-merge-develop|recordar-dashboard|secret-scan) echo "PreToolUse|Bash" ;;
     dod-verificar)  echo "Stop|" ;;
     sesion-inicio)  echo "SessionStart|" ;;
+    recordar-cosechar) echo "Stop|" ;;
+    recordar-unificar-cerebro) echo "SessionStart|" ;;
     *) echo "" ;;
   esac
 }

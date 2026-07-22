@@ -33,13 +33,17 @@ limite-gasto             global  hook
 rehidratar-hilo          global  hook
 aviso-contexto           global  hook
 aviso-drift-cerebro      global  hook
+barrer-ramas             global  hook
 delegacion-gate          global  hook
 delegacion-registrar     global  hook
 delegacion-reporte       global  hook
 limpiar-worktrees        global  script
 limpiar-ramas            global  script
+verificar-cerebro        global  script
 delegacion-comun         global  lib
 ramas-zombie             global  lib
 
 dod-verificar            repo    hook
 sesion-inicio            repo    hook
+recordar-cosechar        repo    hook
+recordar-unificar-cerebro repo   hook

@@ -82,6 +82,19 @@ if (Test-Path "$dir\.git") {
 }
 if ($ref) { Say "instalando la rama '$ref' (QA)" }
 
+# CLAUDE_BRAIN_DIR: exporta la ruta del clon-fuente como env var de USUARIO para que los hooks BASH
+# (aviso-drift-cerebro, sincronizar-cerebro.sh) encuentren la FUENTE en Windows. Sin esto el hook cae a
+# su default de Mac/Linux ($HOME/.claude-brain) -- que en Windows NO existe (aqui clonamos en
+# %LOCALAPPDATA%\claude-brain-repo) -> el auto-sync del cerebro por-repo fallaba MUDO. La ruta se guarda
+# en FORWARD-SLASH: bash se atraganta con los backslashes de Windows (mismo motivo que la ruta del .sh
+# del instalador). $dir (con backslashes) se conserva intacto para los usos nativos de PowerShell.
+$dirBash = $dir -replace '\\','/'
+if ([Environment]::GetEnvironmentVariable('CLAUDE_BRAIN_DIR', 'User') -ne $dirBash) {
+  [Environment]::SetEnvironmentVariable('CLAUDE_BRAIN_DIR', $dirBash, 'User')
+  Say "CLAUDE_BRAIN_DIR = $dirBash (los hooks bash ya hallan la fuente del cerebro)"
+}
+$env:CLAUDE_BRAIN_DIR = $dirBash   # y para ESTA sesion (install-brain.ps1 / hooks que corran ya)
+
 # -- (3) Instalar cerebro (hooks, via Git Bash + jq) + widget de bandeja (.NET) -
 Set-Location $dir
 Say 'instalando el cerebro (hooks + normas)...'
