@@ -11,12 +11,13 @@ namespace ClaudeBrain;
 /// La app trae embebido (version.json, escrito por install.ps1 junto al exe) el SHA + fecha del
 /// commit con que se buildeó y la ruta de su clon. Al abrir la pestaña Cerebro chequea GitHub.
 ///
-/// DOS rutas de update (fail-open en ambas):
+/// DOS rutas de update (fail-open en ambas). AMBAS dejan la máquina ONE-STOP (widget + hooks del
+/// cerebro), igual que el botón de Mac/Linux — sin asimetría entre OS:
 ///  1) DESCARGA (preferida, fase 2): consulta el release rolling 'windows-latest'; si trae el asset
-///     ClaudeBrain.exe con un build-sha distinto al embebido, BAJA el exe y hace swap — SIN clon ni
-///     .NET SDK. La publica release-windows.yml al hacer release a main.
+///     ClaudeBrain.exe con un build-sha distinto al embebido, BAJA el exe y hace swap (SIN .NET SDK),
+///     refresca brain/ (si hay clon) y RE-CABLEA los hooks con el install-brain.ps1 empaquetado.
 ///  2) GIT (fallback pre-release): si no hay release aún, compara `commits/main` y —solo con clon—
-///     hace `git fetch` + `merge --ff-only` + `install.ps1` (recompila).
+///     hace `git fetch` + `merge --ff-only` + `install.ps1` (que ya instala cerebro + widget).
 /// FAIL-OPEN: sin red / sin version.json / sin release ni clon → no molesta.
 ///
 /// Enfoque de AUTO-REEMPLAZO en Windows: el exe es self-contained single-file y, si estuviera
@@ -234,7 +235,8 @@ internal sealed class Updater
 
         // Detachado: baja el exe a TEMP; SOLO si es válido (existe y pesa MBs) detiene el widget
         // (suelta el lock del single-file), reemplaza el exe, reescribe version.json, refresca brain/
-        // si hay clon (para el botón-curita) y relanza. Si la descarga falla → exit sin tocar nada.
+        // (si hay clon), RE-CABLEA los hooks del cerebro (install-brain empaquetado, one-stop) y
+        // relanza. Si la descarga falla → exit sin tocar nada.
         var sb = new StringBuilder();
         sb.Append("$ErrorActionPreference='SilentlyContinue'\n");
         sb.Append($"$url='{_assetUrl!.Replace("'", "''")}'\n");
@@ -257,6 +259,12 @@ internal sealed class Updater
         sb.Append("  $bsrc = Join-Path $repo 'brain'\n");
         sb.Append("  if (Test-Path $bsrc) { Copy-Item $bsrc (Join-Path $dir 'brain') -Recurse -Force }\n");
         sb.Append("}\n");
+        // ONE-STOP (paridad con install.sh de Mac/Linux y con la ruta git de Windows): re-cablea los
+        // HOOKS del cerebro corriendo el install-brain.ps1 EMPAQUETADO junto al exe (mismo que el
+        // botón-curita). Idempotente, sin clon ni .NET SDK (solo Git Bash). Sin esto, la ruta de
+        // descarga solo cambiaba el exe y dejaba los hooks viejos → asimetría vs los otros botones.
+        sb.Append("$bi = Join-Path $dir 'brain\\install-brain.ps1'\n");
+        sb.Append("if (Test-Path $bi) { try { & $bi } catch {} }\n");
         // (Re)crea el acceso directo del menu Inicio, para que un install viejo (sin .lnk) lo gane al
         // autoactualizar y para refrescar el icono/target. Best-effort. Espeja install.ps1.
         sb.Append("$sm=[Environment]::GetFolderPath('Programs')\n");

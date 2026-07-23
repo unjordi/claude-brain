@@ -96,9 +96,10 @@ if ([Environment]::GetEnvironmentVariable('CLAUDE_BRAIN_DIR', 'User') -ne $dirBa
 $env:CLAUDE_BRAIN_DIR = $dirBash   # y para ESTA sesion (install-brain.ps1 / hooks que corran ya)
 
 # -- (3) Instalar cerebro (hooks, via Git Bash + jq) + widget de bandeja (.NET) -
+# install.ps1 es el ONE-STOP (cerebro + widget), igual que install.sh en Mac/Linux -> un solo llamado,
+# sin asimetria. (Antes bootstrap corria install-brain.ps1 + install.ps1 por separado; ahora install.ps1
+# instala el cerebro por defecto. -NoBrain lo saltaria.)
 Set-Location $dir
-Say 'instalando el cerebro (hooks + normas)...'
-& "$dir\brain\install-brain.ps1"
-Say 'instalando el widget de bandeja...'
+Say 'instalando el cerebro (hooks + normas) + el widget de bandeja...'
 & "$dir\windows\install.ps1"
 Say 'listo - cerebro + widget puestos.'

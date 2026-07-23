@@ -13,6 +13,13 @@ Al aceptar, un script suelto hace `git fetch` + `git merge --ff-only origin/main
 éxito**— re-corre el instalador (`install.sh` / `install.ps1`), que reconstruye y relanza. Como el
 proceso corre desprendido, sobrevive a que el instalador cierre la app.
 
+> **ONE-STOP, sin asimetría entre OS.** El instalador que re-corre el botón es el **completo**
+> (**cerebro + widget**) en las 3 plataformas: `install.sh` en Mac/Linux, y en Windows `install.ps1`
+> instala el cerebro por defecto (antes era solo-widget → el botón del Mac pasaba `--no-brain` y el de
+> Windows no tocaba hooks; ambos corregidos 2026-07-23). Así **un clic deja la máquina completa** (hooks
+> nuevos incluidos). El botón **"🩹 Curar cerebro global"** queda como el self-heal SIN `git pull`
+> (re-cablea el cerebro empaquetado en el app), no como el paso obligado que era antes en el Mac.
+
 - macOS (`Updater.swift`), Linux (`main.qml` → `forceRefresh`), Windows (`Updater.cs`).
 - **Requisito:** el receptor tiene el **clon de git** + el **toolchain de build** (Swift/CLT en
   macOS, nada en Linux porque el plasmoide es QML, **.NET SDK en Windows**).
@@ -59,10 +66,12 @@ Cambios en `windows/src/ClaudeBrain/Updater.cs`:
      estado; caer al mensaje actual `"actualiza a mano: …"`. Peor caso = no auto-actualiza, nunca un
      brick.
 
-3. **Refrescar el cerebro empaquetado.** El exe trae `brain/` al lado (para el botón-curita). Un
-   update solo-de-exe dejaría `brain/` viejo. Opciones: (a) el updater también hace `git pull` del
-   clon para refrescar `brain/` (si hay clon), o (b) subir `brain/` como segundo asset del release y
-   descargarlo junto al exe. Decidir al implementar; (a) es lo más simple si el clon existe.
+3. **Refrescar el cerebro + re-cablear los hooks (RESUELTO 2026-07-23).** La ruta de descarga, tras el
+   swap del exe: si hay clon, hace `git ff` y refresca `brain/` al lado del exe (opción (a)); y en
+   AMBOS casos corre el **`install-brain.ps1` empaquetado** para re-cablear los hooks → deja la máquina
+   ONE-STOP (paridad con la ruta git y con Mac/Linux), sin `.NET SDK`. Pendiente menor (opción (b), no
+   enfilada): sin clon, el CONTENIDO de `brain/` no se refresca por pura descarga — subirlo como 2º
+   asset del release lo cubriría; hoy el caso real (máquinas con clon del bootstrap) no lo necesita.
 
 4. `install.ps1` puede ganar un `-FromRelease` que **descargue** el exe en vez de compilar (para
    instalaciones nuevas sin .NET SDK), dejando el build-desde-fuente como camino de dev.

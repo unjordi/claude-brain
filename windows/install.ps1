@@ -6,15 +6,21 @@
 # if the download fails; -Build forces building. Installs to %LOCALAPPDATA%\Programs\ClaudeBrain,
 # registers autostart, and launches. Re-run any time to update in place. Migrates old 'ClaudeQuota'.
 #
-#   pwsh -File install.ps1            # download exe, install, autostart, launch
+#   pwsh -File install.ps1            # brain (hooks) + widget, autostart, launch  <- ONE-STOP
 #   pwsh -File install.ps1 -Build     # build from source instead (needs .NET SDK)
+#   pwsh -File install.ps1 -NoBrain   # skip the brain (hooks); only widget/daemon  (QA / dev)
 #   pwsh -File install.ps1 -NoAutostart
 #
+# PARIDAD con install.sh de Mac/Linux: este instalador es el ONE-STOP (cerebro + widget), sin
+# asimetria entre OS. Asi el boton "Actualizar" del widget (que corre ESTE script) deja la maquina
+# completa en un clic, igual que en Mac/Linux. -NoBrain lo salta (para QA de solo-widget / la CI usa
+# dotnet publish directo, no este script). El boton-curita sigue siendo el self-heal SIN git pull.
 [CmdletBinding()]
 param(
     [switch]$NoAutostart,
     [switch]$NoLaunch,          # build + install but don't launch (e.g. from an elevated installer)
     [switch]$NoClaudeCode,      # skip auto-installing the Claude Code CLI (the thing the widget measures)
+    [switch]$NoBrain,           # skip the Claude-Code brain (hooks/norms); only daemon + widget (paridad con install.sh --no-brain)
     [switch]$Build,             # force build-from-source (dotnet publish) instead of downloading the release exe
     [string]$Configuration = 'Release'
 )
@@ -26,6 +32,20 @@ $appName  = 'ClaudeBrain'
 $dest     = Join-Path $env:LOCALAPPDATA "Programs\$appName"
 $exe      = Join-Path $dest "$appName.exe"
 $assetUrl = 'https://github.com/unjordi/claude-brain/releases/download/windows-latest/ClaudeBrain.exe'
+
+# -- Cerebro (hooks + normas), salvo -NoBrain -- ONE-STOP igual que install.sh (Mac/Linux): el
+# instalador deja cerebro + widget, para que el boton "Actualizar" (que corre este script) actualice
+# TODO en un clic. Best-effort: si Git Bash no esta (install-brain.ps1 sale != 0) NO bloquea el widget
+# -> paridad de comportamiento con install.sh, que tampoco tumba el widget si el cerebro falla.
+if (-not $NoBrain) {
+    $brainInstaller = Join-Path $here '..\brain\install-brain.ps1'
+    if (Test-Path $brainInstaller) {
+        Write-Host "==> Instalando el cerebro (hooks + normas, via Git Bash)..." -ForegroundColor Cyan
+        try { & $brainInstaller } catch { Write-Host "==> Aviso: el cerebro no se instalo ($_); sigo con el widget." -ForegroundColor Yellow }
+    } else {
+        Write-Host "==> Aviso: no encontre $brainInstaller; instalo solo el widget." -ForegroundColor Yellow
+    }
+}
 
 Write-Host "==> Deteniendo instancia previa (si corre)..." -ForegroundColor Cyan
 Get-Process ClaudeBrain,ClaudeQuota -ErrorAction SilentlyContinue | Stop-Process -Force
