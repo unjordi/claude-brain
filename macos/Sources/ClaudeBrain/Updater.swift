@@ -1,10 +1,12 @@
 import AppKit
 import SwiftUI
 
-/// Autoactualización LIGERA del widget, estilo winturbo: la app trae embebido el SHA/fecha del commit
+/// Autoactualización del widget, estilo winturbo: la app trae embebido el SHA/fecha del commit
 /// con que se buildeó (version.json, escrito por make-app.sh). Al abrir la pestaña Cerebro consulta
-/// `commits/main` de GitHub; si el repo avanzó, ofrece un botón que hace `git pull` + `install.sh` y
-/// relanza. El clon a actualizar se RESUELVE localmente (ver resolveClonePath): la ruta embebida es la
+/// `commits/main` de GitHub; si el repo avanzó, ofrece un botón que hace `git ff origin/main` +
+/// `install.sh` COMPLETO (widget + cerebro, igual que Linux → sin asimetría) y relanza. El botón "🩹
+/// Curar cerebro global" queda como el self-heal SIN git pull (reinstala el cerebro empaquetado en el
+/// app). El clon a actualizar se RESUELVE localmente (ver resolveClonePath): la ruta embebida es la
 /// del build —en un .app precompilado en CI, la del runner, que no existe en la Mac—, así que se
 /// prefiere el clon de instalación local (~/.claude-brain). FAIL-OPEN: sin red / sin version.json /
 /// sin clon local → no molesta (el botón invita a actualizar a mano).
@@ -79,8 +81,9 @@ final class Updater: ObservableObject {
         updateAvailable = differs && newer
     }
 
-    /// Jala lo último y reinstala (widget, sin tocar el cerebro), luego relanza. Detacha el proceso
-    /// (nohup) para que sobreviva a que la app se cierre, y sale para que install.sh abra la versión nueva.
+    /// Jala lo último y reinstala TODO (widget + cerebro), luego relanza — `install.sh` COMPLETO, igual
+    /// que el botón de Linux (SIN `--no-brain`): un botón = un one-stop, sin asimetría entre OS. Detacha
+    /// el proceso (nohup) para que sobreviva a que la app se cierre, y sale para que install.sh abra la nueva.
     func runUpdate() {
         guard canSelfUpdate, !repoPath.isEmpty else {
             message = "actualiza a mano: git pull && ./install.sh"
@@ -92,7 +95,7 @@ final class Updater: ObservableObject {
         // la nueva). Si el merge aborta (árbol sucio / no-ff), NO mata nada y la app sigue viva → sin
         // riesgo de quedarte sin widget. El `pkill` va justo antes de reinstalar, no a ciegas.
         let inner = "sleep 1; cd '\(repoPath)' && git fetch origin --quiet && git merge --ff-only origin/main "
-            + "&& { pkill -f 'Claude Brain Widget.app/Contents/MacOS/ClaudeBrain'; bash '\(repoPath)/macos/install.sh' --no-brain; }"
+            + "&& { pkill -f 'Claude Brain Widget.app/Contents/MacOS/ClaudeBrain'; bash '\(repoPath)/macos/install.sh'; }"
         let cmd = "nohup bash -lc \"\(inner)\" >/tmp/claude-brain-update.log 2>&1 &"
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
