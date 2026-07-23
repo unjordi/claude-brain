@@ -8,6 +8,10 @@
 # transcripts de sesión: pesados y pueden traer datos sensibles
 .claude/transcripts/
 .claude/*.jsonl
+# sync de sesiones cross-máquina (claude-session): las sesiones viven en la rama de transporte
+# orphan `sesiones/<usuario>`, NUNCA en develop/main. Su worktree y el staging quedan gitignored aquí.
+.claude/.session-transport/
+.claude/sessions/
 # config específica de la máquina
 .claude/settings.local.json
 # memorias personales/sensibles que NO viajan al equipo

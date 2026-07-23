@@ -134,6 +134,12 @@ SESSIONS_SRC="$ROOT/bin/sessions-extract.js"
 [[ -f "$SESSIONS_SRC" ]] && install -D -m 0755 "$SESSIONS_SRC" "$(dirname "$BIN_DEST")/sessions-extract.js"
 SESSIONMOVE_SRC="$ROOT/bin/session-move.js"
 [[ -f "$SESSIONMOVE_SRC" ]] && install -D -m 0755 "$SESSIONMOVE_SRC" "$(dirname "$BIN_DEST")/session-move.js"
+# Sync de sesiones cross-máquina: session-lib.js (helpers compartidos que require()an move/export/import),
+# session-export.js/session-import.js y el wrapper `claude-session` (ver diseno-sync-sesiones.md).
+for _s in session-lib.js session-export.js session-import.js claude-session; do
+  _src="$ROOT/bin/$_s"
+  [[ -f "$_src" ]] && install -D -m 0755 "$_src" "$(dirname "$BIN_DEST")/$_s"
+done
 
 if [[ ! -f "$LIMITS_DEFAULT" ]]; then
   echo "==> Seeding default limits at $LIMITS_DEFAULT"

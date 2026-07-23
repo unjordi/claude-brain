@@ -138,6 +138,12 @@ SESSIONS_SRC="$ROOT/../bin/sessions-extract.js"
 [[ -f "$SESSIONS_SRC" ]] && install -m 0755 "$SESSIONS_SRC" "$(dirname "$FETCH_DEST")/sessions-extract.js"
 SESSIONMOVE_SRC="$ROOT/../bin/session-move.js"
 [[ -f "$SESSIONMOVE_SRC" ]] && install -m 0755 "$SESSIONMOVE_SRC" "$(dirname "$FETCH_DEST")/session-move.js"
+# Sync de sesiones cross-máquina: session-lib.js (helpers compartidos que require()an move/export/import),
+# session-export.js/session-import.js y el wrapper `claude-session` (ver diseno-sync-sesiones.md).
+for _s in session-lib.js session-export.js session-import.js claude-session; do
+  _src="$ROOT/../bin/$_s"
+  [[ -f "$_src" ]] && install -m 0755 "$_src" "$(dirname "$FETCH_DEST")/$_s"
+done
 
 # Ícono del daemon en "Elementos de inicio": claude-brain-fetch es un script pelón → macOS le pone el
 # genérico "exec". Le incrustamos el ícono de Claude Brain como ícono CUSTOM del archivo vía

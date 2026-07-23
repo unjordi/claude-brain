@@ -107,11 +107,13 @@ $binSrc = Join-Path $repoRoot 'bin'
 if (Test-Path $binSrc) {
     $binDst = Join-Path $dest 'bin'
     New-Item -ItemType Directory -Force -Path $binDst | Out-Null
-    foreach ($js in @('chats-extract.js', 'sessions-extract.js', 'session-move.js')) {
+    # session-lib.js = helpers compartidos que require()an move/export/import; claude-session = wrapper
+    # bash del sync cross-maquina (corre bajo Git Bash). Ver diseno-sync-sesiones.md.
+    foreach ($js in @('chats-extract.js', 'sessions-extract.js', 'session-move.js', 'session-lib.js', 'session-export.js', 'session-import.js', 'claude-session')) {
         $srcJs = Join-Path $binSrc $js
         if (Test-Path $srcJs) { Copy-Item $srcJs (Join-Path $binDst $js) -Force }
     }
-    Write-Host "==> Helpers de node (chats/sessions/move) empaquetados en $binDst (requieren node)." -ForegroundColor Green
+    Write-Host "==> Helpers de node (chats/sessions/move/export/import) + claude-session empaquetados en $binDst (requieren node; claude-session corre bajo Git Bash)." -ForegroundColor Green
 } else {
     Write-Host "==> Aviso: no encontre bin/ en $binSrc; no habra chats.json/sessions.json." -ForegroundColor Yellow
 }

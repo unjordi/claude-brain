@@ -44,7 +44,17 @@ type: reference
 ## Sesiones
 - Los transcripts viven en `~/.claude/projects/<slug>/<id>.jsonl` — **por-máquina, NO en el repo**
   (gitignored: pesan MBs y traen datos sensibles). El **slug se DERIVA del cwd** (ruta con `/`→`-`).
-- **Resumear una sesión en otra máquina** = copiar su `.jsonl` al **mismo slug** del destino + `claude
-  --resume <id>` (requiere que el cwd coincida). El widget claude-brain tiene *mover sesión entre slugs*
-  y *renombrar*, pero **sync cross-máquina de transcripts NO está construido** (idea: sincronizarlos por
-  el canal Drive que el widget ya usa para stats — FUERA de git).
+- **Resumear una sesión en otra máquina** = sembrar su `.jsonl` en el slug del destino (derivado del
+  cwd LOCAL, que suele diferir: `/Users/…`≠`/home/…`≠`C:\…`) **con el `cwd` interno reescrito** + `claude
+  --resume <id>`. El slug NO vive dentro del jsonl (solo es el nombre del dir); el `cwd` sí, en muchas
+  líneas → por eso hay que reescribirlo, no basta re-sluggear.
+- **Sync cross-máquina de sesiones = CONSTRUIDO** (2026-07-23, verificado técnicamente; wiring de release
+  en curso). `bin/session-export.js` (gzip la sesión a `<repo>/.claude/sessions/<id>.jsonl.gz`+meta, opt-in)
+  + `bin/session-import.js` (siembra en el slug local reescribiendo cwd + restaura alias, idempotente) +
+  wrapper `bin/claude-session` (gestiona la **rama de transporte orphan `sesiones/<usuario>`**, que jamás
+  se mergea → no toca develop/clones). Helpers compartidos en `bin/session-lib.js` (fuente única, la
+  consume también `session-move.js`). Diseño+decisiones+evidencia: `diseno-sync-sesiones.md`.
+- **NO hay `claude compact` headless** (v2.1.218): un hook no puede DISPARAR compactación, solo
+  reaccionar. `SessionEnd`/`PreCompact`/`PostCompact` reciben `transcript_path`+`cwd`+`session_id` (útiles
+  para exportar/archivar, no para adelgazar). El CLI nuevo ya escribe `custom-title`/`ai-title` DENTRO del
+  jsonl (antes se derivaban a mano en `sessions-extract.js`).

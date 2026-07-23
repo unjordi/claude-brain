@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# claude-session — hace que las SESIONES de Claude Code viajen con el repo por git, para poder
+# `claude --resume <id>` en OTRA máquina (Mac↔Cachy↔Windows). Envoltorio de session-export.js /
+# session-import.js: gestiona la RAMA DE TRANSPORTE dedicada (orphan, jamás se mergea a develop).
+#
+# Modelo:
+#   - Rama de transporte = `sesiones/<usuario>` (override: $CLAUDE_SESSION_BRANCH). Es ORPHAN: árbol
+#     minúsculo con SOLO `.claude/sessions/<id>.jsonl.gz`+`.meta.json`. Sin relación con develop → no
+#     contamina develop ni los clones (que nacen de develop/main), y es imposible de mergear por error.
+#   - Se materializa en un WORKTREE gitignored `<repo>/.claude/.session-transport/` (barato: solo sesiones).
+#   - Los transcripts van COMPRIMIDOS (gzip) y es OPT-IN: solo exportas las sesiones que quieres.
+#
+# Uso:
+#   claude-session export <sessionId> [--name "etiqueta"]   # embarca una sesión y la sube
+#   claude-session import [--force]                          # baja y siembra las del repo en ESTA máquina
+#   claude-session list                                      # lista lo que hay en la rama de transporte
+#   claude-session help
+#
+# Requisitos: git, node, y que el cwd esté dentro de un repo git con `origin`. SIN dependencias extra.
+set -euo pipefail
+
+BINDIR="$(cd "$(dirname "$0")" && pwd)"
+EXPORT_JS="$BINDIR/session-export.js"
+IMPORT_JS="$BINDIR/session-import.js"
+
+die() { printf 'claude-session: %s\n' "$1" >&2; exit 1; }
+command -v git  >/dev/null 2>&1 || die "falta git"
+command -v node >/dev/null 2>&1 || die "falta node"
+
+REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || die "no estás dentro de un repo git"
+BRANCH="${CLAUDE_SESSION_BRANCH:-sesiones/$(id -un 2>/dev/null || echo user)}"
+WT="$REPO/.claude/.session-transport"
+SESS_REL=".claude/sessions"
+
+have_origin() { git -C "$REPO" remote get-url origin >/dev/null 2>&1; }
+
+# Asegura la rama de transporte (orphan) y su worktree en $WT, con lo último de origin si existe.
+ensure_worktree() {
+  # Si el worktree ya existe y apunta a la rama, solo actualiza.
+  if [ -d "$WT/.git" ] || git -C "$REPO" worktree list --porcelain 2>/dev/null | grep -qxF "worktree $WT"; then
+    if have_origin && git -C "$REPO" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+      git -C "$WT" fetch -q origin "$BRANCH" 2>/dev/null || true
+      git -C "$WT" reset -q --hard "origin/$BRANCH" 2>/dev/null || true
+    fi
+    return
+  fi
+
+  git -C "$REPO" worktree prune >/dev/null 2>&1 || true
+
+  if have_origin && git -C "$REPO" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+    # Ya existe en el remoto → tráela y móntala.
+    git -C "$REPO" fetch -q origin "$BRANCH"
+    git -C "$REPO" worktree add -q "$WT" "$BRANCH" 2>/dev/null \
+      || git -C "$REPO" worktree add -q --track -b "$BRANCH" "$WT" "origin/$BRANCH"
+  else
+    # No existe: crea la rama ORPHAN vía worktree temporal (portable, sin --orphan de worktree).
+    local tmp; tmp="$(mktemp -d)"
+    git -C "$REPO" worktree add -q --detach "$tmp"
+    git -C "$tmp" checkout -q --orphan "$BRANCH"
+    git -C "$tmp" reset -q --hard 2>/dev/null || true
+    git -C "$tmp" rm -rq --cached . >/dev/null 2>&1 || true
+    find "$tmp" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} + 2>/dev/null || true
+    mkdir -p "$tmp/$SESS_REL"
+    : > "$tmp/$SESS_REL/.gitkeep"
+    git -C "$tmp" add -f "$SESS_REL/.gitkeep"
+    git -C "$tmp" -c user.name="claude-session" -c user.email="noreply@anthropic.com" \
+        commit -q -m "chore(sesiones): inicializa rama de transporte $BRANCH"
+    git -C "$REPO" worktree remove --force "$tmp" >/dev/null 2>&1 || rm -rf "$tmp"
+    git -C "$REPO" worktree add -q "$WT" "$BRANCH"
+  fi
+}
+
+push_branch() {
+  have_origin || { echo "(sin origin: quedó local en $BRANCH; no se subió)"; return; }
+  git -C "$WT" push -q -u origin "$BRANCH"
+}
+
+cmd_export() {
+  local id="${1:-}"; shift || true
+  [ -n "$id" ] || die "uso: claude-session export <sessionId> [--name \"etiqueta\"]"
+  ensure_worktree
+  node "$EXPORT_JS" "$id" --repo "$WT" --force "$@"
+  git -C "$WT" add -f "$SESS_REL"
+  if git -C "$WT" diff --cached --quiet; then
+    echo "(nada nuevo que commitear para $id)"
+  else
+    local host; host="$(hostname 2>/dev/null || echo maquina)"
+    git -C "$WT" -c user.name="claude-session" -c user.email="noreply@anthropic.com" \
+        commit -q -m "session: $id (desde $host)"
+    push_branch
+  fi
+  echo "✅ exportada $id → rama $BRANCH"
+}
+
+cmd_import() {
+  ensure_worktree
+  node "$IMPORT_JS" --repo "$REPO" --sessions-dir "$WT/$SESS_REL" "$@"
+}
+
+cmd_list() {
+  ensure_worktree
+  local d="$WT/$SESS_REL"
+  if ! ls "$d"/*.jsonl.gz >/dev/null 2>&1; then echo "(sin sesiones en $BRANCH)"; return; fi
+  for gz in "$d"/*.jsonl.gz; do
+    local id; id="$(basename "$gz" .jsonl.gz)"
+    local label="?"
+    [ -f "$d/$id.meta.json" ] && label="$(node -e 'try{console.log((JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).label)||"")}catch(e){console.log("")}' "$d/$id.meta.json")"
+    printf '  %s  %s\n' "$id" "$label"
+  done
+}
+
+case "${1:-help}" in
+  export) shift; cmd_export "$@" ;;
+  import) shift; cmd_import "$@" ;;
+  list)   shift; cmd_list "$@" ;;
+  help|-h|--help)
+    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) die "comando desconocido: $1 (usa: export | import | list | help)" ;;
+esac
