@@ -88,6 +88,27 @@ Parado **dentro del repo** con el que la sesión debe viajar (el wrapper deriva 
 - **Secreto:** el `secret-scan` por-repo ya escanea lo que ENTRA a git → cubre el commit de sesiones
   (AWS/OpenAI/Anthropic/GitHub/GitLab/PEM). Es una red, no garantía total.
 
+## Implementación real (2026-07-24): BÓVEDA DEDICADA (refinamiento de Opción A)
+Al ir a sembrar los primeros masters, la Opción A "rama de transporte POR repo" se refinó a algo más
+limpio: **un solo repo privado dedicado `unjordi-sessions`** (github.com/unjordi/unjordi-sessions, priv)
+que guarda TODOS los `.gz` en su `.claude/sessions/` (ahí SÍ tracked — son el payload) + `masters.json`
+(mapa id→carpeta-destino) + `seed.sh` (siembra en la otra máquina vía `session-import.js --repo
+$HOME/<target> --sessions-dir <bóveda>`). Ventaja sobre la rama-por-repo: **cero toque a los folders de
+proyecto** (ni worktree `.session-transport` ni gitignore por repo), y desacopla del proyecto — coherente
+con que las sesiones son globales del home, no del repo.
+- **Masters sembrados (5):** claude-brain-master→`code/plantilladotnet` (viaja con la PLANTILLA por
+  decisión de unjordi, no con claude-brain), powerscripts-master→`code/PowerScripts`,
+  databases-master + sae-master→`code/potenciaDatabases` (hermanos, mismo folder, picker por nombre),
+  cps-master→`code/cps`.
+- **⚠️ Límite de 100 MB/archivo de GitHub:** `cps-master` (~215 MB gz) y `sae-master` (~149 MB gz) NO
+  caben (cientos de imágenes base64 → alta entropía, gzip no ayuda). Sus `.gz` van **gitignored** en la
+  bóveda (solo su `.meta.json` se versiona); canal para los gigantes **PENDIENTE** (transferencia directa
+  LAN/NAS vs git-lfs vs no-sincronizar). Nota honesta: un `--resume` de 382 MB (~95M tokens) rebasa
+  cualquier ventana → utilidad real limitada.
+- **Estatus:** los 3 chicos **verificados técnicamente** (smoke de `seed.sh` en sandbox OK, 5/5 import sin
+  error, cwd reescrito, alias restaurados). El `--resume` real en la Cachy = **QA de unjordi** (git pull
+  → `./seed.sh` → resume parado en cada folder).
+
 ## Herencia / multi-dev
 Genérico (vive en el brain, viaja por bootstrap). Cada dev exporta SUS sesiones a SU rama de transporte
 `sesiones/<usuario>`; nadie ve las de otro (privacidad) — es transporte cross-MÁQUINA del mismo dev, NO
