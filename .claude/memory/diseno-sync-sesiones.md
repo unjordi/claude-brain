@@ -100,11 +100,15 @@ con que las sesiones son globales del home, no del repo.
   decisión de unjordi, no con claude-brain), powerscripts-master→`code/PowerScripts`,
   databases-master + sae-master→`code/potenciaDatabases` (hermanos, mismo folder, picker por nombre),
   cps-master→`code/cps`.
-- **⚠️ Límite de 100 MB/archivo de GitHub:** `cps-master` (~215 MB gz) y `sae-master` (~149 MB gz) NO
-  caben (cientos de imágenes base64 → alta entropía, gzip no ayuda). Sus `.gz` van **gitignored** en la
-  bóveda (solo su `.meta.json` se versiona); canal para los gigantes **PENDIENTE** (transferencia directa
-  LAN/NAS vs git-lfs vs no-sincronizar). Nota honesta: un `--resume` de 382 MB (~95M tokens) rebasa
-  cualquier ventana → utilidad real limitada.
+- **⚠️ Límite de 100 MB/archivo de GitHub → canal = GOOGLE DRIVE:** `cps-master` (~215 MB gz) y
+  `sae-master` (~149 MB gz) NO caben (cientos de imágenes base64 → alta entropía, gzip no ayuda). Sus
+  `.gz` van **gitignored** en la bóveda (solo `.meta.json` se versiona) y **viajan por Google Drive**,
+  que ya sincroniza entre Mac (`~/Mi unidad/claude-sessions-oversize/`) y Cachy
+  (`/run/media/unjordi/SteamAndFiles/GoogleDrive/claude-sessions-oversize/`). `seed.sh` autodetecta el
+  root de Drive (override `$CLAUDE_SESSIONS_DRIVE`) y siembra los oversize desde ahí. **Por qué Drive y
+  no git-lfs/scp:** ya es canal sincronizado pasivo en ambas, sin límite de 100 MB ni quota de LFS. El
+  viejo problema de Drive (corromper `.git`) NO aplica: soltamos `.gz` sueltos, no un repo. Nota honesta:
+  un `--resume` de 382 MB (~95M tokens) rebasa cualquier ventana → utilidad real limitada.
 - **Estatus:** los 3 chicos **verificados técnicamente** (smoke de `seed.sh` en sandbox OK, 5/5 import sin
   error, cwd reescrito, alias restaurados). El `--resume` real en la Cachy = **QA de unjordi** (git pull
   → `./seed.sh` → resume parado en cada folder).
