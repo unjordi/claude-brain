@@ -228,12 +228,19 @@ if [[ "$SKIP_PLASMOID" -eq 0 ]]; then
   rm -f "$VERSION_IN_PKG"  # idem: version.json es temporal, no se versiona
 
   # Recarga plasmashell para que tome el plasmoide nuevo: actualizar el PAQUETE no refresca la instancia
-  # viva. Guardado: solo si hay sesión gráfica y plasmashell corriendo (nada sobre SSH/headless);
-  # se salta con --no-reload-shell. Si no aplica, imprime el comando manual. El panel parpadea ~1s.
-  if [[ "$RELOAD_SHELL" -eq 1 ]] && command -v kquitapp6 >/dev/null 2>&1 \
-       && pgrep -x plasmashell >/dev/null 2>&1 && [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]]; then
+  # viva. Guardado: solo si hay sesión gráfica (nada sobre SSH/headless); se salta con
+  # --no-reload-shell. Si no aplica, imprime el comando manual. El panel parpadea ~1s.
+  #
+  # OJO (bug real, 2026-07-24): `kpackagetool6 -u` sobre un plasmoide CARGADO EN VIVO puede tumbar
+  # plasmashell por su cuenta, ANTES de llegar aquí — así que ya NO condicionamos el relanzamiento a
+  # `pgrep -x plasmashell` (si ya está muerto, esa condición es falsa y el bloque entero se saltaba,
+  # dejando el escritorio muerto con solo un mensaje impreso a un log que nadie lee). El pgrep ahora
+  # solo decide si hace falta un kquitapp6 primero; el relanzamiento + verificación corren SIEMPRE.
+  if [[ "$RELOAD_SHELL" -eq 1 ]] && [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]]; then
     echo "==> Recargando plasmashell para aplicar los cambios (el panel parpadeará un momento)..."
-    kquitapp6 plasmashell >/dev/null 2>&1 || true
+    if command -v kquitapp6 >/dev/null 2>&1 && pgrep -x plasmashell >/dev/null 2>&1; then
+      kquitapp6 plasmashell >/dev/null 2>&1 || true
+    fi
     sleep 1
     # Relanzamiento ROBUSTO. El patrón viejo `( kstart … & ) || ( plasmashell … & )` tenía un bug:
     # un subshell con `&` SIEMPRE regresa 0 (el backgrounding "triunfa" aunque el comando no exista)
