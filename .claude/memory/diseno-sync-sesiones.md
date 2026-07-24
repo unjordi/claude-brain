@@ -7,9 +7,12 @@ metadata:
 
 # Sync de sesiones cross-máquina — `claude --resume` tras `git pull`
 
-> **Estado (2026-07-23):** motor construido y **verificado técnicamente** (round-trip export→import
-> perfecto); wiring de git (dónde viven los commits) + despliegue en instaladores + release PENDIENTE
-> de una decisión de unjordi. Rama: `feat/sync-sesiones-cross-maquina` (brain, desde develop).
+> **Estado (2026-07-23) — LIBERADO A MAIN.** Motor + wrapper construidos, verificados end-to-end
+> (round-trip export→import cross-máquina perfecto) y **liberados a main**: MR **#182→develop** +
+> release **#183→main** (2026-07-23). `bin/claude-session` vive en `origin/main` y está desplegado en
+> `~/.local/bin/`. La decisión de wiring de git quedó **resuelta = Opción A** (rama de transporte orphan
+> `sesiones/<usuario>`). **Falta (NO construido aún, manual por ahora):** el auto-import en `SessionStart`
+> y el botón "Exportar al repo" del widget — hoy export/import son **por CLI** (`claude-session`).
 > Es la **v2** que `plantilladotnet/.claude/memory/diseno-unificar-cerebro.md` (líneas 156-157) dejó
 > marcada como "opcional NO enfilada: sincronizar transcripts crudos… mejor curado, no crudo". unjordi
 > la enfiló. Resolución del trade-off crudo/curado: **crudo pero COMPRIMIDO (gzip) + opt-in** (solo las
@@ -33,9 +36,9 @@ metadata:
    `develop`/`main` ni a los clones de la plantilla. (Descartado: el canal Drive/NAS fuera de git.)
 2. **Alcance = opt-in** — solo las sesiones que unjordi marca explícitamente viajan (señal natural: las
    que ya nombró en el widget → `sesiones-alias.json`). No auto-exportar todo.
-3. **PENDIENTE (a decidir):** *cómo* mantenerlo fuera de develop/clones — rama de transporte dedicada
-   `sesiones/<usuario>` (recomendada, cero fricción de integración) vs commit en la mini + guard/CI que
-   lo despoje antes del MR a develop. (Detalle abajo en "Wiring de git".)
+3. **RESUELTA → Opción A (rama de transporte dedicada `sesiones/<usuario>`).** Es lo que se construyó:
+   `.claude/sessions/` gitignored en develop/mini + rama orphan que jamás se mergea. Cero fricción, sin
+   guard nuevo. (Detalle abajo en "Wiring de git".)
 
 ## Motor (CONSTRUIDO y verificado — brain `bin/`)
 - **`session-lib.js`** — helpers COMPARTIDOS (fuente única, no divergir; misma disciplina que
@@ -56,8 +59,8 @@ reescribió 7 ocurrencias de cwd, quedó **idéntico byte a byte salvo el cwd** 
 restauró el alias, y el re-import **saltó** (idempotente). gzip: 2.7x en archivo chico (mucho más en los
 grandes, que son JSON repetitivo).
 
-## Wiring de git (LA decisión pendiente)
-- **Opción A — rama de transporte dedicada `sesiones/<usuario>` (RECOMENDADA).** `.claude/sessions/`
+## Wiring de git (RESUELTO → Opción A, construida)
+- **Opción A — rama de transporte dedicada `sesiones/<usuario>` (ELEGIDA Y CONSTRUIDA).** `.claude/sessions/`
   queda **gitignored en develop/mini** (nunca sube por accidente en un feature/MR). Las sesiones se
   commitean con `git add -f` SOLO en `sesiones/unjordi`, que **jamás se mergea** a develop → viaja
   Mac↔Cachy por `git push/pull origin sesiones/unjordi`, y como los clones nacen de develop/main,
@@ -66,17 +69,24 @@ grandes, que son JSON repetitivo).
   bloquea/despoja `.claude/sessions/` en el MR mini→develop. Más fiel al literal "en mi mini", pero
   **fricción cada integración** + guard nuevo que bloquea (delicado por la norma de guardarraíles).
 
-## Wiring restante (tras la decisión)
-- **Despliegue:** añadir `session-lib.js`/`session-export.js`/`session-import.js` a los 3 instaladores
-  (`install.sh` raíz + `macos/install.sh` + `brain/install-brain.sh`), junto a `session-move.js`.
-- **Auto-import al retomar:** hook `SessionStart` (o paso de `sesion-inicio`) que corre
-  `session-import.js --repo <cwd>` (idempotente, barato) → tras `git pull` en Cachy las sesiones se
-  siembran solas y el picker de `--resume` ya las lista.
-- **Export opt-in:** wrapper `claude-session export <id>` + botón en el widget ("Exportar al repo").
-- **Doc:** `ecosistema-claude.md` (sección Sesiones ya no dice "no construido"), `mapa-cerebro.md`,
-  README del brain, MANIFEST si aplica.
+## Cómo se USA hoy (CLI, ya desplegado)
+Parado **dentro del repo** con el que la sesión debe viajar (el wrapper deriva el repo de `git rev-parse
+--show-toplevel`):
+- `claude-session export <sessionId> [--name "etiqueta"]` — gzip la sesión → la commitea a la rama
+  orphan `sesiones/<usuario>` → `git push`. OPT-IN (solo la que nombras).
+- `claude-session import [--force]` — en la OTRA máquina, tras `git pull`: baja la rama de transporte y
+  siembra las sesiones en el slug local (reescribe el cwd) → el picker de `claude --resume` ya las lista.
+- `claude-session list` — qué hay embarcado en la rama de transporte.
+
+## Wiring — estado
+- ✅ **Motor + wrapper + despliegue en instaladores** (`install.sh` raíz + `macos/install.sh` +
+  `windows/install.ps1`; `brain/install-brain.sh` es de hooks/skills, no aplica) — HECHO y liberado.
+- ✅ **Doc:** `ecosistema-claude.md` sección Sesiones actualizada (ya no dice "no construido").
+- ❌ **Auto-import al retomar** (hook `SessionStart`/paso de `sesion-inicio` que corra
+  `claude-session import` idempotente tras `git pull`) — **NO construido**. Hoy el import es manual.
+- ❌ **Botón "Exportar al repo" en el widget** — **NO construido**. Hoy el export es por CLI.
 - **Secreto:** el `secret-scan` por-repo ya escanea lo que ENTRA a git → cubre el commit de sesiones
-  (AWS/OpenAI/Anthropic/GitHub/GitLab/PEM). Es una red, no garantía total → anotarlo en la doc.
+  (AWS/OpenAI/Anthropic/GitHub/GitLab/PEM). Es una red, no garantía total.
 
 ## Herencia / multi-dev
 Genérico (vive en el brain, viaja por bootstrap). Cada dev exporta SUS sesiones a SU rama de transporte
