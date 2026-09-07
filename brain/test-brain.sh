@@ -3732,6 +3732,80 @@ done
 # ═══ FIN BLOQUE AÑADIDO (#81) ═════════════════════════════════════════════════════════════════════════
 
 # ─────────────────────────────────────────────────────────────────────────────
+echo "== (e2-skills) drift-check: el SKILLS-MANIFEST es COMPLETO — toda brain/skills/*/SKILL.md declarada, sin huérfanos =="
+# Hermano del (e2) de arriba: (e2) ya exige que TODO brain/hooks/*.sh esté en el hooks/MANIFEST (bloques 1/2);
+# ESTE hace lo MISMO para las SKILLS contra brain/skills/MANIFEST — la mitad que faltaba. RIESGO que cierra
+# (detectado por unjordi): una skill en brain/skills/<n>/SKILL.md que NO esté en brain/skills/MANIFEST la
+# OMITE en SILENCIO tanto el sync por-repo (PER_REPO_SK = awk sobre {both,repo} del MANIFEST en
+# sincronizar-cerebro.sh) como el install-brain global (deriva del mismo MANIFEST) → el repo/colega nunca la
+# recibe y nada lo detecta. Bidireccional: también caza una entrada del MANIFEST que apunte a una skill
+# inexistente (huérfana). Formato del SKILLS-MANIFEST: "<nombre> <tier>" (2 columnas; '#'/blancos se ignoran).
+MFS="$SCRIPT_DIR/skills/MANIFEST"
+if [ ! -f "$MFS" ]; then
+  bad "drift-skills: falta el SKILLS-MANIFEST ($MFS)"
+else
+  # (1) toda skill REAL (dir con SKILL.md) de brain/skills está declarada en el SKILLS-MANIFEST
+  miss_sk=0
+  for d in "$SCRIPT_DIR"/skills/*/; do
+    [ -f "${d}SKILL.md" ] || continue
+    b="$(basename "$d")"
+    awk '$1!~/^#/ && NF>=2{print $1}' "$MFS" | grep -qxF "$b" \
+      || { bad "drift-skills: la skill '$b' (brain/skills/$b/SKILL.md) NO está en el SKILLS-MANIFEST → el sync/install la OMITE en silencio"; miss_sk=1; }
+  done
+  [ "$miss_sk" = 0 ] && ok "drift-skills: toda brain/skills/*/SKILL.md está declarada en el SKILLS-MANIFEST"
+  # (2) toda entrada del SKILLS-MANIFEST tiene su carpeta con SKILL.md (ninguna entrada apunta a la nada)
+  miss_skfile=0
+  for b in $(awk '$1!~/^#/ && NF>=2{print $1}' "$MFS"); do
+    [ -f "$SCRIPT_DIR/skills/$b/SKILL.md" ] \
+      || { bad "drift-skills: el SKILLS-MANIFEST lista '$b' pero falta brain/skills/$b/SKILL.md (entrada huérfana)"; miss_skfile=1; }
+  done
+  [ "$miss_skfile" = 0 ] && ok "drift-skills: toda entrada del SKILLS-MANIFEST tiene su carpeta con SKILL.md"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo "== (e2-apply) sincronizar-cerebro --apply: las copias por-repo quedan BYTE-IDÉNTICAS a la fuente (anti-DRIFT del apply) =="
+# (e2)/(e2-skills) verifican COMPLETITUD (¿está listado en el MANIFEST?); ESTE verifica la CORRECCIÓN DEL
+# APPLY: que correr el sync REAL contra un clon fresco deje CADA archivo {repo,both} byte-idéntico a brain/.
+# Es el eje que blinda el caso que motivó todo: un hook (p. ej. dod-verificar) bien listado en el MANIFEST
+# pero DRIFTEADO en la copia por-repo — completitud verde, apply podrido. cmp -s compara CONTENIDO (no
+# permisos: atomic_install hace chmod +x en la copia, irrelevante para el byte-a-byte del cuerpo).
+# El sync CREA .claude/hooks, .claude/skills y el settings.json en el destino → basta un dir VACÍO (mktemp).
+# El settings.json queda FUERA del assert de identidad a propósito: no es una COPIA de un archivo fuente,
+# es un JSON GENERADO por register_hook (cablea rutas ${CLAUDE_PROJECT_DIR}) → no hay "fuente" con la cual
+# hacer cmp. El punto del test son los ARCHIVOS copiados (hooks/libs/skills); el cableado lo cubre (e6d).
+SYNC="$SCRIPT_DIR/sincronizar-cerebro.sh"
+if [ ! -f "$SYNC" ]; then
+  bad "e2-apply: falta sincronizar-cerebro.sh (no puedo probar la corrección del apply)"
+else
+  APPLYDEST="$(mktemp -d "${TMPDIR:-/tmp}/brain-apply.XXXXXX")"
+  bash "$SYNC" "$APPLYDEST" --apply >"$APPLYDEST/.synclog" 2>&1
+  apply_drift=0
+  # (1) cada hook/lib de tier {repo,both} del hooks/MANIFEST: copiado y byte-idéntico a la fuente.
+  for name in $(awk '$1!~/^#/ && NF>=3 && ($2=="repo"||$2=="both"){print $1}' "$HOOKS/MANIFEST"); do
+    s="$HOOKS/$name.sh"; d="$APPLYDEST/.claude/hooks/$name.sh"
+    [ -f "$s" ] || continue
+    if [ ! -f "$d" ]; then bad "e2-apply: el --apply NO copió el hook/lib '$name.sh' al destino"; apply_drift=1
+    elif ! cmp -s "$s" "$d"; then bad "e2-apply: el --apply dejó DRIFT en '$name.sh' (copia por-repo ≠ fuente)"; apply_drift=1; fi
+  done
+  # (2) cada archivo del ÁRBOL COMPLETO de cada skill {both,repo} del skills/MANIFEST: copiado y byte-idéntico.
+  for sk in $(awk '$1!~/^#/ && NF>=2 && ($2=="both"||$2=="repo"){print $1}' "$SCRIPT_DIR/skills/MANIFEST"); do
+    ssk="$SCRIPT_DIR/skills/$sk"; [ -d "$ssk" ] || continue
+    while IFS= read -r sf; do
+      [ -z "$sf" ] && continue
+      rel="${sf#"$ssk"/}"; df="$APPLYDEST/.claude/skills/$sk/$rel"
+      if [ ! -f "$df" ]; then bad "e2-apply: el --apply NO copió skills/$sk/$rel"; apply_drift=1
+      elif ! cmp -s "$sf" "$df"; then bad "e2-apply: el --apply dejó DRIFT en skills/$sk/$rel (copia ≠ fuente)"; apply_drift=1; fi
+    done < <(find "$ssk" -type f 2>/dev/null)
+  done
+  [ "$apply_drift" = 0 ] && ok "e2-apply: --apply deja hooks/libs {repo,both} y skills {both,repo} byte-idénticos a la fuente (cmp -s)"
+  # (3) el apply COMPLETO (sin --only/--prune-only) estampa el sello de versión en el destino.
+  [ -f "$APPLYDEST/.claude/hooks/.brain-version" ] \
+    && ok "e2-apply: el --apply COMPLETO estampó .brain-version en el destino" \
+    || bad "e2-apply: el --apply COMPLETO NO escribió .brain-version"
+  rm -rf "$APPLYDEST"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 echo "== (e3) drift-check WIDGET: el catálogo curado del widget coincide con el MANIFEST + skills (antídoto al que un hook nuevo caiga en OTROS y a una skill sin tile) =="
 # El widget (Windows/C#, macOS/Swift, plasmoid/QML) trae un catálogo CURADO de piezas del cerebro:
 #   (1) los conjuntos known-global / known-repo que clasifican cada hook (si un hook NO está aquí,
