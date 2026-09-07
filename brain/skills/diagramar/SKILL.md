@@ -46,12 +46,41 @@ Para diagramas que el equipo debe poder VER navegando el repo (README, `docs/*.m
 (`NODO["texto (con paréntesis)"]`); saltos de línea con `<br/>`; `**negrita**` NO renderiza
 dentro de etiquetas normales (usa `<b>…</b>`); `<` y `>` literales como `&lt;`/`&gt;`.
 
+## Flujo 3 — Mermaid FEO → Graphviz HERMOSO (mmd2dot)
+
+**Cuándo:** tienes un `erDiagram` de Mermaid que se ve MAL — típicamente por **relaciones
+reflexivas** (una entidad consigo misma, p. ej. `AC ||--o{ AC : "IDPADRE"`), que Mermaid dibuja
+como **loops enormes que cruzan todo el diagrama** porque no controla el layout de los self-loops.
+Graphviz sí los dibuja compactos, pegados a la tabla. Úsalo también cuando quieras **editar el ER a
+mano** (Graphviz/yEd) o un render de más calidad para un PDF/entregable. Ninguna relación se omite
+para que se vea bien — **todas** (reflexivas incluidas) quedan en el DOT.
+
+```sh
+# Mermaid (.mmd) o el 1er bloque ```mermaid de un .md  →  DOT (+ PNG opcional)
+python3 ~/.cortex/bin/mmd2dot.py -i esquema.md -o esquema.dot --png esquema.png
+# rankdir: LR (default, tablas ER se leen a lo ancho) o TB
+python3 ~/.cortex/bin/mmd2dot.py -i esquema.mmd -o esquema.dot --rankdir TB
+```
+(En un clon del repo: `python3 bin/mmd2dot.py …`.) Vive junto a `dot2yed.py` en `bin/` del repo.
+
+Emite nodos-tabla HTML-like (header con el nombre + una fila por columna: tipo, nombre, **PK** en
+negrita, comentario en itálica), estilo lavanda tipo Mermaid default (header `#DDD6FE`, cuerpo
+`#EDE9FE`, bordes/edges morados `#6c5ce7`, Helvetica) y **self-loops LIMPIOS**. Crow's-foot no es
+nativo en Graphviz → se **aproxima** con arrowheads: `||`→`tee`, `|o`/`o|`→`teeodot`,
+`}o`/`o{`→`crowodot`, `}|`/`|{`→`crowtee`. **Soporta HOY solo `erDiagram`** (no flowchart /
+classDiagram / stateDiagram / sequenceDiagram).
+
+**Encadena con dot2yed:** `mmd2dot.py` (Mermaid→DOT) → si además quieres reacomodar a mano,
+`dot2yed.py` (DOT→yEd) sobre el `.dot` que salió. Es el puente que conecta el Flujo 2 (lo que ya
+está en Mermaid) con el Flujo 1 (editar en yEd) sin volver a dibujar nada.
+
 ## Cuándo usar cuál
 
 | Necesidad | Flujo |
 |---|---|
 | Un humano va a REARREGLAR el layout a mano | 1 — `.dot` → dot2yed → yEd |
 | Verse al navegar el repo (README/docs/MR) | 2 — Mermaid en `.md` versionado |
+| Un `erDiagram` de Mermaid se ve feo (self-loops/relaciones cruzadas) y lo quiero HERMOSO | 3 — `mmd2dot.py` (Mermaid→DOT→PNG); encadena a Flujo 1 si además vas a editarlo |
 | Ambas (mapa denso Y visible) | Ambos: `.dot` como fuente editable + un espejo Mermaid en docs — y los DOS se actualizan en la misma tanda |
 
 ## Reglas duras (no negociables)
