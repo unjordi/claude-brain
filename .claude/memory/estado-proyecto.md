@@ -23,6 +23,27 @@ metadata:
 
 ## 🔜 Pendientes (backlog vivo)
 
+- **Broker de terminal trasladado a cortex (#26i, primera pieza) — CÓDIGO LISTO EN RAMA, MIGRACIÓN EN VIVO
+  PENDIENTE.** Rama `feat/term-broker`. Quedó en el repo: `src/term-broker/` (5 `.ts` vendorizados de axon
+  `cf840e6` + 2 probes), `bin/cortex-term-broker`, `src/systemd/cortex-term-broker.service`, bandera
+  `install.sh --con-term-broker` (opt-in, Linux, token generado 0600), retiro en `uninstall.sh`,
+  `docs/term-broker.md`. Verificado: `probe-instalador.sh` 38/38, `probe-broker-vivo.sh` 19/19 (SSE + auth + sesión + PTY/WS + bind),
+  `systemd-analyze verify` limpio, `bash -n` de los 4 scripts. **NO se tocó** el
+  `axon-term-broker.service` que está corriendo. Lo que falta, por severidad:
+  - **[ALTO · decisión de unjordi] licencia del vendorizado.** cortex es MIT y público; axon es
+    `"private": true` y **sin archivo de LICENSE**. Se anotó en `NOTICE` que los 5 módulos son del mismo
+    autor e "included under this repository's MIT license" — pero eso es una **relicencia de facto que solo
+    unjordi puede confirmar**. Si no la confirma, la alternativa es no vendorizar (volver a artefacto) o
+    ponerle LICENSE a axon.
+  - **[ALTO] la migración en vivo** (apagar la unidad legacy, arrancar la nueva) la hace el orquestador con
+    el usuario presente: receta + reverso en `docs/term-broker.md` § "Migración desde la unidad vieja".
+  - **[MEDIO] retirar `src/server/term-host-broker.ts` de axon** (230 líneas, único módulo exclusivo del
+    servidor). Se dejó DEPRECADO a propósito: borrarlo antes de la migración rompería el servicio vivo si
+    alguien hace `git pull` en `~/code/axon-run`. Es un MR de follow-up POST-migración.
+  - **[BAJO] el contrato de #26i sigue abierto** para las OTRAS piezas (hwfit, `ollama-ram-pin`,
+    `state.json`): archivo vs socket vs HTTP, descubrimiento, versionado. Este traslado no lo cierra ni lo
+    prejuzga — el broker ya tenía su contrato (HTTP + token) decidido y corriendo, y no se cambió un byte.
+
 - **Aristas del sync de sesiones (delegadas por `reubicar-master` §9) — EN CURSO `fix/session-infra-aristas`.**
   Las 4 son el subsistema de sync de sesiones (NO del skill; el skill mueve un master, no refactoriza su
   tooling), y son las aristas EXACTAS que el move real de los masters va a pisar. Origen: `SKILL.md §9` —

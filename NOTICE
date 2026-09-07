@@ -25,3 +25,15 @@ derived from the "brain" emoji of the Noto Emoji project by Google.
 
 The graphite rounded-square background and the orange "spark" asterisk were
 drawn for this project and are covered by the repository's MIT license (LICENSE).
+
+--------------------------------------------------------------------------------
+src/term-broker/*.ts  —  vendored from the "axon" project
+--------------------------------------------------------------------------------
+The five TypeScript modules under src/term-broker/ (term-host-broker.ts,
+term-session.ts, term-pty-bridge.ts, ws.ts, pty-session.ts) are a verbatim copy
+of modules from the "axon" harness by the same author, taken at commit
+cf840e625edfdd408e0ec2b573a3fc941c3c84c2. They contain no third-party code and
+no npm dependencies (Node built-ins only), and are included here under this
+repository's MIT license (LICENSE).
+
+Provenance, checksums and the drift-check command: src/term-broker/PROCEDENCIA.md

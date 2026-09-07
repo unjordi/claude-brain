@@ -33,6 +33,17 @@ fi
 echo "==> Stopping and disabling timer"
 systemctl --user disable --now cortex.timer 2>/dev/null || true
 
+# Broker de terminal (si estaba instalado con --con-term-broker). Idempotente/fail-safe: si nunca se
+# instaló, todo esto es no-op. Se retira SIEMPRE, sin bandera aparte: desinstalar es desinstalar.
+# NO se toca la unidad legacy `axon-term-broker.service`: no es de cortex (la instaló axon a mano) y
+# apagarla mataría sesiones que no pusimos nosotros. Ver docs/term-broker.md.
+echo "==> Stopping and disabling the terminal broker (if installed)"
+systemctl --user disable --now cortex-term-broker.service 2>/dev/null || true
+rm -f "$HOME/.config/systemd/user/cortex-term-broker.service"
+rm -f "$HOME/.local/bin/cortex-term-broker"
+rm -rf "$HOME/.local/lib/cortex/term-broker"
+rmdir "$HOME/.local/lib/cortex" 2>/dev/null || true   # solo si quedó vacío
+
 echo "==> Removing systemd user units"
 rm -f "$HOME/.config/systemd/user/cortex.timer"
 rm -f "$HOME/.config/systemd/user/cortex.service"

@@ -8,12 +8,20 @@
 #   ./install.sh --no-brain    # skip the Claude-Code brain (hooks/norms); only daemon + GUI
 #   ./install.sh --no-claude-code # skip auto-installing the Claude Code CLI (the widget measures IT)
 #   ./install.sh --no-reload-shell # don't restart plasmashell at the end (default: restart to load changes)
+#   ./install.sh --con-term-broker # OPT-IN, Linux only. Installs the TERMINAL BROKER: a service that
+#                                  # serves a shell of THIS machine on 127.0.0.1:8799, authenticated with
+#                                  # a token the installer GENERATES. OFF by default; nothing of it is
+#                                  # installed without this flag. Read docs/term-broker.md first.
+#   ./install.sh --help            # print this usage and exit
 #
 # This is the MASTER installer for cortex: it lays down the shared Claude-Code brain
 # (global hooks, delegation-cost governance, skill, norms) AND the quota daemon + optional GUI.
 # Idempotent.
 
 set -euo pipefail
+
+# --help sale ANTES de tocar nada (imprime el bloque de comentarios de arriba).
+usage() { sed -n '2,/^$/p' "$0" | sed 's/^#\( \|$\)//'; }
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BIN_SRC="$ROOT/src/bin/cortex-fetch"
@@ -30,12 +38,26 @@ UNIT_DEST="$HOME/.config/systemd/user"
 # de ahí). "Borra el previo por completo": NO se migra la config vieja; se instala limpia (defaults).
 LIMITS_DEFAULT="$HOME/.config/cortex/limits.env"
 
+# ── Broker de terminal (OPT-IN, ver docs/term-broker.md) ───────────────────────────────────────
+# Los .ts vendorizados van a ~/.local/lib/cortex/term-broker/ (no al PATH: no son ejecutables), y el
+# lanzador `cortex-term-broker` sí a ~/.local/bin (misma convención que cortex-fetch).
+TERM_BROKER_SRC="$ROOT/src/term-broker"
+TERM_BROKER_LIB="$HOME/.local/lib/cortex/term-broker"
+TERM_BROKER_BIN="$HOME/.local/bin/cortex-term-broker"
+TERM_BROKER_ENV="$HOME/.config/cortex/term-broker.env"
+TERM_BROKER_UNIT="cortex-term-broker.service"
+# La unidad LEGACY que instaló a mano una sesión de axon, apuntando al clon ~/code/axon-run. Se
+# CONSULTA (para no arrancar dos brokers en el mismo puerto) pero NUNCA se toca: apagarla es parte
+# de la migración en vivo, con el usuario presente. Ver docs/term-broker.md § migración.
+TERM_BROKER_LEGACY_UNIT="axon-term-broker.service"
+
 REINSTALL=0
 SKIP_PLASMOID=0
 SKIP_CCUSAGE=0
 SKIP_BRAIN=0
 SKIP_CLAUDE_CODE=0
 RELOAD_SHELL=1
+WITH_TERM_BROKER=0
 for arg in "$@"; do
   case "$arg" in
     --reinstall)       REINSTALL=1 ;;
@@ -45,7 +67,9 @@ for arg in "$@"; do
     --no-ccusage)      SKIP_CCUSAGE=1 ;;
     --no-claude-code)  SKIP_CLAUDE_CODE=1 ;;
     --no-reload-shell) RELOAD_SHELL=0 ;;
-    *) echo "unknown arg: $arg" >&2; exit 2 ;;
+    --con-term-broker) WITH_TERM_BROKER=1 ;;
+    -h|--help)         usage; exit 0 ;;
+    *) echo "unknown arg: $arg" >&2; echo "try: $0 --help" >&2; exit 2 ;;
   esac
 done
 
@@ -75,6 +99,117 @@ ensure_path_local_bin() {
     printf '%s' "$block" >> "$f"
   done
   case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
+}
+
+# ── Broker de terminal: instalación OPT-IN ──────────────────────────────────────────────────────
+# SOLO se llama si el usuario pasó --con-term-broker. Sin la bandera, ni una línea de esta función
+# corre y no queda NADA del broker en la máquina (probado por src/term-broker/probe-instalador.sh).
+#
+# Genera un token de 32 bytes hex. Preferimos openssl; si no está, /dev/urandom por `od` (coreutils,
+# siempre presente). Sin fallback a $RANDOM: un token adivinable aquí es ejecución de comandos.
+gen_token() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+  elif [[ -r /dev/urandom ]]; then
+    od -An -tx1 -N32 /dev/urandom | tr -d ' \n'
+  else
+    echo "cortex: no hay fuente de aleatoriedad (ni openssl ni /dev/urandom) para el token" >&2
+    return 1
+  fi
+}
+
+install_term_broker() {
+  echo "==> Installing the TERMINAL BROKER (opt-in) — see docs/term-broker.md"
+
+  # (1) Puerta por OS. El broker usa `script`(util-linux) para el PTY, el login shell del usuario y
+  #     systemd --user: es Linux. Falla RUIDOSO en vez de saltarse en silencio — el usuario pidió
+  #     esto explícitamente con una bandera, merece saber por qué no pasó.
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "    --con-term-broker es solo para Linux (usa 'script' de util-linux, el login shell y systemd --user)." >&2
+    echo "    En macOS/Windows: instala sin la bandera; el resto de cortex funciona igual." >&2
+    # Aquí SÍ aborta (este instalador ya es el de Linux: si el OS no calza, nada de lo de abajo
+    # aplica). En macos/install.sh la MISMA bandera solo AVISA y sigue: allá llega por el
+    # pass-through del bootstrap y tumbar la instalación entera por una bandera inaplicable
+    # sería peor que ignorarla con una explicación.
+    exit 2
+  fi
+
+  # (2) Prerrequisitos, ANTES de escribir nada.
+  local missing=0
+  command -v node   >/dev/null 2>&1 || { echo "    missing: node (>=22, por --experimental-strip-types)" >&2; missing=1; }
+  command -v script >/dev/null 2>&1 || { echo "    missing: script (paquete util-linux) — el PTY lo necesita" >&2; missing=1; }
+  [[ -f "$TERM_BROKER_SRC/term-host-broker.ts" ]] || { echo "    missing: $TERM_BROKER_SRC/term-host-broker.ts" >&2; missing=1; }
+  [[ "$missing" -eq 0 ]] || { echo "    instala lo que falta y vuelve a correr con --con-term-broker" >&2; exit 1; }
+
+  # (3) Módulos vendorizados (0644: son librería, no ejecutables) + lanzador (0755, al PATH).
+  echo "    módulos -> $TERM_BROKER_LIB"
+  install -d "$TERM_BROKER_LIB"
+  local f
+  for f in "$TERM_BROKER_SRC"/*.ts; do
+    install -D -m 0644 "$f" "$TERM_BROKER_LIB/$(basename "$f")"
+  done
+  echo "    lanzador -> $TERM_BROKER_BIN"
+  install -D -m 0755 "$ROOT/bin/cortex-term-broker" "$TERM_BROKER_BIN"
+
+  # (4) Token per-máquina, GENERADO aquí. Idempotente: si el archivo ya existe NO se toca (regenerarlo
+  #     rompería al cliente que ya lo tiene). Nunca hay un token por defecto ni horneado en el repo.
+  local token_is_new=0
+  if [[ ! -f "$TERM_BROKER_ENV" ]]; then
+    echo "    generando token per-máquina -> $TERM_BROKER_ENV (0600)"
+    install -d -m 0700 "$(dirname "$TERM_BROKER_ENV")"
+    # umask ANTES de crear: que el archivo no exista ni un instante con el token adentro y 0644.
+    ( umask 077
+      cat > "$TERM_BROKER_ENV" <<EOF
+# cortex — broker de terminal. Generado por ./install.sh --con-term-broker el $(date -Iseconds).
+# ⚠️ SECRETO: quien tenga este token puede ejecutar CUALQUIER comando como tu usuario en esta
+# máquina (el broker no es una sandbox). Modo 0600, y NO lo copies a un repo.
+#
+# El prefijo AXON_ es intencional: es el contrato con el cliente (axon-en-contenedor) y además es
+# como buildSessionEnv() lo BARRE del entorno de cada shell. Ver src/term-broker/PROCEDENCIA.md.
+AXON_TERM_BROKER_TOKEN=$(gen_token)
+# AXON_TERM_BROKER_PORT=8799      # puerto (loopback SIEMPRE; el bind a 127.0.0.1 no es configurable)
+# AXON_TERM_BROKER_HOME=$HOME     # cwd inicial de las sesiones
+EOF
+    )
+    chmod 600 "$TERM_BROKER_ENV"
+    token_is_new=1
+  else
+    echo "    token ya existe -> $TERM_BROKER_ENV (no se regenera)"
+  fi
+
+  # (5) La unidad.
+  echo "    unidad -> $UNIT_DEST/$TERM_BROKER_UNIT"
+  install -D -m 0644 "$UNIT_SRC/$TERM_BROKER_UNIT" "$UNIT_DEST/$TERM_BROKER_UNIT"
+  systemctl --user daemon-reload
+
+  # (6) Arranque — con la salvaguarda del puerto ocupado. Si la unidad LEGACY de axon sigue viva,
+  #     arrancar aquí daría EADDRINUSE y un Restart=on-failure ciclando cada 3 s… mientras la
+  #     terminal que el usuario tiene abierta sigue en la unidad vieja. En ese caso dejamos la
+  #     unidad HABILITADA pero NO la arrancamos, y explicamos el cambio. Nunca apagamos la vieja
+  #     por nuestra cuenta: eso mata sesiones en uso.
+  if systemctl --user is-active --quiet "$TERM_BROKER_LEGACY_UNIT" 2>/dev/null; then
+    echo ""
+    echo "    ⚠️  $TERM_BROKER_LEGACY_UNIT está ACTIVA y ocupa el puerto 8799."
+    echo "       Instalé todo y habilité $TERM_BROKER_UNIT, pero NO lo arranqué (chocarían)."
+    echo "       Puede haber una terminal en uso ahí. Para hacer el cambio, ver docs/term-broker.md"
+    echo "       § 'Migración desde la unidad vieja' (apaga la vieja y arranca ésta, en ese orden)."
+    systemctl --user enable "$TERM_BROKER_UNIT"
+  else
+    systemctl --user enable --now "$TERM_BROKER_UNIT"
+    echo "    servicio arriba: systemctl --user status $TERM_BROKER_UNIT"
+  fi
+
+  # (7) Cómo se COMPARTE el token con el cliente. El instalador no lo escribe en el .env de nadie
+  #     (no sabe dónde vive el compose de quien clona); imprime la línea exacta a pegar.
+  echo ""
+  echo "    El cliente (axon-en-contenedor) necesita estas dos líneas en su .env / compose:"
+  echo "      AXON_TERM_BROKER_URL=http://host.docker.internal:8799"
+  echo "      AXON_TERM_BROKER_TOKEN=<el valor que está en $TERM_BROKER_ENV>"
+  echo "    Para copiarla SIN imprimir el secreto aquí:"
+  echo "      grep '^AXON_TERM_BROKER_TOKEN=' $TERM_BROKER_ENV >> /ruta/al/.env/del/cliente"
+  echo "    (sin AXON_TERM_BROKER_TOKEN, axon degrada solo al shell del contenedor — no falla)"
+  [[ "$token_is_new" -eq 1 ]] && echo "    ⚠️  token NUEVO: el cliente que tuviera el anterior ya no autentica."
+  echo ""
 }
 
 if [[ "$SKIP_BRAIN" -eq 0 ]]; then
@@ -212,6 +347,12 @@ systemctl --user daemon-reload
 
 echo "==> Enabling timer"
 systemctl --user enable --now cortex.timer
+
+# Broker de terminal: ÚNICO punto de entrada, y solo con la bandera. Sin --con-term-broker aquí no
+# pasa nada (ni archivos, ni unidad, ni token) — es el camino por DEFAULT y el que más importa.
+if [[ "$WITH_TERM_BROKER" -eq 1 ]]; then
+  install_term_broker
+fi
 
 echo "==> Priming cache with one run"
 systemctl --user start cortex.service || true

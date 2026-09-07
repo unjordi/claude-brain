@@ -1,0 +1,37 @@
+[Unit]
+Description=cortex terminal broker (shell de ESTA máquina en 127.0.0.1:8799, loopback + token)
+Documentation=https://github.com/unjordi/cortex/blob/main/docs/term-broker.md
+After=default.target
+
+[Service]
+# PRIMER servicio long-running de cortex. El resto del repo es un `Type=oneshot` disparado por un
+# .timer (cortex.service); esto es otra cosa: vive 24/7 y es PADRE de shells y PTYs del usuario.
+# El cambio de perfil está documentado en docs/term-broker.md — no es un detalle de esta unidad.
+Type=simple
+
+# El token NO es config opcional: sin él el broker aborta a propósito (jamás expone ejecución sin
+# auth). Por eso este EnvironmentFile va SIN el `-` de "opcional" que usa cortex.service para
+# limits.env: si el archivo no está, systemd falla de inmediato y lo dice, en vez de dejar un
+# Restart=on-failure ciclando cada 3 s contra el mismo error. Lo siembra ./install.sh --con-term-broker.
+EnvironmentFile=%h/.config/cortex/term-broker.env
+
+ExecStart=%h/.local/bin/cortex-term-broker
+Restart=on-failure
+RestartSec=3
+
+# Un hijo (una sesión del usuario) que se coma la RAM y lo mate el OOM killer NO debe tumbar el
+# broker y con él TODAS las demás sesiones. Con el default (OOMPolicy=stop) systemd para el
+# servicio completo cuando un proceso del cgroup muere por OOM.
+OOMPolicy=continue
+
+# Contabilidad SÍ, tope NO — y es una decisión, no un olvido: la RAM del cgroup es la de las
+# SESIONES REALES del usuario (medido en la unidad de hoy: 3.4 GB en uso, pico de 56 GB). Un
+# MemoryMax aquí mataría el trabajo del usuario, no un leak del broker. Se mide para poder verlo
+# (`systemctl --user show cortex-term-broker -p MemoryCurrent -p MemoryPeak`), no para acotarlo.
+MemoryAccounting=yes
+
+# KillMode se deja en el default (control-group): parar el servicio mata las sesiones, que es lo
+# correcto — son hijos suyos y no sobreviven sin el broker que las multiplexa.
+
+[Install]
+WantedBy=default.target

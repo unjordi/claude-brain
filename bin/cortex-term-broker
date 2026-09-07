@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# cortex-term-broker — lanza el BROKER DE TERMINAL de cortex (opt-in, Linux).
+#
+# Sirve un shell de ESTA máquina (el del usuario que lo arranca, con su $HOME y su login shell) en
+# 127.0.0.1:8799, autenticado con un token compartido. Lo consume axon-en-contenedor para que el
+# widget de Terminal de Odysseus dé la computadora real y no el interior del contenedor.
+# Doc completa (postura de seguridad, perfil de recursos, migración): docs/term-broker.md.
+#
+# Config — todo por variables de entorno; el servicio las toma de ~/.config/cortex/term-broker.env:
+#   AXON_TERM_BROKER_TOKEN  (REQUERIDO — sin él el broker NO arranca; nunca hay modo "sin auth")
+#   AXON_TERM_BROKER_PORT   (default 8799)
+#   AXON_TERM_BROKER_HOME   (default $HOME — cwd inicial de las sesiones)
+#   SHELL                   (default /usr/bin/zsh — el login shell del usuario)
+# Los nombres `AXON_*` son el CONTRATO con el cliente y además lo que `buildSessionEnv()` barre del
+# entorno de cada shell; ver src/term-broker/PROCEDENCIA.md antes de "arreglar" el prefijo.
+#
+# Uso directo (debug):  cortex-term-broker
+set -euo pipefail
+
+# Los .ts vendorizados los deja el instalador aquí; override para probar desde el clon:
+#   CORTEX_TERM_BROKER_LIB=~/.cortex/src/term-broker cortex-term-broker
+LIB="${CORTEX_TERM_BROKER_LIB:-$HOME/.local/lib/cortex/term-broker}"
+ENTRY="$LIB/term-host-broker.ts"
+
+if [[ ! -f "$ENTRY" ]]; then
+  echo "cortex-term-broker: no encuentro $ENTRY — reinstala con:  ./install.sh --con-term-broker" >&2
+  exit 1
+fi
+if ! command -v node >/dev/null 2>&1; then
+  echo "cortex-term-broker: falta 'node' (>=22, por --experimental-strip-types)" >&2
+  exit 1
+fi
+
+# --experimental-strip-types: corre TypeScript sin transpilar. Los módulos no tienen NINGUNA
+# dependencia de npm (solo builtins node:), por eso no hace falta node_modules ni un build.
+# --disable-warning silencia el aviso de "experimental" en cada arranque (ruido en el journal).
+exec node --disable-warning=ExperimentalWarning --experimental-strip-types "$ENTRY" "$@"
