@@ -129,5 +129,23 @@ debilidades REALES en los propios fixes de la ronda 1 (el loop funcionando). Ver
 - **fuera de repo · `bootstrap-claude.sh` de la PLANTILLA** (`cp -f` de 3/6 hooks both, pisa globales con stale): es el 🚧 BOOT_INV ya conocido, vive en plantilladotnet, no en cortex. Ya trackeado (EPIC del ciclo brain-widget).
 - **guard-precision** (confirmar-merge match "develop", git-branch push pelón, dod B2, AskUserQuestion, no-bypass self-heal): FPs de guards, no del proceso 01 → backlog #9 (slice de tuning con OK + test).
 
-> **Ronda 3:** pendiente — regenerar `material-03` desde el worktree (traer 18ad38b+4d2adc3) → 3 lentes → confirmar
-> convergencia a solo-bajos (con una lente proceso COMPLETA; la de la ronda 2 salió truncada). Luego el Opus gate.
+## RESOLUCIÓN — RONDA 3 (2026-09-08, re-audit sobre el código de rondas 1+2)
+
+Las 3 lentes dejaron el `.response` vacío (quirk qwen3: todo al `.thinking`) → hallazgos extraídos del razonamiento.
+**Ningún hallazgo fue regresión de los fixes de rondas 1-2** (se sostienen). Los nuevos son doc/operabilidad/
+mantenimiento, NO bugs activos del camino de instalación/actualización:
+
+| sev real | hallazgo | disposición |
+|----------|----------|-------------|
+| **medio** | sweeper `DASHBOARD` hardcodea slug `-Users-` → rompe en Linux (la Cachy) → bitácora nunca se escribe | **ARREGLADO 31febb6** (deriva el slug de $HOME; portable Mac/Linux, verificado) |
+| medio (refactor) | `ev_de()` duplicado en install-brain.sh + sincronizar-cerebro.sh | backlog #17a (extraer a lib compartida; test-brain ya caza divergencia) |
+| bajo (robustez) | contrato de formato de sincronizar-cerebro implícito (drift lo parsea por grep) | backlog #17b (contrato/test) |
+| bajo (doc) | sweeper no aparece en el flowchart 01 | backlog #17c (añadir nodo) |
+| bajo (dismiss) | descubrimiento del sweeper solo por `.brain-version` | por DISEÑO (el sello es el marcador intencional) — no es bug |
+
+**Convergencia:** el proceso de instalación/actualización (camino feliz + edge-cases de concurrencia/atomicidad)
+ya no tiene C/A/M sin atender. Lo que resta es doc/refactor/robustez (backlog) — el piso "solo-bajos". Falta una
+ronda LIMPIA (thinking desactivado, salida estructurada) para confirmarlo formalmente + el Opus gate.
+
+> **Ronda 4 (limpia):** re-audit con `think:false` para salida estructurada (`.response`, no `.thinking`) → confirmar
+> solo-bajos formalmente. Luego el **Opus gate** (Claude Opus fresco, solo-tooling, proceso-algoritmo, sin contexto).
