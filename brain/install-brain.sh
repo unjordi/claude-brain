@@ -162,10 +162,12 @@ ev_de() {
 # de ev_de(). El command conserva el literal `$HOME` (se expande al correr el hook, no aquí). ──
 WIRE_HOOKS="$(awk '$1!~/^#/ && NF>=3 && ($2=="global"||$2=="both") && $3=="hook"{print $1}' "$SRC_HOOKS/MANIFEST" 2>/dev/null)"
 wired_names=""
+unwired_names=""
 for h in $WIRE_HOOKS; do
   evm="$(ev_de "$h")"
   if [ -z "$evm" ]; then
     echo "warn: no tengo evento para cablear el hook global '$h' (agrégalo a ev_de en install-brain.sh) — NO cableado"
+    unwired_names="$unwired_names $h"
     continue
   fi
   # evm puede traer VARIOS pares "Event|Matcher" (space-separated) → cablear cada uno (multi-evento).
@@ -175,6 +177,10 @@ for h in $WIRE_HOOKS; do
   done
   wired_names="$wired_names $h"
 done
+if [ -n "$unwired_names" ]; then
+  echo "ERROR: hooks COPIADOS pero SIN cablear:$unwired_names — agrega su evento en ev_de() (install-brain.sh). El cerebro quedaría con guards inertes." >&2
+  exit 1
+fi
 echo "ok: hooks cableados en $GSET (derivados del MANIFEST):$wired_names"
 
 # ── (c) Skills genéricas del cerebro (cerrar-slice, orquestar-fanout, …) — tier {global,both} del
