@@ -190,7 +190,15 @@ El gate **NO dio cero** — cazó **1 CRÍTICO que las 4 rondas de ollama NO vie
   · **BAJO** asimetría brained: el sweeper descubre solo por `.brain-version`; el hook acepta también `dod-verificar.sh` → un repo pre-sello es invisible al barrido (el caso MegaFlux que motivó el sweeper).
   · **BAJO/policy** el escaneo de secretos del auto-sync es fail-OPEN si falta `detectar-secretos.sh` → en el único camino que commitea fuera del tool Bash, el guard defensivo se apaga en silencio. El Opus sugiere fail-CLOSED (abortar). Requiere decisión de unjordi (cambia la política fail-open del brain).
 
-**VEREDICTO FINAL proceso 01:** el CRÍTICO del Opus está arreglado; el proceso de instalación/actualización quedó
-**verificado técnicamente** con el footgun del updater cerrado. Quedan reales: 1 alto de concurrencia + 2 medios +
-bajos, TODOS deferidos a backlog #19 con su severidad (refactor/moderados/policy). **DECISIÓN PENDIENTE de unjordi:**
-¿otra pasada de fixes sobre el alto+medios antes de pasar al proceso 02, o se aceptan como backlog y se avanza?
+**VEREDICTO FINAL proceso 01** (tras trabajar los hallazgos del Opus): el CRÍTICO está arreglado (footgun del
+updater, 92fb814); 2 bajos arreglados (e703dac); el MEDIO de mtime MITIGADO con hedge (fc3d91c: el mensaje ya no
+guía a destruir una edición viva). Reevaluando los deferidos con el CÓDIGO real:
+- El "ALTO de concurrencia" resultó un **TRADEOFF CONOCIDO-ACEPTADO** — el comentario del sweeper (barrer-flotilla
+  L92-96) ya lo documenta como aceptado (precheck .claude/-limpio + index.lock → degrada SIN corromper). Un lock
+  compartido naíve sería NET-NEGATIVO (lock stale → repo sin auto-sync → drift silencioso = problema MegaFlux) →
+  su fix real es un slice deliberado (lock + staleness), no un rush. NO es un alto sin atender.
+- El MEDIO de doble-sync (eficiencia, baja frecuencia) y el fix DE FONDO del mtime (git-blob) + bajos → backlog #19.
+
+**ESTADO:** proceso 01 **verificado técnicamente**, convergido a solo-bajos: crítico cerrado, sin altos reales sin
+atender (el nominal es tradeoff aceptado documentado), medios mitigados o de baja-frecuencia trackeados. Listo para
+pasar al **proceso 02** con el tail en backlog #16-#19. (Verde técnico ≠ LISTO: el cierre real es de unjordi / release.)
