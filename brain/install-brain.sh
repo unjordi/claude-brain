@@ -181,7 +181,14 @@ if [ -n "$unwired_names" ]; then
   echo "ERROR: hooks COPIADOS pero SIN cablear:$unwired_names — agrega su evento en ev_de() (install-brain.sh). El cerebro quedaría con guards inertes." >&2
   exit 1
 fi
-echo "ok: hooks cableados en $GSET (derivados del MANIFEST):$wired_names"
+# Mensaje HONESTO: sin jq, register_hook hizo return sin cablear nada → NO afirmar "cableados" (mentiría).
+# Fail-open se CONSERVA (no exit 1: memorias/skills sí se instalaron), pero se dice la verdad: guards inertes
+# hasta que haya jq. (Antes: el loop sumaba el hook a wired_names aunque register_hook no cableara sin jq.)
+if command -v jq >/dev/null 2>&1; then
+  echo "ok: hooks cableados en $GSET (derivados del MANIFEST):$wired_names"
+else
+  echo "ADVERTENCIA: hooks COPIADOS a $HOOKS_DIR pero NO CABLEADOS en $GSET (falta jq) — los guards NO disparan (fail-open) hasta que instales jq y re-corras. Esto NO es una instalación completa de guards."
+fi
 
 # ── (c) Skills genéricas del cerebro (cerrar-slice, orquestar-fanout, …) — tier {global,both} del
 # brain/skills/MANIFEST (fuente única de tiers; hoy TODAS son `global`). Copia el ÁRBOL COMPLETO de cada

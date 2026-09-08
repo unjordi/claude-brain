@@ -27,7 +27,10 @@
 #   personal-clean repo PERSONAL (sin marca .claude/repo-compartido) sano: cero guards del brain sobrando.
 #   personal-flag  repo PERSONAL con guards del brain que SOBRAN → mensaje = flag "quítalos" (no auto-git).
 #   clean          repo COMPARTIDO al día (0 drift).
-#   synced         repo COMPARTIDO: auto-sincronizado (apply+commit+push) en la mini-develop. mensaje = ctx.
+#   synced         repo COMPARTIDO: auto-sincronizado (apply+commit+push OK) en la mini-develop. mensaje = ctx.
+#   synced-push-failed  COMPARTIDO: apply+commit local OK pero el PUSH falló (red/auth) → commit en la rama
+#                  LOCAL, aún no en el remoto. NO se cachea (no es clean): avisa re-pushear a mano. Antídoto al
+#                  falso "synced" que ocultaba un remoto stale (el commit local hacía desaparecer el drift).
 #   would-sync     (solo DRY_RUN) habría auto-sincronizado, pero en dry-run NO se tocó nada.
 #   drift          repo COMPARTIDO con drift que NO se auto-aplicó (ramita/.claude sucio/fuente stale/etc).
 #
@@ -178,12 +181,21 @@ NO commiteé ni pusheé nada (des-estageé el cambio; el working tree quedó con
             return 0
           fi
           if git -C "$ROOT" commit -q -o -m "chore(cerebro): auto-sync de la copia por-repo (aviso-drift, $total archivo(s) al día)" -- .claude/ >/dev/null 2>&1; then
-            git -C "$ROOT" push -q origin "$cur" >/dev/null 2>&1 || true
             local sha
             sha=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo "?")
-            printf 'STATUS=%s\n' "synced"
-            printf '%s\n' "🧬✅ CEREBRO AUTO-SINCRONIZADO en tu mini-develop ($cur, commit $sha): la copia por-repo estaba $total archivo(s) atrás y se puso al día SOLA (apply+commit+push). Llegará al develop compartido con tu próxima integración coordinada. Qué cambió:
+            # El push puede fallar (red/auth/rate-limit) DESPUÉS del commit local. NO lo tragues con `|| true`
+            # + STATUS=synced: eso reporta éxito falso, y como el commit local YA pone la copia al día vs la
+            # fuente, la próxima sesión ve 0 drift → clean → NUNCA reintenta el push → el colega/clon queda
+            # stale para siempre sin que nada lo detecte. Reporta el fallo de push HONESTO.
+            if git -C "$ROOT" push -q origin "$cur" >/dev/null 2>&1; then
+              printf 'STATUS=%s\n' "synced"
+              printf '%s\n' "🧬✅ CEREBRO AUTO-SINCRONIZADO en tu mini-develop ($cur, commit $sha): la copia por-repo estaba $total archivo(s) atrás y se puso al día SOLA (apply+commit+push). Llegará al develop compartido con tu próxima integración coordinada. Qué cambió:
 $detalle$dupla_nota"
+            else
+              printf 'STATUS=%s\n' "synced-push-failed"
+              printf '%s\n' "🧬⚠️ CEREBRO auto-sincronizado LOCALMENTE (commit $sha en $cur, $total archivo(s)) pero el PUSH FALLÓ (red/auth/rate-limit). El commit está en tu rama LOCAL; re-pushéalo cuando tengas red: \`git -C $ROOT push origin $cur\` — si no, tu copia local se ve al día pero el develop compartido (y los colegas/clones) siguen con la copia STALE. Qué cambió:
+$detalle$dupla_nota"
+            fi
             return 0
           fi
         fi
