@@ -261,7 +261,7 @@ EOF
   fi
   if [ "$n_st" -gt 0 ]; then
     msg="$msg
-  · $n_st archivo(s) DESACTUALIZADOS/ausentes en la copia instalada (la fuente cambió y no se re-desplegó). Remedio: re-corre el bootstrap/install-brain (o \`bash $BRAIN_DIR/brain/install-brain.sh\`):$stale"
+  · $n_st archivo(s) que la copia instalada tiene DESACTUALIZADOS/ausentes (la fuente se ve más nueva por mtime). Remedio normal: re-corre el bootstrap/install-brain (o \`bash $BRAIN_DIR/brain/install-brain.sh\`). ⚠️ OJO: si EDITASTE esa copia EN VIVO, un \`git pull\` en la fuente pudo re-sellar su mtime y hacerla ver 'más nueva' aunque TU edición sea la real — compara el CONTENIDO antes de re-desplegar o perderías tu cambio (pórtalo a la fuente primero):$stale"
   fi
   printf '%s\n' "$msg"
   return 0
@@ -317,7 +317,7 @@ EOF
   fi
   if [ "$n_st" -gt 0 ]; then
     msg="$msg
-  · $n_st archivo(s) DESACTUALIZADOS/ausentes en la copia instalada (la fuente cambió y no se re-desplegó). Remedio: re-corre el bootstrap/install-brain (o \`bash $BRAIN_DIR/brain/install-brain.sh\`):$stale"
+  · $n_st archivo(s) que la copia instalada tiene DESACTUALIZADOS/ausentes (la fuente se ve más nueva por mtime). Remedio normal: re-corre el bootstrap/install-brain (o \`bash $BRAIN_DIR/brain/install-brain.sh\`). ⚠️ OJO: si EDITASTE esa copia EN VIVO, un \`git pull\` en la fuente pudo re-sellar su mtime y hacerla ver 'más nueva' aunque TU edición sea la real — compara el CONTENIDO antes de re-desplegar o perderías tu cambio (pórtalo a la fuente primero):$stale"
   fi
   printf '%s\n' "$msg"
   return 0
