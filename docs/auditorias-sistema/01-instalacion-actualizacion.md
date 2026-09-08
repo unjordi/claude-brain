@@ -108,5 +108,26 @@ Cada uno se verificó contra el código antes de aplicar (el 27B da CANDIDATOS, 
 `.bak` único de CLAUDE.md sin rotación · conocimiento-propio sin watchdog · log en /tmp se pierde en reboot ·
 skills retiradas no se podan · fetch.prune global sin doc · persist_env sin validar path. Quedan como backlog.
 
-> **Ronda 2 (re-audit con el código YA arreglado):** en curso — 3 lentes ollama qwen3.8:27b sobre `material-02.txt`.
-> Objetivo: confirmar convergencia a solo-bajos. Luego el Opus gate (fresco, solo-tooling).
+## RESOLUCIÓN — RONDA 2 (2026-09-08, re-audit sobre el código ya arreglado; cada hallazgo verificado contra código)
+
+El re-audit (3 lentes ollama sobre `material-02.txt` = código con la ronda 1 aplicada) NO convergió: cazó
+debilidades REALES en los propios fixes de la ronda 1 (el loop funcionando). Verificadas y arregladas:
+
+| sev | hallazgo (lente) | fix | commit |
+|-----|------------------|-----|--------|
+| **crítico** (proceso) / bajo (suf) | skills `rm -rf` ANTES del `mv` → ventana sin skill + data-loss si `mv` falla | swap con rollback (aparta vieja→entra nueva→restaura si falla); sandbox ✓ | 18ad38b |
+| **alto** (proceso+suf) | updater lock `mkdir`+`trap EXIT` no se limpia con kill-9 → botón ⬆ muerto para siempre | lock PID-aware: guarda pid, recicla lock huérfano (`kill -0`) | 18ad38b |
+| **alto** (coherencia+suf) | `Updater.swift checkout -B` SIN stash (arreglé el gemelo bootstrap.sh, no el del widget) | stash pre-checkout en el `inner` (mismo patrón que bootstrap) | 18ad38b |
+| medio (proceso+suf) | auto-sync `push \|\| true` + STATUS=synced → push-fail reporta éxito falso → nunca reintenta → colega stale | STATUS=synced-push-failed (no cacheado) + mensaje re-push; manejado en el sweeper | 4d2adc3 |
+| medio (suf+coherencia) | sin jq, `register_hook` return pero el loop suma a wired_names → "ok: cableados" miente | mensaje honesto sin jq (fail-open conservado, sin exit 1) | 4d2adc3 |
+
+**Ya cubierto por la ronda 1 (suficiencia lo re-reportó sobre el código pre-fix):** stash de bootstrap.sh, drift de hooks global.
+
+**DIFERIDO / bajos (no bloquean convergencia del 01):**
+- **bajo · `conocimiento-propio` sin límite de tamaño** (aviso-drift L~72): se reinyecta íntegro en cada SessionStart → bloat de contexto si crece. Backlog: decidir cap + aviso "…truncado" (no truncar identidad en silencio).
+- **enhancement · doc+test de `ev_de`**: FIX-4 ya hace exit-1 si un hook queda sin cablear; falta un test que falle si un hook {global,both} kind=hook del MANIFEST no tiene entrada en `ev_de`, + doc del checklist "agregar hook → añadir a ev_de". Backlog.
+- **fuera de repo · `bootstrap-claude.sh` de la PLANTILLA** (`cp -f` de 3/6 hooks both, pisa globales con stale): es el 🚧 BOOT_INV ya conocido, vive en plantilladotnet, no en cortex. Ya trackeado (EPIC del ciclo brain-widget).
+- **guard-precision** (confirmar-merge match "develop", git-branch push pelón, dod B2, AskUserQuestion, no-bypass self-heal): FPs de guards, no del proceso 01 → backlog #9 (slice de tuning con OK + test).
+
+> **Ronda 3:** pendiente — regenerar `material-03` desde el worktree (traer 18ad38b+4d2adc3) → 3 lentes → confirmar
+> convergencia a solo-bajos (con una lente proceso COMPLETA; la de la ronda 2 salió truncada). Luego el Opus gate.
