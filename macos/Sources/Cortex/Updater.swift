@@ -165,7 +165,9 @@ final class Updater: ObservableObject {
         // `cd` queda pelón → $HOME → `git fetch` fuera de todo repo → "fatal: not a git repository", y el
         // botón ⬆ nunca converge. Con \$ las expande el bash INTERNO, que es donde se asignan.
         let canonical = FileManager.default.homeDirectoryForCurrentUser.path + "/.cortex"
-        let inner = "sleep 1; SRC='\(repoPath)'; DST='\(canonical)'; "
+        let inner = "sleep 1; mkdir -p \\$HOME/.cortex 2>/dev/null; LK=\\$HOME/.cortex/.updating; "
+            + "mkdir \\$LK 2>/dev/null || { echo 'update ya en curso — abortando el 2o'; exit 0; }; trap 'rmdir \\$LK 2>/dev/null' EXIT; "
+            + "SRC='\(repoPath)'; DST='\(canonical)'; "
             + "[ \\$SRC != \\$DST ] && [ -d \\$SRC ] && [ ! -e \\$DST ] && mv \\$SRC \\$DST; "
             + "DIR=\\$DST; [ -d \\$DIR/.git ] || DIR=\\$SRC; "
             + "cd \\$DIR && git fetch origin --quiet && git checkout -B main origin/main "

@@ -117,7 +117,16 @@ register_hook() {
       if any(.hooks[$ev][]?; ([.hooks[]?.command] | join(" ")) | test($pat))
       then .hooks[$ev] = [ .hooks[$ev][] | if (([.hooks[]?.command] | join(" ")) | test($pat)) then (if $m=="" then del(.matcher) else .matcher=$m end) else . end ]
       else .hooks[$ev] += [ (if $m=="" then {} else {"matcher":$m} end) + {"hooks":[{"type":"command","command":$cmd,"shell":"bash"}]} ] end
-    ' "$GSET" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then mv "$tmp" "$GSET"; else rm -f "$tmp"; echo "warn: no pude fusionar hook ($pat)"; fi
+    ' "$GSET" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    mv "$tmp" "$GSET"
+  else
+    rm -f "$tmp"
+    if ! jq empty "$GSET" 2>/dev/null; then
+      echo "ERROR: $GSET es JSON INVÁLIDO — los guards NO se cablearon. Repáralo (jq . \"$GSET\") o bórralo y re-corre install-brain." >&2
+      exit 1
+    fi
+    echo "warn: no pude fusionar hook ($pat)"
+  fi
 }
 
 # Evento+matcher de cada hook GLOBAL a cablear. El MANIFEST declara tier/kind pero NO el evento →
@@ -183,9 +192,12 @@ if [ -d "$SRC_SKILLS" ]; then
   for name in $_sk_names; do
     sk="$SRC_SKILLS/$name"
     [ -f "$sk/SKILL.md" ] || { echo "warn: skill '$name' en el manifiesto pero falta $sk/SKILL.md"; continue; }
-    mkdir -p "$SKILLS_DIR/$name"
-    cp -Rf "$sk"/. "$SKILLS_DIR/$name"/    # árbol COMPLETO (SKILL.md + subdirs como reference/)
-    echo "ok: skill $name instalada (árbol completo) en $SKILLS_DIR/$name"
+    mkdir -p "$SKILLS_DIR"
+    t="$(mktemp -d "$SKILLS_DIR/.tmp.$name.XXXX")" || { echo "warn: no pude crear tmp para skill $name"; continue; }
+    cp -Rf "$sk"/. "$t"/ || { rm -rf "$t"; echo "warn: no pude copiar skill $name"; continue; }
+    rm -rf "$SKILLS_DIR/$name"
+    mv "$t" "$SKILLS_DIR/$name"    # rename ATÓMICO (tmp en el mismo filesystem) → sin ventana de skill a-medio-copiar
+    echo "ok: skill $name instalada (árbol completo, atómico) en $SKILLS_DIR/$name"
   done
 fi
 
