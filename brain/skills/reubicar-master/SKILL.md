@@ -1,33 +1,38 @@
 ---
 name: reubicar-master
 description: >-
-  Muda una sesión master COMPLETA de Claude Code a otro repo (caso canónico: los brain-master a
-  `cortex`) SIN dejar nada a medias — transcript re-anclado + cwd reescrito, cerebro del master
-  migrado por su canal correcto, slug global y TODAS las referencias (masters.json target por-id,
+  Muda una sesión master COMPLETA de Claude Code a CUALQUIER repo destino SIN dejar nada a medias —
+  transcript re-anclado + cwd reescrito, cerebro del master migrado por su canal correcto, opcional
+  RENOMBRE del master, y slug global + TODAS las referencias (masters.json target y name por-id,
   alias, symlink `memory`) corregidas de forma ATÓMICA, residuo QUIRÚRGICO barrido y doc=realidad.
-  Úsala cuando: un `--resume` cae en un folder muerto; un master quedó "a medias" (residuo + resume
-  roto, anti-ejemplo helios-selene); o quieres consolidar los dos brain-master (Mac + Cachy) en
-  `cortex` sin lobotomizarlos, sin fuga a un repo público ni duplicado divergente. Hermana de
+  El destino es un PARÁMETRO (`$DST_REPO`), no una constante: sirve igual para `cortex`, `axon` o el
+  repo que sea, y el corte de qué viaja versionado se calibra según la VISIBILIDAD REAL del destino
+  (pública o privada), verificada en runtime. Úsala cuando: un `--resume` cae en un folder muerto; un
+  master quedó "a medias" (residuo + resume roto, anti-ejemplo helios-selene); o un master debe mudarse
+  al repo que de verdad es su casa, sin lobotomizarlo, sin fuga ni duplicado divergente. Hermana de
   `claude-proyecto-autocontenido` (esa define DÓNDE vive el cerebro; ésta lo MUEVE de casa).
 ---
 
 # reubicar-master — mudar un brain-master COMPLETO a su nueva casa (sin lobotomía, sin tail, sin fuga)
 
 ## Answer-first: qué hace y cómo, en una frase
-Re-ancla una sesión master **cerrada** a un repo destino (transcript + cwd + slug global + masters.json
-target + alias + symlink `memory`), migrando **el cerebro del master** clasificado en **3 tiers** por su
-canal correcto — **atómicamente** (move + fix de referencias en el MISMO bloque) y **quirúrgicamente**
-(sin tocar el symlink `memory` del slug compartido por ~130 sesiones). El sello de LISTO es la **QA
-funcional del humano**, no el verde técnico.
+Re-ancla una sesión master **cerrada** al repo destino que se le indique (transcript + cwd + slug global
++ masters.json target/name + alias + symlink `memory`), migrando **el cerebro del master** clasificado en
+**3 tiers** por su canal correcto — **atómicamente** (move + fix de referencias en el MISMO bloque) y
+**quirúrgicamente** (sin tocar el symlink `memory` de un slug compartido por cientos de sesiones). El
+destino y el nombre del master son PARÁMETROS. El sello de LISTO es la **QA funcional del humano**, no el
+verde técnico.
 
 ## Cuándo usarla · Cuándo NO
 **SÍ:**
-- Consolidar los brain-master (`claude-brain-cachy-master` en Cachy, `claude-brain-master` en Mac) dentro
-  de `cortex` — su casa real (lo dice su `CLAUDE.local.md`), no `plantilladotnet` (donde el cwd los
-  ancló por accidente histórico).
+- Mudar un master al repo que de verdad es su casa (la que declara su `CLAUDE.local.md`), en vez del repo
+  donde el cwd lo ancló por accidente histórico. Casos reales: los brain-master anclados en
+  `plantilladotnet` — `cortex-master` (Mac) mudándose a `cortex`, `axon-master` (Cachy) a `axon`.
 - Un `claude --resume <id>` que reanuda en un folder que ya no es la casa del master ("folder muerto").
 - Un master que quedó a medias tras un intento previo (residuo en el slug viejo + resume roto = el
   anti-ejemplo **helios-selene**).
+- Un master que además cambió de IDENTIDAD/nombre (p. ej. `claude-brain-cachy-master` → `axon-master`):
+  el renombre de `masters.json` + alias va en el mismo bloque atómico que el move (S4).
 
 **NO es:**
 - Un mover-sesiones genérico entre proyectos cualesquiera (para eso está `session-move.js` directo, o el
@@ -59,21 +64,46 @@ memorias que se ven parado en plantilladotnet". **No lo es.** Esos skills son .N
 plantilla del equipo, autocargados solo porque el cwd era la plantilla); el oficio del master es MANTENER
 el cerebro. Se clasifica por **PROPIEDAD** y cada tier viaja por su canal:
 
-| TIER | Qué es | Canal | Va a cortex |
+| TIER | Qué es | Canal | Va al destino |
 |---|---|---|---|
-| **T1 — cerebro personal PÚBLICO-SEGURO** | memorias de mantener-el-cerebro, genéricas/compartibles (`handoff-peer-claudes-conciso.md`, `plan-molde-cerebros.md`, `diseno-unificar-cerebro.md`, …). Skills: NINGUNO viaja (las 4 de mantenimiento — `agregar-hook-cerebro`, `cortex-widget`, `cambiar-icono`, `publicar-widget` — YA viven en `cortex/.claude/skills`; las ~35 transversales son GLOBAL y se auto-cargan solas) | **versionado por PR** (merge dedup por CONTENIDO en `cortex/.claude/memory`) | **SÍ** |
+| **T1 — cerebro personal PÚBLICO-SEGURO** | memorias de mantener-el-cerebro, genéricas/compartibles (`handoff-peer-claudes-conciso.md`, `plan-molde-cerebros.md`, `diseno-unificar-cerebro.md`, …). Skills: NINGUNO viaja (las 4 de mantenimiento — `agregar-hook-cerebro`, `cortex-widget`, `cambiar-icono`, `publicar-widget` — YA viven en `cortex/.claude/skills`; las ~35 transversales son GLOBAL y se auto-cargan solas) | **versionado por PR** (merge dedup por CONTENIDO en `$DST/memory`) | **SÍ** |
 | **T2 — cerebro personal SENSIBLE** | identidad y autorizaciones (`conocimiento-propio.local.md`, `autorizaciones-vigentes.local.md`, y el `CLAUDE.local.md` de la raíz) | **bundle en Drive** (gitignored) — git NO los propaga | **SÍ, gitignored per-máquina** |
 | **T3 — PRODUCTO de la plantilla .NET** | los 18 skills .NET + memorias de plantilla/proyecto (`_PROTOCOLO.md`, `flujo-de-trabajo.md`, `decisiones-infra.md`, `release-develop-main.md`, `modulo-notificaciones.md`, `lecciones-migracion-cps.md`, `estado-proyecto.md`, `bitacora.md`, `entorno-maquina.md`, …) | **SE QUEDA en plantilladotnet** | **NO** |
 
-**Por qué así, no de otra forma:** `cortex` es **PÚBLICO** [verificado: `git@github.com:unjordi/cortex.git`]
-y su `.gitignore` **NO ignora** `.claude/skills/*` ni el `CLAUDE.local.md` de la raíz [verificado:
-`git check-ignore .claude/skills/foo CLAUDE.local.md` no los lista]. Commitear T3 ahí = **fuga + duplicado
-divergente** de la plantilla del equipo. Resultado del corte:
-- **cortex** queda con el master + su cerebro COMPLETO (T1∪T2 + las GLOBAL que ya viajan) **sin** los
-  18 skills .NET. Cero lobotomía.
-- **plantilladotnet** queda íntegro y canónico como plantilla .NET. Nadie la vacía.
+### 1.0 · El corte NO depende del destino, pero SU RAZÓN SÍ — verifica la visibilidad, no la asumas
+**El resultado es el mismo con cualquier destino: T1∪T2 viajan, T3 se queda.** Lo que cambia con la
+visibilidad del destino es POR QUÉ, y eso importa porque una skill que da la razón equivocada se aplica mal
+la próxima vez. **Verifica la visibilidad en runtime — nunca la asumas:**
+```bash
+DST_PRIVADO=$(gh repo view "$(git -C "$DST_REPO" remote get-url origin | sed -E 's#.*[:/]([^/]+/[^/]+)(\.git)?$#\1#')" --json isPrivate -q .isPrivate 2>/dev/null || echo unknown)
+echo "destino privado: $DST_PRIVADO"   # unknown ⇒ trátalo como PÚBLICO (conservador)
+```
+| Destino | Riesgo de commitear T3 | Riesgo de commitear T2 |
+|---|---|---|
+| **PÚBLICO** (p. ej. `cortex` [verificado 2026-09-08: `isPrivate=false`]) | **FUGA** del template del equipo **+ duplicado divergente** | **FUGA de identidad y autorizaciones** |
+| **PRIVADO** (p. ej. `axon` [verificado 2026-09-08: `isPrivate=true`]) | **duplicado divergente** — el riesgo de fuga baja, el de drift NO: T3 es producto VIVO de otro repo, y una copia se desincroniza igual | sigue **gitignored**: un repo privado puede volverse público, y las autorizaciones no pertenecen a git en ningún caso |
+
+**La trampa a evitar:** concluir "el destino es privado ⇒ me puedo llevar T3". **NO.** El motivo dominante
+para dejar T3 nunca fue solo la fuga: es que T3 es el PRODUCTO VIVO de otro repo y una copia **driftea**.
+La visibilidad solo decide cuán catastrófico es equivocarse, no si es correcto.
+
+**Resultado del corte, con cualquier destino:**
+- **El destino** queda con el master + su cerebro COMPLETO (T1∪T2 + las GLOBAL que ya viajan), **sin** los
+  skills .NET. Cero lobotomía.
+- **El origen** (`plantilladotnet`) queda íntegro y canónico como plantilla .NET. Nadie la vacía.
 - Cero fuga, cero duplicado. Ambos extremos enteros. **Esto NO es hacer menos: es la descomposición
   correcta.** El skill PROPONE este corte; el humano lo confirma (Decisión #2), pero el corte no baja alcance.
+
+### 1.0.1 · Si el destino YA tiene su cerebro canonizado, S1 es un no-op — detéctalo, no lo rehagas
+Un destino puede llegar con el trabajo de S1 ya hecho por fuera (su `.claude/memory/` ya tiene índice
+`MEMORY.md` y las memorias del master ya copiadas). **Detéctalo por postcondición y sáltate S1**, en vez de
+re-copiar y ensuciar el diff:
+```bash
+[ -f "$DST/memory/MEMORY.md" ] && echo "destino con índice: S1 puede ser no-op (verifica con G-PARITY)"
+```
+Precedente real: `axon` se canonizó el 2026-09-08 ANTES de la mudanza (índice nuevo, memorias del harness
+trackeadas, personales en `.local.md`) — cuando la mudanza corra, S1 ya estará satisfecho y solo hay que
+comprobar G-PARITY.
 
 ### 1.1 · Escape-hatch T3 (opt-in, Decisión #3) — overlay GITIGNORED, nunca versionado
 Si el humano QUIERE que el master conserve acceso vivo a los skills .NET en su nueva casa **sin filtrarlos**:
@@ -87,26 +117,42 @@ Presentes-pero-no-commiteados → cero lobotomía + cero fuga. **Default: NO** (
 ---
 
 ## 2 · Variables base (poblar una vez; el resto de la skill las reutiliza)
+> **Nada de esto es constante.** `SRC_REPO`, `DST_REPO`, `MASTER_NAME`, `MASTER_NAME_NUEVO` y
+> `MEMORIAS_T1` son **PARÁMETROS que se pueblan en runtime** (Decisiones #0–#2 de §7). Los valores de
+> ejemplo abajo son eso, ejemplos — cámbialos. `BIN` sí es fijo: los scripts de sesión viven en `cortex`
+> sea cual sea el destino.
+
 ```bash
 set -euo pipefail
-SRC_REPO="/home/unjordi/code/plantilladotnet"
-DST_REPO="/home/unjordi/code/cortex"
+# ── PARÁMETROS (poblar en runtime — Decisiones #0/#1/#2) ─────────────────────────────
+SRC_REPO="$HOME/code/plantilladotnet"        # ej.: donde el cwd ancló al master por accidente
+DST_REPO=""                                  # ← Decisión #0: la casa REAL (ej. $HOME/code/cortex, $HOME/code/axon)
+MASTER_NAME=""                               # ← nombre ACTUAL en masters.json (ej. claude-brain-cachy-master)
+MASTER_NAME_NUEVO=""                         # ← Decisión #0b: nombre nuevo, o "" si no se renombra (ej. axon-master)
+ID=""                                        # ← Decisión #1: el <id> vigente (ver G-ID)
+MEMORIAS_T1=""                               # ← Decisión #2: memorias del-master que viajan versionadas
+# ── DERIVADAS / FIJAS ───────────────────────────────────────────────────────────────
+[ -n "$DST_REPO" ] && [ -n "$MASTER_NAME" ] || { echo "Faltan parámetros: DST_REPO y MASTER_NAME"; exit 1; }
+[ -d "$DST_REPO/.git" ] || { echo "DST_REPO no es un repo git: $DST_REPO"; exit 1; }
 SRC="$SRC_REPO/.claude"
 DST="$DST_REPO/.claude"
-BIN="$DST_REPO/bin"                                              # session-move/import/export.js + session-lib.js
+BIN="$HOME/code/cortex/bin"                  # session-move/import/export.js + session-lib.js — SIEMPRE en cortex
+[ -f "$BIN/session-move.js" ] || { echo "No encuentro los scripts de sesión en $BIN"; exit 1; }
 DRIVE="${CLAUDE_SESSIONS_DRIVE:-/run/media/unjordi/SteamAndFiles/GoogleDrive/claude-sessions}"
-GLOBAL_MEM="$HOME/.claude/projects/-home-unjordi/memory"          # cerebro de MÁQUINA (donde rig-master dejó memorias)
-MASTER_NAME="claude-brain-cachy-master"                          # identidad PER-MÁQUINA (Mac usa claude-brain-master)
-ID=""                                                            # ← Decisión #1: el <id> vigente (ver G-ID)
-OLD_SLUG="$(printf '%s' "$SRC_REPO" | sed 's/[^a-zA-Z0-9]/-/g')"  # -home-unjordi-code-plantilladotnet (COMPARTIDO ~130 sesiones)
-NEW_SLUG="$(printf '%s' "$DST_REPO" | sed 's/[^a-zA-Z0-9]/-/g')"  # -home-unjordi-code-cortex
+GLOBAL_MEM="$HOME/.claude/projects/$(printf '%s' "$HOME" | sed 's/[^a-zA-Z0-9]/-/g')/memory"   # cerebro de MÁQUINA
+OLD_SLUG="$(printf '%s' "$SRC_REPO" | sed 's/[^a-zA-Z0-9]/-/g')"   # ojo: suele ser COMPARTIDO por cientos de sesiones
+NEW_SLUG="$(printf '%s' "$DST_REPO" | sed 's/[^a-zA-Z0-9]/-/g')"
 JSONL="$HOME/.claude/projects/$OLD_SLUG/$ID.jsonl"
 NEW_JSONL="$HOME/.claude/projects/$NEW_SLUG/$ID.jsonl"
 MJ="$DRIVE/masters.json"
-# T1 propuesto (Decisión #2 confirma/ajusta); T2 fijo; T3 no viaja.
-MEMORIAS_T1="handoff-peer-claudes-conciso.md plan-molde-cerebros.md diseno-unificar-cerebro.md"
+# T2 es FIJO (identidad + autorizaciones); T3 nunca viaja versionado (§1.0).
 T2_LOCAL="conocimiento-propio.local.md autorizaciones-vigentes.local.md"   # en .claude/memory/
 T2_ROOT="CLAUDE.local.md"                                                   # en la raíz del repo
+```
+**Ejemplo poblado** (la mudanza de `axon-master`, pendiente al 2026-09-08):
+```bash
+DST_REPO="$HOME/code/axon"; MASTER_NAME="claude-brain-cachy-master"; MASTER_NAME_NUEVO="axon-master"
+MEMORIAS_T1="handoff-peer-claudes-conciso.md plan-molde-cerebros.md diseno-unificar-cerebro.md"
 ```
 > **Nota de ejecución (una sola shell):** los bloques de esta skill comparten las *Variables base* y las
 > postcondiciones recomputan lo que necesitan inline (p. ej. S3 recalcula el mtime desde `$JSONL`, no de
@@ -137,10 +183,25 @@ DETERMINISTA el de **mtime más reciente** (desempate alfabético por slug, `ses
 duplicado elige el más nuevo, que con duplicados suele ser el vivo. Aun así el gate NO desaparece: ahora es
 una **CONFIRMACIÓN** — el humano confirma que el `<id>` auto-seleccionado por mtime es el que quiere mover,
 lo CITA textual y puebla `ID=`.
+⚠️ **Y el id VIVO puede NO estar en `masters.json` — no lo elijas de ahí a ciegas.** El registro lo
+alimenta el hook de auto-export, que solo AÑADE ids; una sesión forkeada o reciente puede no haberse
+registrado nunca. Si eliges el id desde `masters.json` sin cruzarlo contra los `.jsonl` reales, mueves una
+sesión MUERTA y dejas la viva anclada en el origen. **Cruza siempre las dos fuentes:**
 ```bash
-grep -n '"id"\|"name"' "$MJ"                     # listar candidatos para que el humano elija
+grep -n '"id"\|"name"' "$MJ"                     # candidatos REGISTRADOS
+# candidatos REALES en disco, por frescura (el vivo es el de mtime más reciente):
+find "$HOME/.claude/projects/$OLD_SLUG" -maxdepth 1 -name '*.jsonl' -printf '%T@ %p\n' \
+  | sort -rn | head -5 | while read -r t f; do
+      printf '%s  %s  %s líneas\n' "$(date -d "@${t%.*}" '+%m-%d %H:%M')" "$(basename "$f" .jsonl)" "$(wc -l < "$f")"
+    done
 [ -n "$ID" ] || { echo "G-ID: falta el <id> vigente (Decisión #1)"; exit 1; }
+[ -f "$JSONL" ] || [ -f "$NEW_JSONL" ] || { echo "G-ID: el <id> elegido no tiene .jsonl — ¿registro huérfano?"; exit 1; }
+jq -e --arg id "$ID" '.masters[]|select(.id==$id)' "$MJ" >/dev/null \
+  || echo "AVISO: el id vivo NO está en masters.json ⇒ S4 hará UPSERT (lo añade), no update"
 ```
+**Caso real (2026-09-08, Cachy):** `masters.json` traía `claude-brain-cachy-master` con dos ids —
+`7a6960de` (ya **sin `.jsonl`**: el fork original) y `9cbc2856` (frío del día anterior) — mientras la sesión
+**viva** era `4e7b786c`, **ausente del registro**. Elegir por `masters.json` habría movido una sesión muerta.
 
 ### G-LIVENESS · la sesión objetivo está CERRADA — por **mtime que BLOQUEA** (NO `fuser`/`lsof`)
 Gatea el move DESTRUCTIVO (S3+); el prep NO-destructivo S1/S2 corre antes que él (ver nota de §3).
@@ -162,8 +223,9 @@ CERRADA"*. En cross-máquina el mtime se chequea en el host remoto (`ssh <host> 
 > self-check). Por eso el move de cada master lo dispara **el OTRO** — ver la danza §6.
 
 ### G-GITIGNORE · BLINDAR el `.gitignore` del destino ANTES de depositar nada sensible
-`cortex` es público y su `.gitignore` **no** cubre el `CLAUDE.local.md` de la raíz [verificado].
-Depositarlo sin blindar lo dejaría TRACKEADO = fuga. Se blinda ANTES de tocar T2:
+Un destino cuyo `.gitignore` no cubra el `CLAUDE.local.md` de la raíz dejaría lo sensible TRACKEADO = fuga
+[verificado en `cortex`; **compruébalo en TU destino**, no lo asumas]. Se blinda ANTES de tocar T2 — y aplica
+igual si el destino es privado (§1.0: un privado puede volverse público):
 ```bash
 for pat in 'CLAUDE.local.md' '.claude/memory/*.local.md' '.claude/settings.local.json'; do
   grep -qxF "$pat" "$DST_REPO/.gitignore" || printf '%s\n' "$pat" >> "$DST_REPO/.gitignore"
@@ -285,17 +347,34 @@ node "$BIN/session-move.js" "$ID" --to-cwd "$DST_REPO"          # {ok, fromSlug,
 [ -f "$NEW_JSONL" ] || { echo "ABORTO: no se creó $NEW_JSONL"; exit 1; }
 uniqcwd=$(grep -o '"cwd":"[^"]*"' "$NEW_JSONL" | sort -u)
 [ "$uniqcwd" = "\"cwd\":\"$DST_REPO\"" ] || { echo "ABORTO: cwd no uniforme: $uniqcwd"; exit 1; }
-# 3) INMEDIATAMENTE corregir masters.json target POR-ID (mktemp capturado, sin sponge):
+# 3) INMEDIATAMENTE corregir masters.json target POR-ID — y el NAME si hay renombre (mktemp, sin sponge):
+NOMBRE_FINAL="${MASTER_NAME_NUEVO:-$MASTER_NAME}"
 tmpm=$(mktemp)
-jq --arg id "$ID" --arg t "${DST_REPO#$HOME/}" \
-   '(.masters[] | select(.id==$id)).target = $t' "$MJ" > "$tmpm" && /bin/mv -f "$tmpm" "$MJ"
-# 4) alias legible REAL (usa la lib, no editar a mano):
+# UPSERT (no update): si el id vivo no estaba registrado, se AÑADE — ver el caso real de G-ID.
+jq --arg id "$ID" --arg t "${DST_REPO#$HOME/}" --arg n "$NOMBRE_FINAL" '
+  if ([.masters[] | select(.id==$id)] | length) > 0
+  then (.masters[] | select(.id==$id)) |= (.target = $t | .name = $n)
+  else .masters += [{id:$id, name:$n, target:$t}] end' "$MJ" > "$tmpm" && /bin/mv -f "$tmpm" "$MJ"
+# 4) alias legible REAL con el nombre FINAL (usa la lib, no editar a mano):
 node -e 'require(process.argv[1]).writeAlias(process.argv[2],process.argv[3])' \
-  "$BIN/session-lib.js" "$ID" "$MASTER_NAME"
+  "$BIN/session-lib.js" "$ID" "$NOMBRE_FINAL"
+# 5) si hubo RENOMBRE, retirar el alias VIEJO para que no queden dos apuntando al mismo id:
+if [ -n "$MASTER_NAME_NUEVO" ] && [ "$MASTER_NAME_NUEVO" != "$MASTER_NAME" ]; then
+  find "$HOME/.claude" "$DRIVE" -maxdepth 2 -name "*$MASTER_NAME*" -type l -print   # revisar y retirar a mano
+  echo "RECORDATORIO: el nombre VIEJO ($MASTER_NAME) puede seguir citado en el cerebro del master"
+  echo "  → grep -rl '$MASTER_NAME' \"$DST/memory\" \"$DST_REPO/CLAUDE.local.md\"  (doc=realidad, S6)"
+fi
 ```
+
+> **El RENOMBRE es parte del mismo bloque atómico, no un paso aparte.** Un master cuyo `target` se movió
+> pero cuyo `name` sigue siendo el viejo es la misma clase de tail que `helios-selene`: las referencias
+> quedan a medias y la siguiente herramienta que lea `masters.json` (o el humano) verá una identidad que ya
+> no existe. Caso real: `claude-brain-cachy-master` → `axon-master`, decidido el 2026-08-22, con
+> `masters.json` todavía diciendo el nombre viejo semanas después porque el renombre no tenía dueño.
 **Postcondiciones S4:** `find ~/.claude/projects -name "$ID.jsonl"` = **exactamente 1** (el nuevo); cwd
 único = `$DST_REPO`; `jq -r --arg id "$ID" '.masters[]|select(.id==$id).target' "$MJ"` = `${DST_REPO#$HOME/}`;
-alias puesto.
+`jq -r --arg id "$ID" '.masters[]|select(.id==$id).name' "$MJ"` = `$NOMBRE_FINAL`; alias puesto (y el viejo
+retirado si hubo renombre).
 
 ### S5 · Depositar T2 + barrido QUIRÚRGICO + symlink verificado
 ```bash
@@ -304,13 +383,14 @@ tar -C "$DST/memory" -xzf "$DRIVE/$ID.brain-local.tgz"
 [ -f "$DST/memory/$T2_ROOT" ] && /bin/mv -f "$DST/memory/$T2_ROOT" "$DST_REPO/$T2_ROOT"   # CLAUDE.local.md va a la RAÍZ
 git -C "$DST_REPO" status --porcelain | grep -iE 'local\.md|CLAUDE\.local' && { echo "FUGA: sensible visible a git"; exit 1; } || true
 # doc=realidad de la identidad: "corro desde plantilladotnet (mi base)" ya es FALSO → revisar a ojo tras editar:
-#   conocimiento-propio.local.md del DESTINO: "corro desde cortex (mi nueva base), antes desde plantilladotnet"
+#   conocimiento-propio.local.md del DESTINO: "corro desde <destino> (mi nueva base), antes desde <origen>"
+#   y si hubo RENOMBRE, la identidad del master también cambia ahí y en CLAUDE.local.md
 # BARRIDO QUIRÚRGICO del slug COMPARTIDO (~130 sesiones): SOLO el <id>.jsonl. El move local ya lo unlinkeó;
 # esto es defensivo/idempotente (por si quedó copia o se vino de import). NUNCA el symlink 'memory'.
 [ -f "$HOME/.claude/projects/$OLD_SLUG/$ID.jsonl" ] && /bin/rm -f "$HOME/.claude/projects/$OLD_SLUG/$ID.jsonl"
 find "$HOME/.claude/projects/$OLD_SLUG" -maxdepth 1 -name memory -type l   # VERIFICAR que el symlink compartido SIGUE vivo
-# symlink 'memory' del slug NUEVO → el cerebro COMPLETO (ya apunta a cortex/.claude/memory [verificado]):
-readlink "$HOME/.claude/projects/$NEW_SLUG/memory"     # → /home/unjordi/code/cortex/.claude/memory
+# symlink 'memory' del slug NUEVO → debe apuntar al cerebro COMPLETO del DESTINO:
+readlink "$HOME/.claude/projects/$NEW_SLUG/memory"     # esperado: $DST/memory
 find -L "$DST" -type l                                 # sin symlinks rotos; si faltara: bash "$DST_REPO/bootstrap-claude.sh"
 ```
 
@@ -319,13 +399,13 @@ find -L "$DST" -type l                                 # sin symlinks rotos; si 
   `confirmar-merge-develop`/`merge-squash-guard`). **NUNCA `--auto-merge`** — integridad de guardarraíles.
   Sin OK, queda en la mini-develop (Decisión #5). Solo lo versionable (T1 + gitignore); jamás
   `.jsonl`/`*.local.md`/`brain/`.
-- Actualizar: **dashboard global** (Mapa: el master ahora vive en `code/cortex` + bitácora fechada
+- Actualizar: **dashboard global** (Mapa: el master ahora vive en `${DST_REPO#$HOME/}` + bitácora fechada
   con `>>`), `estado-proyecto.md`, y el `CLAUDE.local.md`/README de plantilladotnet si mencionaba al master
   como residente. **Registrar la RUEDA** (el TAIL que a helios-selene le faltó).
-- **LISTO = QA del humano.** `claude --resume $ID` parado en `cortex`; confirmar: (a) reanuda sin
+- **LISTO = QA del humano.** `claude --resume $ID` parado en `$DST_REPO`; confirmar: (a) reanuda sin
   folder muerto; (b) identidad cargada (conocimiento-propio re-inyectado por `aviso-drift-cerebro`);
-  (c) las 4 skills de cortex + las GLOBAL aparecen; (d) las memorias-del-master (T1∪T2) están;
-  (e) `masters.json`/alias correctos. **Verde técnico ≠ LISTO. No se declara a ciegas.**
+  (c) las skills del destino + las GLOBAL aparecen; (d) las memorias-del-master (T1∪T2) están;
+  (e) `masters.json` con el **target Y el name** correctos, y el alias apuntando al nombre final. **Verde técnico ≠ LISTO. No se declara a ciegas.**
 
 ---
 
@@ -346,37 +426,117 @@ el plano de datos** (transporta el `.gz` + el bundle T2); **git-PR** lleva T1. E
 ya es LOCAL a su máquina — SSH no transporta el `.jsonl`, solo ORDENA el move allá.
 
 **Preflight SSH:** `ssh -o BatchMode=yes -o ConnectTimeout=8 unjordi@macbook-pro-de-unjordi.local 'echo ok'`
-(key-auth + mDNS) + verificar `node` y `~/code/cortex` remotos.
+(key-auth + mDNS) + verificar `node` y el `$DST_REPO` remoto (y que `~/code/cortex/bin` exista allá: los
+scripts de sesión viven en cortex sea cual sea el destino).
 
-**Coreografía (consolidar los dos brain-master en cortex):**
-1. **Preparar (esta sesión VIVA — solo lo NO-destructivo):** G-ID/G-RECONSTITUTE(S0)/G-GITIGNORE/S1(T1 por
-   PR)/S2(bundle T2). Esta sesión NO se mueve a sí misma (G-LIVENESS: mtime caliente).
-2. **unjordi CIERRA el gemelo Mac (`<id-mac>`).** Desde Cachy, por SSH, el gemelo (o un shell remoto) corre
-   S3–S6 para `<id-mac>` con `session-import.js --repo /Users/unjordi/code/cortex` (import re-deriva
-   el slug `/Users/...` y hace el swap solo). Su identidad T2 viaja por el bundle Drive `locals-<master-mac>`;
-   T1 le llega con `git pull` del PR mergeado.
-3. **unjordi resume el gemelo** en su nueva casa (Mac `cortex`) → gemelo vivo con cerebro completo.
-4. **unjordi CIERRA esta sesión Cachy (`$ID`).** El gemelo (ahora vivo en cortex) por SSH corre S3–S6
-   para `$ID` con `--to-cwd /home/unjordi/code/cortex`. **Así el gemelo me mueve a MÍ** — yo no me
-   auto-muevo (estoy cerrada).
-5. **unjordi resume Cachy** en `cortex` → cerebro completo. QA (§S6) en cada máquina.
+> **Los gemelos NO tienen por qué ir al MISMO destino.** La danza no consolida: solo resuelve el
+> huevo-y-gallina de que nadie puede auto-moverse. Cada master declara SU `DST_REPO` (Decisión #0) y puede
+> además renombrarse (#0b). Estado real al 2026-09-08: el gemelo Mac ya opera como **`cortex-master`** con
+> casa en `cortex`; el de Cachy va a **`axon`** y se renombra a **`axon-master`**. Destinos distintos, misma
+> coreografía.
 
-**Cómo sobrevive el orquestador a su propia reubicación:** esta sesión orquesta el paso 2 (mueve al gemelo);
-NO puede ejecutar su propio paso 4 (debe estar cerrada) → lo ejecuta el gemelo. "Sobrevive" reapareciendo con
-`claude --resume` desde el slug nuevo.
+**Coreografía (genérica — A y B son los dos masters; cada uno con su propio `DST_REPO`):**
+1. **Preparar (la sesión VIVA — solo lo NO-destructivo):** G-ID / S0 / G-GITIGNORE / S1 (T1 por PR, o
+   detectar que el destino ya está canonizado y es no-op, §1.0.1) / S2 (bundle T2). Una sesión viva NO se
+   mueve a sí misma (G-LIVENESS: mtime caliente).
+2. **El humano CIERRA a A.** Desde la otra máquina, por SSH, **B** (o un shell plano) corre S3–S6 para el
+   `<id-A>` apuntando al `DST_REPO` **de A**. Cross-máquina se usa `session-import.js --repo <DST_REPO-de-A>`
+   (re-deriva el slug local y hace el swap `/home`↔`/Users` solo). La identidad T2 de A viaja por su bundle
+   de Drive; T1 le llega con `git pull` del PR mergeado.
+3. **El humano resume A** en su nueva casa → A vivo con cerebro completo. QA (§S6).
+4. **El humano CIERRA a B.** Ahora **A** (vivo en su casa nueva) corre por SSH S3–S6 para `<id-B>` apuntando
+   al `DST_REPO` **de B**. **Así cada uno mueve al otro** — ninguno se auto-mueve.
+5. **El humano resume B** en su casa → cerebro completo. QA (§S6) en cada máquina.
 
-### 6.1 · Handoff script escrito a DISCO (sobrevive compactaciones)
-El skill ESCRIBE el guion del paso destructivo a `$DRIVE/handoff-$ID.sh` (copy-paste para el humano, desde
-un shell plano con la sesión cerrada) — así no se pierde si esta sesión compacta antes del cierre:
+**Si solo hay UN master que mudar** (no hay gemelo disponible, o el otro ya está en su casa): no hace falta
+SSH ni danza. El humano CIERRA la sesión y corre S3–S6 desde un **shell plano** en la misma máquina, o desde
+una sesión de Claude DISTINTA (que no es la que se mueve, así que G-LIVENESS la deja). Es el caso de la
+mudanza pendiente de `axon-master`: el gemelo ya está en cortex, así que basta un operador local.
+
+**Cómo sobrevive el orquestador a su propia reubicación:** la sesión viva orquesta el move del OTRO; NO
+puede ejecutar el suyo (debe estar cerrada) → lo ejecuta el otro master, un shell plano o una sesión
+distinta. "Sobrevive" reapareciendo con `claude --resume` desde el slug nuevo.
+
+### 6.1 · Handoff script escrito a DISCO — EJECUTABLE, no un stub
+El skill ESCRIBE el guion del paso destructivo a `$DRIVE/handoff-$ID.sh` para que **otra persona u otra
+sesión lo corra tal cual**, con la sesión objetivo cerrada. Sobrevive compactaciones porque vive en disco.
+
+> **Regla dura: el handoff se escribe COMPLETO y EJECUTABLE.** Un handoff que solo dice "(ver SKILL §4)"
+> obliga a quien lo corre a reconstruir los pasos destructivos a mano — justo lo que la skill existe para
+> evitar. Si no puedes escribir un paso, escribe el `echo` que lo pide y un `exit 1`, nunca un comentario
+> que finge que está resuelto.
+
+El script re-declara sus propias variables (no hereda nada), re-verifica G-LIVENESS **él mismo** (quien lo
+corre puede hacerlo horas después) y para en el primer fallo. Plantilla:
+
 ```bash
-cat > "$DRIVE/handoff-$ID.sh" <<EOF
+cat > "$DRIVE/handoff-$ID.sh" <<HANDOFF
 #!/usr/bin/env bash
-# handoff reubicar-master $MASTER_NAME ($ID) — CORRER con la sesión CERRADA, desde shell plano.
+# handoff reubicar-master: $MASTER_NAME ($ID) → ${DST_REPO}${MASTER_NAME_NUEVO:+  (renombre a $MASTER_NAME_NUEVO)}
+# CORRER con la sesión CERRADA, desde un shell plano o una sesión de Claude DISTINTA.
+# Generado $(date -Iseconds) por reubicar-master. Idempotente y re-entrante: cada paso verifica antes de mutar.
 set -euo pipefail
-# (S3 export-first, S4 move+target-fix+alias, S5 deposita T2 + residuo quirúrgico, S6 doc) — ver SKILL §4.
-EOF
+ID="$ID"; MASTER_NAME="$MASTER_NAME"; NOMBRE_FINAL="${MASTER_NAME_NUEVO:-$MASTER_NAME}"
+SRC_REPO="$SRC_REPO"; DST_REPO="$DST_REPO"
+DST="\$DST_REPO/.claude"; BIN="\$HOME/code/cortex/bin"
+DRIVE="$DRIVE"; MJ="\$DRIVE/masters.json"
+OLD_SLUG="$OLD_SLUG"; NEW_SLUG="$NEW_SLUG"
+JSONL="\$HOME/.claude/projects/\$OLD_SLUG/\$ID.jsonl"
+NEW_JSONL="\$HOME/.claude/projects/\$NEW_SLUG/\$ID.jsonl"
+T2_LOCAL="$T2_LOCAL"; T2_ROOT="$T2_ROOT"
+
+echo "── G-LIVENESS (re-verificado AQUÍ, no heredado) ──"
+[ "\$ID" = "\${CLAUDE_SESSION_ID:-}" ] && { echo "BLOQUEO: es la sesión que ejecuta"; exit 1; }
+if [ -f "\$JSONL" ]; then
+  age=\$(( ( \$(date +%s) - \$(stat -c %Y "\$JSONL") ) / 60 ))
+  [ "\$age" -lt "\${REUBICAR_LIVE_MIN:-15}" ] && { echo "BLOQUEO: .jsonl tocado hace \${age}m ⇒ presunta VIVA"; exit 1; }
+  echo "  ok: frío hace \${age}m"
+else
+  [ -f "\$NEW_JSONL" ] && echo "  (ya movido: reanudando desde S5)" || { echo "BLOQUEO: no encuentro el .jsonl"; exit 1; }
+fi
+[ -f "\$DRIVE/.export-\$ID.lock" ] && { echo "BLOQUEO: auto-export en vuelo"; exit 1; }
+
+echo "── S3 export-first ──"
+if [ -f "\$JSONL" ]; then
+  tmpe=\$(mktemp -d)
+  node "\$BIN/session-export.js" "\$ID" --repo "\$tmpe" --name "\$NOMBRE_FINAL" --force
+  /bin/cp -f "\$tmpe/.claude/sessions/\$ID.jsonl.gz" "\$tmpe/.claude/sessions/\$ID.meta.json" "\$DRIVE/"
+  /bin/rm -rf "\$tmpe"
+  [ "\$(stat -c %Y "\$DRIVE/\$ID.jsonl.gz")" -ge "\$(stat -c %Y "\$JSONL")" ] || { echo "S3: .gz no es >= sesión"; exit 1; }
+fi
+
+echo "── S4 move + target + name + alias (BLOQUE ININTERRUMPIDO) ──"
+if [ -f "\$JSONL" ]; then node "\$BIN/session-move.js" "\$ID" --to-cwd "\$DST_REPO"; fi
+[ -f "\$NEW_JSONL" ] || { echo "ABORTO: no se creó \$NEW_JSONL"; exit 1; }
+uniqcwd=\$(grep -o '"cwd":"[^"]*"' "\$NEW_JSONL" | sort -u)
+[ "\$uniqcwd" = "\"cwd\":\"\$DST_REPO\"" ] || { echo "ABORTO: cwd no uniforme: \$uniqcwd"; exit 1; }
+tmpm=\$(mktemp)
+jq --arg id "\$ID" --arg t "\${DST_REPO#\$HOME/}" --arg n "\$NOMBRE_FINAL" \\
+   '(.masters[] | select(.id==\$id)) |= (.target = \$t | .name = \$n)' "\$MJ" > "\$tmpm" && /bin/mv -f "\$tmpm" "\$MJ"
+node -e 'require(process.argv[1]).writeAlias(process.argv[2],process.argv[3])' "\$BIN/session-lib.js" "\$ID" "\$NOMBRE_FINAL"
+
+echo "── S5 depositar T2 + barrido quirúrgico + symlink ──"
+[ -f "\$DRIVE/\$ID.brain-local.tgz" ] && tar -C "\$DST/memory" -xzf "\$DRIVE/\$ID.brain-local.tgz"
+[ -f "\$DST/memory/\$T2_ROOT" ] && /bin/mv -f "\$DST/memory/\$T2_ROOT" "\$DST_REPO/\$T2_ROOT"
+git -C "\$DST_REPO" status --porcelain | grep -iE 'local\.md|CLAUDE\.local' && { echo "FUGA: sensible visible a git"; exit 1; } || true
+[ -f "\$HOME/.claude/projects/\$OLD_SLUG/\$ID.jsonl" ] && /bin/rm -f "\$HOME/.claude/projects/\$OLD_SLUG/\$ID.jsonl"
+find "\$HOME/.claude/projects/\$OLD_SLUG" -maxdepth 1 -name memory -type l | grep -q . \\
+  && echo "  ok: symlink 'memory' del slug COMPARTIDO intacto" || echo "  ⚠️ el slug viejo ya no tiene symlink 'memory' (revisar)"
+[ -L "\$HOME/.claude/projects/\$NEW_SLUG/memory" ] || ln -s "\$DST/memory" "\$HOME/.claude/projects/\$NEW_SLUG/memory"
+readlink "\$HOME/.claude/projects/\$NEW_SLUG/memory"
+
+echo "── POSTCONDICIONES ──"
+n=\$(find "\$HOME/.claude/projects" -name "\$ID.jsonl" | wc -l); [ "\$n" -eq 1 ] || { echo "ABORTO: \$n copias del .jsonl"; exit 1; }
+jq -r --arg id "\$ID" '.masters[]|select(.id==\$id)|"target=\(.target) name=\(.name)"' "\$MJ"
+echo
+echo "✅ Move hecho. FALTA (humano): claude --resume \$ID parado en \$DST_REPO y QA §S6 —"
+echo "   identidad cargada, skills visibles, memorias T1∪T2 presentes, masters.json y alias correctos."
+HANDOFF
 chmod +x "$DRIVE/handoff-$ID.sh"
+bash -n "$DRIVE/handoff-$ID.sh" && echo "sintaxis del handoff OK"    # gate: nunca dejes un handoff que no parsea
 ```
+**Postcondición de §6.1:** `bash -n` pasa y el script NO contiene la cadena `ver SKILL §` como sustituto de
+un paso. Un handoff que no se puede correr no es un handoff.
 
 ### 6.2 · Fallback SIN SSH (Drive caído o sin mDNS/key-auth)
 Consolidar Mac↔Cachy sin una sola llamada SSH: en CADA máquina, un operador local (sesión fresca o shell
@@ -388,6 +548,10 @@ por-id serializada, nunca en ambas máquinas dentro de la ventana de sync.
 ---
 
 ## 7 · Decisiones del HUMANO (acotadas — se preguntan en RUNTIME, no se asumen)
+0. **`DST_REPO` — la casa destino.** No hay default: la skill NO asume `cortex` ni ningún otro. Se pregunta,
+   y se verifica que sea un repo git y cuál es su visibilidad real (§1.0).
+0b. **¿Se RENOMBRA el master?** (`MASTER_NAME_NUEVO`) — si la identidad cambió junto con la casa. Vacío = no
+   se renombra. El renombre va en el bloque atómico de S4, nunca después.
 1. **`<id>` vigente** de cada máquina (duplicados en masters.json).
 2. **Frontera T1↔T3** — el skill propone el corte del §1; el humano confirma qué memorias son del-master
    (viajan) vs de-la-plantilla (se quedan). NO baja alcance: mueve TODO lo del master.
@@ -411,10 +575,17 @@ por-id serializada, nunca en ambas máquinas dentro de la ventana de sync.
 | Conflicto Drive de masters.json | edición concurrente de UN archivo | edición por-id serializada; vigilar `masters (1).json` |
 | Move NO atómico (a medias) | `session-move.js` hace copy-a-slug-nuevo + unlink-viejo (no es un rename atómico) | respaldado (backup `session-move.js:62-66`) + aborta-si-colisiona (`:60`) + máquina de estados re-entrante: la postcondición S4 detecta un estado a medias y reanuda |
 | Backups sin poda | `session-move.js` respalda sin límite | anotar poda de `~/.claude/session-move-backups/` |
+| **Identidad a medias** (target movido, `name` viejo) | el renombre del master no iba en el bloque atómico | S4 fija `target` **y** `name` en el mismo `jq`, reescribe el alias con el nombre final y lista el alias viejo para retirarlo |
+| **Mueve la sesión EQUIVOCADA** | elegir el `<id>` desde `masters.json` sin cruzarlo con los `.jsonl` reales; el registro solo AÑADE ids y puede no tener el vivo | G-ID cruza registro ∩ disco por frescura y avisa si el id vivo no está registrado; S4 hace **UPSERT** |
+| **Destino asumido** (`cortex` por default) | la skill traía el destino hardcodeado en las variables base | `DST_REPO` es Decisión #0 sin default; se aborta si viene vacío o no es un repo git |
+| **"Es privado, me llevo T3"** | leer el candado NO-FUGA como si la fuga fuera el único motivo | §1.0: el motivo dominante es el **duplicado divergente**, que no depende de la visibilidad |
+| **Handoff inservible** | el guion a disco era un stub con "(ver SKILL §4)" | §6.1 exige script completo + `bash -n` verde como postcondición |
 
 ## 9 · Pendientes DELEGADOS al brain (fuera del skill)
 - Freshness-check en `seed.sh --force` (hoy pisa con `.gz` viejo).
 - Que el auto-registro del hook ACTUALICE `target` de un id ya presente (hoy solo añade, `exportar-sesion-master.sh:144`).
 - Poda de `~/.claude/session-move-backups/` (se acumulan `.jsonl` de cientos de MB).
 - Lock/actualización atómica de masters.json junto al move (hoy hay micro-ventana entre el move y el `jq` del target → un proceso externo podría leer el target viejo).
+- Que `exportar-sesion-master.sh` reconozca un **renombre** (hoy el auto-registro ni actualiza `target` ni
+  `name`: solo añade ids nuevos → un master renombrado reaparece con el nombre viejo si algo re-siembra).
 - `findSession` podría desempatar por `lastActivity`/nº-líneas y no solo por `mtime` (edge: un backup viejo restaurado con `mtime` nuevo se elegiría siendo contenido antiguo).
