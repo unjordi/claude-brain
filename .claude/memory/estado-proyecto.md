@@ -23,6 +23,44 @@ metadata:
 
 ## 🔜 Pendientes (backlog vivo)
 
+- **Broker de terminal trasladado a cortex (#26i, primera pieza) — CÓDIGO LISTO Y AUDITADO EN RAMA;
+  FALTA LA MIGRACIÓN EN VIVO (unjordi presente).** Rama `feat/term-broker`. Quedó en el repo:
+  `src/term-broker/` (5 `.ts` vendorizados de axon **`341fb53`** + `SHA256SUMS` + 2 probes),
+  `bin/cortex-term-broker`, `bin/migrar-term-broker.sh`, `src/systemd/cortex-term-broker.service`,
+  bandera `install.sh --con-term-broker` (opt-in, Linux, token generado 0600), retiro en
+  `uninstall.sh`, `docs/term-broker.md`. Del lado de axon, `feat/term-broker-cliente-solo` (`67bdbae`)
+  ya trae `origin/develop` fusionado.
+  **Segunda pasada (2026-09-07): se atendieron los 10 hallazgos priorizados de la auditoría.**
+  Lo sustantivo: se **re-vendorizó desde `341fb53`** (socket unix + `GET /health` + el manejo de
+  error de `listen()` que faltaba); la unidad ganó `RuntimeDirectory=axon` +
+  `RuntimeDirectoryPreserve=yes` y `StartLimitIntervalSec/Burst` (antes ciclaba para siempre sin
+  llegar nunca a `failed`); el instalador valida OS/prereqs en el **paso 0** y decide por el
+  **endpoint** (`ss` sobre puerto y socket) en vez de por el nombre de una unidad, sin habilitar
+  cuando está ocupado (y deshabilitando lo que una corrida previa habilitó); y la migración es un
+  **script** que verifica con el token real. Verificado: `probe-instalador.sh` **49/49 exit 0**,
+  `probe-broker-vivo.sh` **35/35 exit 0**, `sha256sum -c` 0, `systemd-analyze --user verify` 0,
+  `bash -n` de los 8 scripts. **NO se tocó** el `axon-term-broker.service` que corre (MainPID
+  3203989, NRestarts=0 antes y después).
+  Lo que falta, por severidad:
+  - **[ALTO] la migración en vivo.** Se corre `~/.local/bin/migrar-term-broker.sh` (idempotente,
+    adopta el token legacy para que el `.env` del cliente no cambie, verifica con `/health` +
+    `/run` real y revierte solo si falla). Requiere `./install.sh --con-term-broker` antes, y a
+    unjordi presente porque **cierra sus terminales abiertas**.
+  - **[MEDIO] retirar `src/server/term-host-broker.ts` de axon** (ahora 394 líneas). Sigue
+    DEPRECADO a propósito: borrarlo antes de la migración rompería el servicio vivo, que arranca
+    desde `~/code/axon-run`. MR de follow-up POST-migración.
+  - **[BAJO · MENORES de la auditoría, NO atendidos]** — se dejan explícitos para que no se pierdan:
+    `I-3` el match de path por prefijo (`url.startsWith("/run")` acepta `/runtime`), `I-4`
+    `tokenMatches` usa `Buffer.equals` y no `timingSafeEqual`, `C-5`/`C-6`. Los tres primeros viven
+    en el código **vendorizado**: arreglarlos aquí rompería la copia byte-a-byte, así que van en
+    **axon** y llegan por re-vendorizado. `C-4` (el claim del `env` falso en modo contenedor) e
+    `I-6`/`I-7`/`I-11`/`I-12`/`I-13`/`C-3` SÍ se atendieron.
+  - **[CERRADO] licencia del vendorizado.** unjordi confirmó que axon y cortex son suyos y que la
+    relicencia MIT no es un bloqueo; el `NOTICE` lo dice ahora sin el "de facto".
+  - **[BAJO] el contrato de #26i sigue abierto** para las OTRAS piezas (hwfit, `ollama-ram-pin`,
+    `state.json`): archivo vs socket vs HTTP, descubrimiento, versionado. Este traslado no lo cierra
+    ni lo prejuzga.
+
 - **Aristas del sync de sesiones (delegadas por `reubicar-master` §9) — EN CURSO `fix/session-infra-aristas`.**
   Las 4 son el subsistema de sync de sesiones (NO del skill; el skill mueve un master, no refactoriza su
   tooling), y son las aristas EXACTAS que el move real de los masters va a pisar. Origen: `SKILL.md §9` —

@@ -25,8 +25,18 @@ param(
     [switch]$NoClaudeCode,      # skip auto-installing the Claude Code CLI (the thing the widget measures)
     [switch]$NoBrain,           # skip the Claude-Code brain (hooks/norms); only daemon + widget (paridad con install.sh --no-brain)
     [switch]$Build,             # force build-from-source (dotnet publish) instead of downloading the release exe
+    # El broker de terminal es Linux-only (systemd --user + `script` de util-linux + el login shell).
+    # Se ACEPTA la bandera solo para poder decir POR QUE no aplica: sin este parametro, invocar
+    # `install.ps1 -ConTermBroker` moriria con "A parameter cannot be found", que parece un typo.
+    # Ojo: bootstrap.ps1 corre via `irm | iex` y llama a este script SIN argumentos, asi que por esa
+    # via la bandera no llega nunca -- no hay forma de pedir el broker desde el one-liner de Windows.
+    [switch]$ConTermBroker,
     [string]$Configuration = 'Release'
 )
+
+if ($ConTermBroker) {
+    Write-Host "==> Aviso: -ConTermBroker es solo para Linux (systemd --user + script/util-linux); se ignora en Windows." -ForegroundColor Yellow
+}
 
 $ErrorActionPreference = 'Stop'
 $here    = Split-Path -Parent $MyInvocation.MyCommand.Path

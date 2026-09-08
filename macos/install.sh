@@ -50,6 +50,12 @@ for arg in "$@"; do
     --no-ccusage)     SKIP_CCUSAGE=1 ;;
     --no-claude-code) SKIP_CLAUDE_CODE=1 ;;
     --build)          BUILD=1 ;;
+    # El broker de terminal es Linux-only (usa `script` de util-linux, el login shell y systemd
+    # --user). El bootstrap pasa las banderas TAL CUAL a este instalador, así que si alguien corre
+    # el one-liner con --con-term-broker en una Mac llegaría aquí: mejor decirle POR QUÉ no aplica
+    # que un "unknown arg" que parece un typo. No aborta: el resto de cortex se instala igual.
+    --con-term-broker)
+      echo "note: --con-term-broker es solo para Linux (systemd --user + script/util-linux); se ignora en macOS." >&2 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
