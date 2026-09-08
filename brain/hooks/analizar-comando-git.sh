@@ -64,6 +64,29 @@ acg_rama_actual() { git -C "${1:-${CLAUDE_PROJECT_DIR:-.}}" rev-parse --abbrev-r
 # El `cwd` del payload es la señal correcta para el caso PELÓN: gh/glab/git sin destino resuelven desde el
 # cwd, EXACTAMENTE el dato que la herramienta usaría. bash-3.2-safe · BSD+GNU sed.
 
+# acg_expande_home(ruta) → la ruta con el `~` / `$HOME` INICIAL resuelto a $HOME. El shell expande esos
+# prefijos ANTES de que el binario los vea (`cd ~/code/axon` → /home/…/code/axon), pero los guards leen el
+# TEXTO del comando, donde el `~` sigue literal → `git -C '~/code/axon'` FALLA y el repo objetivo quedaba
+# IRRESOLUBLE. Consecuencia real (FP 2026-09-08, MR 87 de axon y PR 19 de odysseus): TARGET_ROOT no
+# resolvía a un repo git ⇒ (a) el slug del remoto salía VACÍO y la consulta de la base corría contra el
+# repo del cwd del hook (otro repo, otro foro) → "no pude CONFIRMAR el destino"; (b) el `--repo` explícito
+# no casaba con el slug local ⇒ INCIERTO ⇒ gateaba repos PERSONALES que están FUERA del alcance del guard.
+# Corrección de DETECCIÓN de target (no afloja nada: solo hace que el dir que el guard inspecciona sea el
+# MISMO que el shell usó). Solo el prefijo INICIAL, y solo `~`/`~/…`/`$HOME`/`${HOME}` (no `~otrousuario`,
+# que no podemos resolver de forma portable). bash-3.2-safe, sin `eval`.
+acg_expande_home() {   # $1=ruta → ruta con ~ / $HOME inicial expandido
+  local p="$1"
+  case "$p" in
+    '~')            printf '%s' "$HOME" ;;
+    '~/'*)          printf '%s/%s' "$HOME" "${p#\~/}" ;;
+    '$HOME')        printf '%s' "$HOME" ;;
+    '${HOME}')      printf '%s' "$HOME" ;;
+    '$HOME/'*)      printf '%s/%s' "$HOME" "${p#\$HOME/}" ;;
+    '${HOME}/'*)    printf '%s/%s' "$HOME" "${p#\$\{HOME\}/}" ;;
+    *)              printf '%s' "$p" ;;
+  esac
+}
+
 # acg_target_dir(cmd, payload_cwd) → DIRECTORIO del repo objetivo. Precedencia: -C > cd/pushd > payload_cwd
 # > CLAUDE_PROJECT_DIR > '.'. Opera sobre el cmd CON comillas INTACTAS (para leer una ruta entrecomillada de
 # -C/cd) y ANTES de acg_normaliza_git_prefijo (que DESPOJA el -C) → por eso el consumidor pasa el segmento
@@ -73,11 +96,11 @@ acg_target_dir() {   # $1=cmd  $2=payload_cwd → imprime el dir objetivo
   # (1) -C <dir> del git (quote-aware; el `.*` codicioso toma el ÚLTIMO -C, normalmente el único)
   d=$(printf '%s' "$cmd" | sed -nE "s/.*(^|[^[:alnum:]])-C[[:space:]=]+(\"[^\"]*\"|'[^']*'|([^[:space:]\"']|\\\\.)+).*/\2/p" | head -1)
   d=$(printf '%s' "$d" | sed -E "s/^[\"']//; s/[\"']\$//")
-  if [ -n "$d" ]; then printf '%s' "$d"; return 0; fi
+  if [ -n "$d" ]; then acg_expande_home "$d"; return 0; fi
   # (2) cd/pushd <dir> en el segmento (quote-aware; el valor NO cruza ;&|)
   d=$(printf '%s' "$cmd" | sed -nE "s/.*(^|[^[:alnum:]])(cd|pushd)[[:space:]]+(\"[^\"]*\"|'[^']*'|([^[:space:]\"';&|]|\\\\.)+).*/\3/p" | head -1)
   d=$(printf '%s' "$d" | sed -E "s/^[\"']//; s/[\"']\$//")
-  if [ -n "$d" ]; then printf '%s' "$d"; return 0; fi
+  if [ -n "$d" ]; then acg_expande_home "$d"; return 0; fi
   # (3) payload cwd  (4) CLAUDE_PROJECT_DIR  (5) '.'
   if [ -n "$pcwd" ]; then printf '%s' "$pcwd"; return 0; fi
   printf '%s' "${CLAUDE_PROJECT_DIR:-.}"
@@ -227,6 +250,19 @@ acg__run_timeout() {
   return "$rc"
 }
 
+# Corre un comando acotado por timeout DESDE el directorio objetivo del comando original. Por qué:
+# `gh`/`glab` resuelven el repo del CWD cuando no reciben `-R`, y el hook corre en SU propio cwd (el de la
+# sesión), que puede ser OTRO repo — incluso de otro foro (GitLab vs GitHub). Así, un `cd <repo> && gh pr
+# merge N` con slug irresoluble consultaba la base en el repo EQUIVOCADO → o fallaba ("no pude CONFIRMAR el
+# destino", FP 2026-09-08 del MR 87) o —peor— podía devolver la base de otro repo. Corriendo la consulta en
+# el dir objetivo, la herramienta resuelve EXACTAMENTE lo que resolvería el comando del usuario. Si el dir
+# no existe/no es accesible, se queda en el cwd actual (conducta de antes, nunca peor).
+acg__run_en_dir() {   # $1=dir  $2=segundos  $3.. = comando
+  local d="$1"; shift
+  ( if [ -n "$d" ] && [ -d "$d" ]; then cd "$d" 2>/dev/null || :; fi
+    acg__run_timeout "$@" )
+}
+
 # Extrae el destino EXPLÍCITO del PROPIO comando de merge, si viene por flag de base
 # (gh: --base/-B · glab: --target-branch/--target). Es la fuente MÁS confiable del destino y NO cuesta
 # red, ni gh/glab, ni jq: el destino ya está TIPEADO en el comando que disparó el hook. Devuelve la rama
@@ -258,7 +294,7 @@ acg_destino_explicito_del_comando() {   # $1=comando → rama destino | vacío
 # release por no resolver). Requiere jq (sin jq devuelve vacío).
 ACG_MR_TIMEOUT="${ACG_MR_TIMEOUT:-6}"
 acg_destino_de_mr() {   # $1=comando  $2=payload_cwd(opcional)
-  local raw="$1" pcwd="${2:-}" u tool repo mrid key cache dest
+  local raw="$1" pcwd="${2:-}" u tool repo mrid key cache dest dir
   # (b) PREFERIDO — destino EXPLÍCITO del PROPIO comando (--base/--target-branch): SIN red, SIN gh/glab,
   # SIN jq. Sortea el modo de falla (a): en un launch GUI de Claude Code el subproceso-hook hereda el PATH
   # MÍNIMO de launchd (/usr/bin:/bin:…), donde jq SÍ está (/usr/bin/jq → el guard corre y gatea) pero gh/glab
@@ -273,15 +309,18 @@ acg_destino_de_mr() {   # $1=comando  $2=payload_cwd(opcional)
   # Repo objetivo por PRECEDENCIA (--repo/-R > remoto del dir objetivo: -C > cd > cwd > PROJECT_DIR). Antes
   # el fallback leía SIEMPRE el remoto de CLAUDE_PROJECT_DIR → resolvía el destino del repo equivocado.
   repo=$(acg_target_remote "$raw" "$pcwd")
+  dir=$(acg_target_dir "$raw" "$pcwd")   # cwd de la consulta: el dir que el comando REALMENTE toca
   mrid=$(acg_mrid "$u")
   [ -n "$mrid" ] || return 0
-  key=$(printf '%s' "${repo}|${tool}|${mrid}" | sed 's/[^A-Za-z0-9]/_/g')
+  # La clave del caché incluye el DIR cuando el slug del remoto sale vacío: si no, dos repos distintos con
+  # slug irresoluble compartían la MISMA entrada de caché y uno heredaba la base del otro.
+  key=$(printf '%s' "${repo:-$dir}|${tool}|${mrid}" | sed 's/[^A-Za-z0-9]/_/g')
   cache="${TMPDIR:-/tmp}/acg-mrdest-${key}"
   if [ -f "$cache" ]; then cat "$cache"; return 0; fi
   if [ "$tool" = glab ]; then
-    dest=$(acg__run_timeout "$ACG_MR_TIMEOUT" glab api "projects/:id/merge_requests/$mrid" ${repo:+-R "$repo"} 2>/dev/null | jq -r '.target_branch // empty' 2>/dev/null)
+    dest=$(acg__run_en_dir "$dir" "$ACG_MR_TIMEOUT" glab api "projects/:id/merge_requests/$mrid" ${repo:+-R "$repo"} 2>/dev/null | jq -r '.target_branch // empty' 2>/dev/null)
   else
-    dest=$(acg__run_timeout "$ACG_MR_TIMEOUT" gh pr view "$mrid" ${repo:+-R "$repo"} --json baseRefName -q .baseRefName 2>/dev/null)
+    dest=$(acg__run_en_dir "$dir" "$ACG_MR_TIMEOUT" gh pr view "$mrid" ${repo:+-R "$repo"} --json baseRefName -q .baseRefName 2>/dev/null)
   fi
   if [ -n "$dest" ]; then
     printf '%s' "$dest" > "$cache" 2>/dev/null
@@ -416,19 +455,20 @@ acg_msg_narra_acciones() {   # $1=mensaje → 0=parece lista de acciones(adverti
 # título CONFIRMADO no bloquea). Requiere jq (sin jq devuelve vacío).
 acg_mensaje_de_mr() {   # $1=comando  $2=payload_cwd(opcional) → título del MR/PR | vacío
   command -v jq >/dev/null 2>&1 || return 0
-  local raw="$1" pcwd="${2:-}" u tool repo mrid key cache titulo
+  local raw="$1" pcwd="${2:-}" u tool repo mrid key cache titulo dir
   u=$(acg_despoja_comillas "$raw")
   if printf '%s' "$u" | grep -qE 'glab(\.exe)?[[:space:]]+mr'; then tool=glab; else tool=gh; fi
   repo=$(acg_target_remote "$raw" "$pcwd")
+  dir=$(acg_target_dir "$raw" "$pcwd")   # mismo criterio que acg_destino_de_mr: consultar EN el dir objetivo
   mrid=$(acg_mrid "$u")
   [ -n "$mrid" ] || return 0
-  key=$(printf '%s' "${repo}|${tool}|${mrid}|msg" | sed 's/[^A-Za-z0-9]/_/g')
+  key=$(printf '%s' "${repo:-$dir}|${tool}|${mrid}|msg" | sed 's/[^A-Za-z0-9]/_/g')
   cache="${TMPDIR:-/tmp}/acg-mrmsg-${key}"
   if [ -f "$cache" ]; then cat "$cache"; return 0; fi
   if [ "$tool" = glab ]; then
-    titulo=$(acg__run_timeout "$ACG_MR_TIMEOUT" glab api "projects/:id/merge_requests/$mrid" ${repo:+-R "$repo"} 2>/dev/null | jq -r '.title // empty' 2>/dev/null)
+    titulo=$(acg__run_en_dir "$dir" "$ACG_MR_TIMEOUT" glab api "projects/:id/merge_requests/$mrid" ${repo:+-R "$repo"} 2>/dev/null | jq -r '.title // empty' 2>/dev/null)
   else
-    titulo=$(acg__run_timeout "$ACG_MR_TIMEOUT" gh pr view "$mrid" ${repo:+-R "$repo"} --json title -q .title 2>/dev/null)
+    titulo=$(acg__run_en_dir "$dir" "$ACG_MR_TIMEOUT" gh pr view "$mrid" ${repo:+-R "$repo"} --json title -q .title 2>/dev/null)
   fi
   if [ -n "$titulo" ]; then
     printf '%s' "$titulo" > "$cache" 2>/dev/null
@@ -446,20 +486,21 @@ acg_mensaje_de_mr() {   # $1=comando  $2=payload_cwd(opcional) → título del M
 # Devuelve un JSON array normalizado [{number,title,baseRefName,headRefName,isDraft}] o vacío.
 acg_lista_prs_abiertos() {   # $1=comando (para derivar repo/herramienta)  $2=payload_cwd(opcional) → JSON array | vacío
   command -v jq >/dev/null 2>&1 || return 0
-  local raw="$1" pcwd="${2:-}" u tool repo key cache out
+  local raw="$1" pcwd="${2:-}" u tool repo key cache out dir
   u=$(acg_despoja_comillas "$raw")
   if printf '%s' "$u" | grep -qE 'glab(\.exe)?[[:space:]]+mr'; then tool=glab; else tool=gh; fi
   repo=$(acg_target_remote "$raw" "$pcwd")   # --repo/-R > remoto del dir objetivo (no siempre PROJECT_DIR)
-  key=$(printf '%s' "${repo}|${tool}|prlist" | sed 's/[^A-Za-z0-9]/_/g')
+  dir=$(acg_target_dir "$raw" "$pcwd")       # mismo criterio: la lista se pide EN el dir objetivo
+  key=$(printf '%s' "${repo:-$dir}|${tool}|prlist" | sed 's/[^A-Za-z0-9]/_/g')
   cache="${TMPDIR:-/tmp}/acg-prlist-${key}"
   if [ -f "$cache" ]; then cat "$cache"; return 0; fi
   if [ "$tool" = glab ]; then
     # glab mr list --output json → array con iid/title/target_branch/source_branch/draft. Normalizo al
     # mismo shape que gh (number,title,baseRefName,headRefName,isDraft) para un solo digestor aguas abajo.
-    out=$(acg__run_timeout "$ACG_MR_TIMEOUT" glab mr list ${repo:+-R "$repo"} --output json 2>/dev/null \
+    out=$(acg__run_en_dir "$dir" "$ACG_MR_TIMEOUT" glab mr list ${repo:+-R "$repo"} --output json 2>/dev/null \
           | jq -c '[.[] | {number:(.iid // .number), title:(.title // ""), baseRefName:(.target_branch // ""), headRefName:(.source_branch // ""), isDraft:((.draft // .work_in_progress) // false)}]' 2>/dev/null)
   else
-    out=$(acg__run_timeout "$ACG_MR_TIMEOUT" gh pr list ${repo:+-R "$repo"} --state open --limit 50 --json number,title,baseRefName,headRefName,isDraft 2>/dev/null)
+    out=$(acg__run_en_dir "$dir" "$ACG_MR_TIMEOUT" gh pr list ${repo:+-R "$repo"} --state open --limit 50 --json number,title,baseRefName,headRefName,isDraft 2>/dev/null)
   fi
   # Solo cachea un ARRAY no vacío válido (un fallo/timeout → vacío → se reintenta la próxima).
   if [ -n "$out" ] && printf '%s' "$out" | jq -e 'type=="array" and length>0' >/dev/null 2>&1; then
