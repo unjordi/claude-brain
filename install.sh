@@ -273,8 +273,21 @@ EOF
   #     es la nuestra, el cliente que trae el token viejo recibe 401 y axon degrada AL SHELL DEL
   #     CONTENEDOR: el usuario ve su terminal "rara" sin una sola pista de por qué. Se descartó
   #     `Conflicts=` en la unidad (arbitraría matando las sesiones que el usuario tiene abiertas).
+  #     OJO con el caso "el ocupante SOMOS NOSOTROS": en una máquina ya migrada, el endpoint está
+  #     ocupado por $TERM_BROKER_UNIT, que es exactamente lo que queremos que esté ahí. Tratar eso
+  #     como un conflicto y caer al bloque de abajo tenía una consecuencia seria: el `disable` de más
+  #     abajo apagaba NUESTRA propia unidad, ya sana y habilitada, y en el siguiente reboot el usuario
+  #     se quedaba SIN broker (axon degradando al shell del contenedor, sin una pista de por qué).
+  #     El dato para distinguirlo ya estaba calculado en el paso (1): `era_actualizacion` es
+  #     precisamente "$TERM_BROKER_UNIT está activa". Si lo está, el ocupante es ella y no hay
+  #     conflicto que reportar — solo el aviso de reinicio del paso (7).
   local ocupante=""
-  if ocupante="$(term_broker_endpoint_ocupado)"; then
+  if [[ "$era_actualizacion" -eq 1 ]]; then
+    # Somos nosotros. Ni se avisa de conflicto ni se toca el enable: la unidad se queda como está.
+    # (El `enable --now` tampoco hace falta: ya está activa; y `enable` sería idempotente pero
+    #  ruidoso.) El paso (7) le dirá que reinicie para cargar el código nuevo.
+    :
+  elif ocupante="$(term_broker_endpoint_ocupado)"; then
     echo ""
     echo "    ⚠️  El endpoint del broker YA está ocupado — NO arranqué ni habilité $TERM_BROKER_UNIT."
     echo "        ocupante: $ocupante"
@@ -302,9 +315,15 @@ EOF
   # (6) Cómo se COMPARTE el token con el cliente. El instalador no lo escribe en el .env de nadie
   #     (no sabe dónde vive el compose de quien clona); imprime la línea exacta a pegar.
   echo ""
+  #     La variable que se imprime aquí es la que lee el CLIENTE: `AXON_TERM_BROKER_URL`.
+  #     Antes decía `AXON_TERM_BROKER_SOCKET`, que solo la lee el SERVIDOR para decidir dónde abrir
+  #     el socket — el cliente no la mira. Quien seguía el instructivo al pie de la letra montaba
+  #     bien el socket, ponía bien el token, y axon degradaba al shell del CONTENEDOR en silencio,
+  #     porque para él el broker simplemente no estaba configurado. Un socket se le pasa al cliente
+  #     con el esquema `unix:` en la URL (ver docker/axon.yml del fork de Odysseus).
   echo "    El cliente axon EN CONTENEDOR necesita el socket montado + el token:"
   echo "      volumen:  $(dirname "$TERM_BROKER_SOCKET"):$(dirname "$TERM_BROKER_SOCKET")   # el DIRECTORIO, no el archivo"
-  echo "      AXON_TERM_BROKER_SOCKET=$TERM_BROKER_SOCKET"
+  echo "      AXON_TERM_BROKER_URL=unix:$TERM_BROKER_SOCKET"
   echo "      AXON_TERM_BROKER_TOKEN=<el valor que está en $TERM_BROKER_ENV>"
   echo "    Un cliente NATIVO del host usa en cambio:"
   echo "      AXON_TERM_BROKER_URL=http://127.0.0.1:$TERM_BROKER_PORT"

@@ -149,6 +149,58 @@ ck "manda al migrador, no a pegar comandos" grep -q "migrar-term-broker.sh" "$SA
 ck "deshabilita la unidad que estaba habilitada" grep -q "disable cortex-term-broker.service" "$CALLS"
 ck "a la legacy no le hizo NADA"         not_in_file_re "(disable|stop|start|restart|enable)[^\n]*axon-term-broker" "$CALLS"
 
+# ── F) REINSTALAR sobre una máquina YA MIGRADA no debe apagar nuestra propia unidad ──────────────
+# El caso que se rompía: en una máquina ya migrada el endpoint está ocupado por cortex-term-broker
+# .service, que es justo lo que queremos que esté ahí. El instalador lo leía como conflicto, entraba
+# a la rama de "ocupado" y su `disable` apagaba NUESTRA unidad sana → al siguiente reboot el usuario
+# se quedaba sin broker, con axon degradando al shell del contenedor sin decir por qué.
+echo
+echo "— F) reinstalar sobre una máquina YA MIGRADA (el ocupante somos nosotros) —"
+# Stub distinto: aquí `is-active` de NUESTRA unidad responde 0 (está corriendo), que es lo que
+# `era_actualizacion` consulta. La legacy sigue respondiendo !=0.
+cat > "$STUBS/systemctl" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >> "$CALLS"
+case " \$* " in
+  *" is-active "*" cortex-term-broker.service "*) exit 0 ;;
+  *" is-active "*) exit 3 ;;
+esac
+exit 0
+EOF
+chmod +x "$STUBS/systemctl"
+# El escenario COMPLETO: además de la unidad activa, el endpoint tiene que estar OCUPADO — si no, el
+# instalador toma la rama "libre" y el bug ni se asoma (una prueba que pasa con el bug presente no
+# prueba nada). Se ocupa un puerto propio del sandbox, como en D).
+MIGR_PORT=18812
+python3 - "$MIGR_PORT" <<'PY2' &
+import socket, sys, time
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(1)
+time.sleep(30)
+PY2
+MIGR_PID=$!
+for _ in $(seq 1 40); do ss -ltnH "sport = :$MIGR_PORT" 2>/dev/null | grep -q . && break; sleep 0.1; done
+: > "$CALLS"
+( export AXON_TERM_BROKER_PORT="$MIGR_PORT"; run_install --con-term-broker ); rc_g=$?
+kill "$MIGR_PID" 2>/dev/null; wait "$MIGR_PID" 2>/dev/null
+ck "el install sale 0 en una reinstalación"     test "$rc_g" -eq 0
+ck "NO trata a nuestra propia unidad como conflicto" not_in_file "endpoint del broker YA está ocupado" "$SANDBOX/out.txt"
+ck "NO deshabilita la unidad que está sirviendo"     not_in_file_re "(^| )disable[^\n]*cortex-term-broker" "$CALLS"
+ck "avisa que hay que reiniciar para cargar el código nuevo" grep -q "ya estaba CORRIENDO" "$SANDBOX/out.txt"
+# El instructivo del token tiene que nombrar la variable que lee el CLIENTE. Decía
+# AXON_TERM_BROKER_SOCKET, que solo la lee el SERVIDOR: quien lo seguía al pie de la letra montaba
+# bien el socket, ponía bien el token, y axon degradaba al contenedor EN SILENCIO.
+ck "el instructivo del cliente usa AXON_TERM_BROKER_URL con esquema unix:" grep -qE "AXON_TERM_BROKER_URL=unix:" "$SANDBOX/out.txt"
+ck "el instructivo NO le pide al cliente AXON_TERM_BROKER_SOCKET" not_in_file "      AXON_TERM_BROKER_SOCKET=" "$SANDBOX/out.txt"
+# Se restaura el stub original para que E) (uninstall) corra como antes.
+cat > "$STUBS/systemctl" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >> "$CALLS"
+case " \$* " in *" is-active "*) exit 3 ;; esac
+exit 0
+EOF
+chmod +x "$STUBS/systemctl"
+
 echo
 echo "— E) uninstall retira el broker —"
 ( cd "$ROOT" && bash ./uninstall.sh --no-brain --keep-cfg >/dev/null 2>&1 )
