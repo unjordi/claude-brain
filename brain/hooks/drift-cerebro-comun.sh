@@ -254,3 +254,59 @@ EOF
   printf '%s\n' "$msg"
   return 0
 }
+
+# ── drift_hooks_global — drift de la copia GLOBAL de hooks (~/.claude/hooks) vs la FUENTE única
+#    (brain/hooks), para TODO archivo de tier {global,both} del HOOKS-MANIFEST. Es el equivalente
+#    AUTOMÁTICO del `drift_scan hooks` del doctor verificar-cerebro (manual): antídoto al síntoma real
+#    (~/.claude/hooks/*.sh se editó a mano en dev → la copia viva DRIFTÓ de la fuente y NADA lo detectaba;
+#    "el global está congelado" con FPs vivos).
+#    ALCANCE = EXACTAMENTE lo que install-brain COPIA a ~/.claude/hooks (install-brain.sh, awk de la etapa (a)):
+#    todo {global,both} SIN filtrar kind → hooks + LIBS (analizar-comando-git, drift-cerebro-comun, juez-comun…)
+#    + scripts. NO se limita a kind=hook: una lib compartida driftada (p.ej. la lógica git de los guards) es
+#    justo el drift silencioso que este chequeo debe cazar. (El cableado sí filtra kind=hook, pero eso es OTRA
+#    etapa; el DRIFT de la copia espeja la COPIA, no el cableado.)
+#    WARN-ONLY (nunca reescribe la copia global: la dirección puede ser "edit en vivo sin portar" = mejora
+#    que se PERDERÍA con un overwrite ciego; el remedio es editar la FUENTE + re-correr install-brain).
+#    Imprime el mensaje humano si hay drift; NADA si está limpia. Devuelve 0 SIEMPRE (fail-open).
+#    PRECISIÓN: solo archivos del manifiesto {global,both}; solo compara los PRESENTES en la fuente (un hook
+#    puramente local en ~/.claude/hooks, sin contraparte fuente, NO es este drift → se ignora, cero FP).
+#    bash-3.2-safe.
+drift_hooks_global() {
+  local BRAIN_DIR SRC_HOOKS INST_HOOKS MAN
+  BRAIN_DIR="$(resolve_brain_dir)"
+  SRC_HOOKS="$BRAIN_DIR/brain/hooks"
+  INST_HOOKS="$HOME/.claude/hooks"
+  MAN="$SRC_HOOKS/MANIFEST"
+  [ -d "$SRC_HOOKS" ] || return 0          # sin fuente → fail-open
+  [ -d "$INST_HOOKS" ] || return 0         # sin copia instalada → nada que comparar
+  [ -f "$MAN" ] || return 0                # sin manifiesto de hooks → no sé qué es del brain → fail-open
+
+  local names editadas stale n_ed n_st h src inst
+  names=$(awk '$1!~/^#/ && NF>=3 && ($2=="global"||$2=="both"){print $1".sh"}' "$MAN")
+  editadas=""; stale=""; n_ed=0; n_st=0
+  while IFS= read -r h; do
+    [ -z "$h" ] && continue
+    src="$SRC_HOOKS/$h"
+    [ -f "$src" ] || continue
+    inst="$INST_HOOKS/$h"
+    [ -f "$inst" ] || { n_st=$((n_st+1)); stale="$stale hooks/$h(falta)"; continue; }
+    cmp -s "$src" "$inst" && continue
+    if [ "$inst" -nt "$src" ]; then n_ed=$((n_ed+1)); editadas="$editadas hooks/$h"
+    else n_st=$((n_st+1)); stale="$stale hooks/$h"; fi
+  done <<EOF
+$names
+EOF
+
+  [ "$n_ed" = 0 ] && [ "$n_st" = 0 ] && return 0   # limpia → silencio
+  local msg="🧠⚠️ DRIFT DE HOOKS (copia GLOBAL ~/.claude/hooks vs la fuente única del cerebro):"
+  if [ "$n_ed" -gt 0 ]; then
+    msg="$msg
+  · $n_ed archivo(s) EDITADOS EN VIVO (la copia instalada es MÁS NUEVA que la fuente → tu edición se PERDERÍA en el próximo install-brain). PÓRTALOS a la fuente $SRC_HOOKS y re-corre install-brain:$editadas"
+  fi
+  if [ "$n_st" -gt 0 ]; then
+    msg="$msg
+  · $n_st archivo(s) DESACTUALIZADOS/ausentes en la copia instalada (la fuente cambió y no se re-desplegó). Remedio: re-corre el bootstrap/install-brain (o \`bash $BRAIN_DIR/brain/install-brain.sh\`):$stale"
+  fi
+  printf '%s\n' "$msg"
+  return 0
+}
