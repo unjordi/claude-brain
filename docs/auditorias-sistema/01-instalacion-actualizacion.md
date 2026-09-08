@@ -147,5 +147,19 @@ mantenimiento, NO bugs activos del camino de instalación/actualización:
 ya no tiene C/A/M sin atender. Lo que resta es doc/refactor/robustez (backlog) — el piso "solo-bajos". Falta una
 ronda LIMPIA (thinking desactivado, salida estructurada) para confirmarlo formalmente + el Opus gate.
 
-> **Ronda 4 (limpia):** re-audit con `think:false` para salida estructurada (`.response`, no `.thinking`) → confirmar
-> solo-bajos formalmente. Luego el **Opus gate** (Claude Opus fresco, solo-tooling, proceso-algoritmo, sin contexto).
+## RESOLUCIÓN — RONDA 4 (2026-09-08, re-audit LIMPIO con `think:false` → salida estructurada)
+
+Las 3 lentes con salida `.response` limpia. **NINGÚN C/A/M nuevo real** — el proceso de instalación/actualización
+CONVERGIÓ a solo-bajos. Triage (cada hallazgo verificado contra código real):
+
+**Falsos positivos (descartados con evidencia):**
+- proceso: `drift_hooks_global` cmp+`-nt` "falso positivo por mtime" → FALSO: el código hace `cmp -s && continue` PRIMERO (contenido idéntico nunca es drift); el `-nt` solo corre si difieren. El 27B recomendó exactamente lo que el código YA hace.
+- proceso: `emit_and_exit` jq-escaping → FALSO: `jq --arg` escapa cualquier string (backticks/$/saltos); el propio hallazgo admite "jq debería escapar".
+- suficiencia: "las libs no se copian" → FALSO: el MANIFEST lista las libs (kind=lib) y el copy de install-brain (L76, sin filtro de kind) las incluye — verificado.
+- **proceso+coherencia (ALTO): auto-sync `git add -A .claude/` + commit bypassa secret-scan / sobre-stagea** → FALSO/ya-mitigado: (a) el auto-sync SOLO corre si `.claude/` está LIMPIO antes (precondición L152) → no barre cambios ajenos; (b) el bypass de secret-scan YA está cerrado (L161-181, audit 2026-08-06) con escaneo inline `ds_buscar` de **la MISMA lib** `detectar-secretos.sh` que el guard real → no puede divergir. El residual "regex no exhaustivo" es limitación deliberada/documentada de TODO el secret-scan, no un bug del 01.
+
+**Ya cubierto:** coherencia "sin jq → mensaje engañoso" = arreglado en 4d2adc3 (mensaje honesto).
+
+**Bajos/doc/robustez → backlog #18** (no bloquean convergencia): register_hook dedupe por substring frágil ante un hook custom con path distinto · `pkill -f` mata TODAS las instancias del widget · flowchart GUPD dice "NO git fetch/pull" pero install-brain sí hace `git config --global fetch.prune` (nit de fidelidad) · doc "bootstrap/widget ⬆ son para máquinas de CONSUMO, no para dev del cerebro" · helper de propagación manual del drift en ramas ≠ Develop<user> · check post-copy de `SKILL.md` en el swap de skills.
+
+**VEREDICTO ronda 4:** proceso 01 convergió — sin C/A/M sin atender. Falta solo el **Opus gate** (Claude Opus fresco, solo-tooling, proceso-algoritmo, SIN contexto, como ronda 1): si coincide en 0 observaciones C/A/M → proceso 01 CERRADO (verificado técnicamente), se pasa al proceso 02.
