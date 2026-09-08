@@ -92,45 +92,58 @@ digraph flujos {
 
   // ───────────────────────────────────── EL FLUJO ─────────────────────────────────────
   subgraph cluster_f0 {
-    label="06 · Integrar una rama a develop/main   (ZOOM de la ruta de MERGE — raíz común de 9 hooks en 03; aquí 3 pueden DENY: git-branch-guard → merge-squash-guard → confirmar-merge-develop)";
+    label="06 · Integrar una rama a develop/main   (ZOOM de la ruta de MERGE — raíz común de 9 hooks en 03; aquí 3 pueden DENY —git-branch-guard · merge-squash-guard · confirmar-merge-develop— EVALUADOS EN PARALELO sobre el MISMO comando: el árbol de abajo es la AGREGACIÓN lógica deny-gana, NO el orden real de ejecución — §6)";
     fontname="Times"; fontsize=14; fontcolor="#5fa89e";
     color="#5fa89e"; penwidth=1.6; style="rounded"; bgcolor="#1b1712";
 
     CMD [fillcolor="#232323", color="#8a8a8a", fontcolor="#cfc8c0",
-         label="intento de integrar (comando Bash con git)\n`git push` · `glab mr merge` · `gh pr merge`\n(PreToolUse/Bash → los 9 hooks corren EN PARALELO; ver 03 —8 inspeccionan git, no-bypass-deploy no-opea—.\nAquí hacemos ZOOM en los 3 que gobiernan un MERGE a base)"];
+         label="intento de integrar (comando Bash con git)\n`git push` · `glab mr merge` · `gh pr merge`\n(PreToolUse/Bash → los 9 hooks corren EN PARALELO; ver 03 —8 inspeccionan git, no-bypass-deploy no-opea—.\nAquí hacemos ZOOM en los 3 que gobiernan un MERGE a base)\nNOTA: los 3 rombos de abajo EVALÚAN el MISMO comando EN PARALELO (sin despachador);\nla cadena de rombos es la AGREGACIÓN lógica deny-gana, NO orden de ejecución"];
 
     // ── git-branch-guard ──
     GBG [shape=diamond, fillcolor="#2b2622", color="#d97757",
-         label="🔒🚧 git-branch-guard\n¿push DIRECTO que TOCA base (develop/main)?\n· push explícito · push PELÓN/HEAD/--force parado EN base · +develop (force-refspec)\n· o un `mr merge`/`pr merge` que NOMBRA la base directo\n(lib analizar-comando-git.sh = fuente ÚNICA)"];
+         label="🔒🚧 git-branch-guard\n¿push DIRECTO que TOCA base (develop/main)?\n· push explícito · push PELÓN/HEAD/--force parado EN base · +develop (force-refspec)\n· o un `mr merge`/`pr merge` que NOMBRA la base directo\n· push --all/--mirror · push PELÓN con la rama del repo OBJETIVO IRRESOLUBLE\n  (fail-safe: ante duda BLOQUEA — backstop = ramas protegidas server-side)\n(lib analizar-comando-git.sh = fuente ÚNICA)"];
     GBG_D [color="#c0392b", penwidth=2,
            label="🔴 DENY — «no se hace push/merge directo a develop/main».\nHaz ramita feat/… → commit → push ramita → MR. A main: release\ndeliberado (web de GitLab, o CLI con OK SÚPER-explícito). NO reintentes."];
 
     // ── merge-squash-guard ──
     MSG [shape=diamond, fillcolor="#2b2622", color="#d97757",
-         label="🔒🔗 merge-squash-guard\n¿es `glab mr merge`/`gh pr merge` REAL, SIN --squash?\n→ resuelve el DESTINO del MR (lib acg_destino_de_mr; caché por MR-id; timeout ~6s)"];
+         label="🔒🔗 merge-squash-guard\n¿es `glab mr merge`/`gh pr merge` REAL?\n→ resuelve el DESTINO del MR (lib acg_destino_de_mr; caché por MR-id; timeout ~6s)\ndestino=develop bifurca por SIN/CON --squash — main/personal/no-merge pasan libres"];
     MSG_D [color="#c0392b", penwidth=2,
-           label="🔴 DENY si destino = develop: integrar a develop SQUASHEA a 1 commit limpio/slice.\nRehaz con --squash --squash-message «resumen curado».\nEXENTO: destino main (release) → SIN squash (conserva historia).\nFAIL-SAFE: destino INDETERMINADO y no es release → mantiene la exigencia de squash."];
+           label="🔴 DENY si destino = develop Y SIN --squash: integrar a develop SQUASHEA a 1 commit limpio/slice.\nRehaz con --squash --squash-message «resumen curado».\nEXENTO: destino main (release) → SIN squash (conserva historia).\nFAIL-SAFE: destino INDETERMINADO y no es release → mantiene la exigencia de squash."];
+
+    // ── merge-squash-guard, 2ª compuerta: CALIDAD del mensaje (CON --squash, destino develop) ──
+    MSGQ [shape=diamond, fillcolor="#2b2622", color="#d97757",
+          label="🔒🔗 merge-squash-guard — calidad del squash-message\n(destino=develop Y CON --squash: --squash está garantizado, pero el MENSAJE puede ser basura)\n¿mensaje POBRE (título default «Merge pull request #N», vacío, placeholder 1-palabra)\no EDITORIALIZA el proceso («se decidió», «tras analizar»)\no (solo si es LITERAL, tipeado inline) <12 palabras o sin traza «Rama:/MR:»?\nUNVERIFICABLE ($()/--fill/--body-file) o API no resolvió el título AUTO → PASA (fail-open)"];
+    MSGQ_D [color="#c0392b", penwidth=2,
+            label="🔴 DENY — trae --squash pero el MENSAJE es pobre/editorializa/superficial/sin traza:\nno basta el flag, el squash-message es el resumen del slice.\nRehaz con --squash-message «resumen curado en prosa + Rama:/MR: <id>».\n(WARN no-bloqueante aparte, si sustancioso pero narra lista de acciones «se cambió…, se corrigió…»: sugiere reescribir, PASA igual.)"];
 
     // ── confirmar-merge-develop (juez-LLM) ──
     CMD_G [shape=diamond, fillcolor="#2b2622", color="#d97757",
            label="🔒✋ confirmar-merge-develop\n¿es un merge MR REAL Y el repo tiene la marca .claude/repo-compartido?\n(repos personales / ramas Develop*·epic·integracion → pasan LIBRES)\n→ DESTINO: main = RELEASE · develop = normal"];
     CMD_OK [shape=diamond, fillcolor="#2b2622", color="#d97757",
-            label="¿hay OK EXPRESO del usuario para ESTE cierre?\njuez-LLM (Haiku vía juez-comun.sh · curl→api.anthropic.com · token OAuth, NO `claude -p`)\nLEE la conversación intercalada USUARIO/ASISTENTE (OKs anafóricos: el asistente propone → el usuario acepta)\n· o un grant DURABLE vigente en autorizaciones-vigentes.local.md (scope=merge-develop, con vencimiento)\n· PISO DETERMINISTA de main: destino main SIN lenguaje de release del USUARIO → DENY (defensa en profundidad)\n· sin token OAuth / red / timeout / respuesta ininteligible → UNAVAILABLE → DENY conservador (fail-CLOSED)"];
+            label="¿hay OK EXPRESO del usuario para ESTE cierre?\njuez-LLM (Haiku vía juez-comun.sh · curl→api.anthropic.com · token OAuth, NO `claude -p`)\nLEE la conversación intercalada USUARIO/ASISTENTE (OKs anafóricos: el asistente propone → el usuario acepta)\n· o un grant DURABLE vigente en autorizaciones-vigentes.local.md (scope=merge-develop, con vencimiento)\n· PISO DETERMINISTA de main: destino main SIN lenguaje de release del USUARIO → DENY (defensa en profundidad)\n· sin token OAuth / red / timeout / respuesta ininteligible → UNAVAILABLE → DENY conservador (fail-CLOSED)\n· SIN jq Y el cmd CRUDO parece mr/pr merge → DENY inmediato «FRENO (sin jq)…» (fail-CLOSED, antes de token/juez)\n  NOTA: asimetría: git-branch-guard y merge-squash-guard FALLAN-ABIERTO sin jq (solo éste cierra)"];
     CMD_D [color="#c0392b", penwidth=2,
            label="🔴 DENY (definición de LISTO en el punto del merge):\nintegrar a develop/main exige tu OK EXPRESO — cítalo y reintenta.\nverde técnico ≠ LISTO; «sigue/avanza» NO autoriza. A main, un «mergea»\ngenérico NO basta: pide lenguaje SUPER-explícito («release / hasta main / libera»).\nMientras: itera en tu mini-develop con `git merge` LOCAL (sin candado)."];
 
-    OK [color="#7fb069", penwidth=2,
+    OK [color="#c0392b", penwidth=3,
         label="⚠ ESCRIBE git · 🟢 MERGE\ndevelop → con --squash (1 commit curado) · main → release SIN squash\n(el gate ≠ «no puedes»: con tu OK, Claude mergea por CLI sin que des clics)\n📜 → 🌿 Flujo de git · 💡 → 📦 cerrar-slice (arma el MR con el resumen curado)"];
 
-    // Aristas
+    PASA [color="#7fb069", penwidth=2,
+          label="🟢 PASA — estos 3 guards NO gobiernan este comando\n(no es un merge/push a base: p. ej. `git push origin feat/x`,\n`glab mr view`, `mr diff`) — el comando corre tal cual, SIN squash ni release"];
+
+    // Aristas — flujo SÓLIDO (secuencia intra-chart); dashed queda RESERVADO a cross-ref a otro chart (§4)
     CMD -> GBG;
     GBG -> GBG_D [label="toca base directo"];
-    GBG -> MSG   [label="no toca base\n(es un MR de ramita)", style=dashed];
-    MSG -> MSG_D [label="develop confirmado\nsin --squash"];
-    MSG -> CMD_G [label="ya trae --squash /\ndestino main / no es merge", style=dashed];
+    GBG -> MSG   [label="no toca base\n(es un MR de ramita)"];
+    MSG -> MSG_D [label="destino develop\nSIN --squash\n(o irresoluble, salvo release explícito)"];
+    MSG -> MSGQ  [label="destino develop\nCON --squash"];
+    MSGQ -> MSGQ_D [label="mensaje pobre /\neditorializa / superficial /\nsin traza"];
+    MSGQ -> CMD_G  [label="mensaje sustancioso /\nUNVERIFICABLE / API no resolvió"];
+    MSG -> CMD_G [label="destino main / personal\n(SÍ es merge MR real)"];
+    MSG -> PASA  [label="no es merge real\n(push de ramita, `mr view`, etc.)"];
     CMD_G -> CMD_OK [label="repo compartido\n+ es merge MR"];
-    CMD_G -> OK     [label="repo personal /\nrama personal / no es merge", style=dashed];
-    CMD_OK -> CMD_D [label="sin OK expreso /\njuez UNAVAILABLE /\nmain sin release"];
+    CMD_G -> OK     [label="repo personal /\nrama personal"];
+    CMD_OK -> CMD_D [label="sin OK expreso /\njuez UNAVAILABLE /\nsin jq (parece merge) /\nmain sin release"];
     CMD_OK -> OK    [label="OK citado /\ngrant durable vigente"];
   }
 }

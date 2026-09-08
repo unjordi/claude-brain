@@ -101,9 +101,12 @@ digraph flujos {
     FANOUT [shape=diamond, fillcolor="#2b2622", color="#d97757",
             label="PreToolUse/Bash → 9 hooks corren EN PARALELO sobre el MISMO comando\n(NO hay cascada secuencial; cada uno decide solo). Abajo se detallan los 8 que\nINSPECCIONAN git; el 9º —no-bypass-deploy— también dispara pero NO-OPEA\nsobre un comando git (solo actúa ante un instalador/deploy a mano)"];
 
-    // ── Preludio COMÚN a todos (documentado en cada hook) ──
+    // ── Preludio de CADA hook (①② — casi universal, NO 100%; ③④ son de la LIB, solo 4 hooks) ──
     COMUN [color="#c9a227",
-           label="🟡  preludio común de CADA hook (antes de decidir):\n① dedupe doble-cableado: si soy la copia del REPO y existe la GLOBAL → cedo (exit 0)\n   → un clon SIN bootstrap: la del repo sí corre\n② fail-open: sin jq → exit 0 (no bloquea; es red de seguridad, no cárcel)\n③ augmenta PATH (gh/glab de /opt/homebrew·/usr/local·~/.local/bin, al FINAL) → destino/MR\n   RESOLUBLES por API; sin esto el PATH mínimo de launchd los ocultaba y el fail-safe\n   frenaba merges/releases YA autorizados (root cause #78; ACG_PATH_AUGMENT=0 lo apaga)\n④ despoja comillas + normaliza prefijo `git -c/-C/--work-tree…` + `git.exe`\n   (lib analizar-comando-git.sh = fuente ÚNICA de los git-guards → no divergen)"];
+           label="🟡  preludio de CADA hook (antes de decidir):\n① dedupe doble-cableado: si soy la copia del REPO y existe la GLOBAL → cedo (exit 0)\n   presente en GBG/MSG/CMDG/SEC/DASH/ENTM; AUSENTE en rama-vieja y proteger-arbol\n   (arrancan directo en `command -v jq`) → un clon SIN bootstrap: la del repo sí corre\n② fail-open GENERAL: sin jq → exit 0 (no bloquea; red de seguridad, no cárcel)\n   ⚠ EXCEPCIÓN fail-SAFE (se ENDURECE, no se afloja):\n   · confirmar-merge-develop: sin jq + el comando CRUDO parece merge (mr merge|accept,\n     pr merge) → 🔴 DENY igual (anti-evasión «sin token=DENY, sin jq=ALLOW», A3)\n   ⚠ secret-scan es DISTINTO — sin jq → SIEMPRE fail-open (ni con STRICT=1;\n     no puede ni emitir el deny sin jq); STRICT=1 solo endurece a fail-CLOSED\n     otra infra faltante CON jq presente (git ausente / no-es-repo / rango\n     del diff indeterminable)"];
+
+    LIB   [color="#c9a227",
+           label="🟡 sub-preludio de la LIB analizar-comando-git.sh — SOLO en los\nque la sourcean: GBG · MSG · CMDG · SEC (NO en DASH/ENTM/RAMV/ARBOL):\n③ augmenta PATH (gh/glab de /opt/homebrew·/usr/local·~/.local/bin, al FINAL) → destino/MR\n   RESOLUBLES por API; sin esto el PATH mínimo de launchd los ocultaba y el fail-safe\n   frenaba merges/releases YA autorizados (root cause #78; ACG_PATH_AUGMENT=0 lo apaga)\n④ despoja comillas + normaliza prefijo `git -c/-C/--work-tree…` + `git.exe`\n   (fuente ÚNICA de los 4 → no divergen; los avisos y proteger-arbol hacen su\n   PROPIO despojo inline vía sed y NO obtienen esto — p. ej. `git -c k=v push`\n   puede evadir su chequeo de adyacencia git+push)"];
 
     // ── LOS 4 QUE PUEDEN DENEGAR (🔒 forzosos) ──
     GBG   [shape=diamond, fillcolor="#2b2622", color="#d97757",
@@ -112,9 +115,17 @@ digraph flujos {
            label="🔴 DENY — «no se hace push a develop/main».\nRedirige: ramita feat/… → commit → push ramita → MR → develop.\nNO reintentes. (guard OK = sistema funcionando)"];
 
     MSG   [shape=diamond, fillcolor="#2b2622", color="#d97757",
-           label="🔒🔗 merge-squash-guard\n¿es `glab mr merge`/`gh pr merge` REAL, SIN --squash?\n→ resuelve DESTINO del MR (lib acg_destino_de_mr,\ncaché por MR-id compartida; timeout 6s)"];
+           label="🔒🔗 merge-squash-guard\n¿es `glab mr merge`/`gh pr merge` REAL?\n→ resuelve DESTINO del MR (lib acg_destino_de_mr,\ncaché por MR-id compartida; timeout 6s)"];
     MSG_D [fillcolor="#3a2020", color="#c0392b", penwidth=2.5,
-           label="🔴 DENY si destino = develop (o IRRESOLUBLE y NO es\nrelease explícito): integrar a develop SQUASHEA a 1 commit.\nRehaz con --squash --squash-message «resumen curado».\nExención: destino main (release) → SIN squash (conserva historia)"];
+           label="🔴 DENY (falta --squash) si destino = develop (o IRRESOLUBLE\ny NO es release explícito): integrar a develop SQUASHEA a 1 commit.\nRehaz con --squash --squash-message «resumen curado».\nExención: destino main (release) → SIN squash (conserva historia)"];
+    MSQ   [shape=diamond, fillcolor="#2b2622", color="#d97757",
+           label="¿el comando YA trae --squash/-s ?"];
+    MSGCAL [shape=diamond, fillcolor="#2b2622", color="#d97757",
+           label="destino = develop → PISO de SUSTANCIA del mensaje:\n¿pobre (título default/vacío/placeholder de 1 palabra)?\n¿EDITORIALIZA el proceso («se decidió»/«tras analizar»)?\n¿—solo mensaje LITERAL— superficial (<12 palabras)\no le falta traza rama/MR (Rama:/MR:)?"];
+    MSG_D2 [fillcolor="#3a2020", color="#c0392b", penwidth=2.5,
+           label="🔴 DENY (piso anti-basura, AUN CON --squash):\nel mensaje del squash no tiene sustancia — pobre, editorializa\nel proceso, o (mensaje LITERAL) superficial/sin traza.\nRehaz con --squash-message «resumen curado + Rama:/MR:»"];
+    MSGWARN [color="#e08e45",
+           label="🟠 WARN (no bloquea) — el mensaje PARECE lista de\nacciones (≥2 «se <verbo>»): additionalContext, sugiere\nreescribir el QUÉ HACE el código, y PASA"];
 
     CMDG  [shape=diamond, fillcolor="#2b2622", color="#d97757",
            label="🔒✋ confirmar-merge-develop\n¿es merge MR REAL Y el repo tiene marca\n.claude/repo-compartido? (repos personales → pasa libre)\n→ DESTINO: main = RELEASE · develop = normal\n(ramas personales Develop*/epic/integracion → pasan libres)"];
@@ -136,14 +147,14 @@ digraph flujos {
     RAMV  [color="#e08e45",
            label="🔔🕰️ rama-vieja  ·  ¿git push de una ramita?\n🟠 avisa si está ≥40 commits DETRÁS de origin/develop\n→ rebasa antes (el MR traería ruido/conflictos)"];
     ARBOL [color="#e08e45",
-           label="🔔🌳 proteger-arbol  ·  ¿git DESTRUCTIVO (reset --hard/checkout -f/rebase/branch -d/-D)?\n🟠 reset/checkout/rebase: avisa si orfanaría commits sin pushear (@{u}..HEAD).\nbranch -d/-D SOLO: decide por chequeo ZOMBIE per-rama (ancestro | squash/cherry | remota-gone),\ncalla si todas ya están integradas (mata el FP dominante). SUPRIME el FP en worktree AISLADO (H14/H15)"];
+           label="🔔🌳 proteger-arbol  ·  ¿git DESTRUCTIVO (reset --hard/checkout -f/rebase/branch -D)?\n🟠 reset/checkout/rebase: avisa si orfanaría commits sin pushear (@{u}..HEAD).\nbranch -D SOLO (force-delete; el gate de entrada solo casa `-D` mayúscula —\n`git branch -d` minúscula NUNCA llega al guard, git ya rehúsa borrar ramas no\nintegradas): decide por chequeo ZOMBIE per-rama (ancestro | squash/cherry |\nremota-gone), calla si todas ya están integradas (mata el FP dominante).\nSUPRIME el FP en worktree AISLADO (H14/H15)"];
 
     // ── Confluencia: precedencia deny > ask > allow ──
     PREC  [shape=diamond, fillcolor="#2b2622", color="#d97757",
            label="el CLI combina las 8 decisiones\nprecedencia: deny > ask > allow"];
     BLOCK [fillcolor="#3a2020", color="#c0392b", penwidth=3,
            label="🔴 comando BLOQUEADO\n(al menos un guard denegó — el modelo lee el motivo y NO reintenta)"];
-    RUN   [color="#7fb069", penwidth=2,
+    RUN   [color="#7fb069", penwidth=3,
            label="⚠ ESCRIBE git · 🟢 el comando git CORRE\n(ningún deny; los avisos 🟠 quedan como contexto para el modelo)"];
 
     // ── PostToolUse (no bloquea, no es del flujo git per se) ──
@@ -152,24 +163,33 @@ digraph flujos {
 
     // Aristas del fan-out
     CMD -> FANOUT;
-    FANOUT -> COMUN [label="cada hook primero corre\nel preludio común"];
-    COMUN -> GBG; COMUN -> MSG; COMUN -> CMDG;
-    COMUN -> SEC; COMUN -> DASH; COMUN -> ENTM; COMUN -> RAMV; COMUN -> ARBOL;
+    FANOUT -> COMUN [label="cada hook primero corre\nsu preludio ①②"];
+    COMUN -> LIB [label="GBG/MSG/CMDG/SEC\nademás corren ③④\n(sourcean la lib)"];
+    LIB -> GBG; LIB -> MSG; LIB -> CMDG; LIB -> SEC;
+    COMUN -> DASH; COMUN -> ENTM; COMUN -> RAMV; COMUN -> ARBOL;
 
     GBG -> GBG_D [label="sí"];
-    MSG -> MSG_D [label="sí (develop\nsin squash)"];
+    MSG -> MSQ [label="es merge MR real"];
+    MSQ -> MSG_D [label="NO trae --squash,\ndestino develop\n(o irresoluble\nsin release)"];
+    MSQ -> MSGCAL [label="SÍ trae --squash,\ndestino develop"];
+    MSGCAL -> MSG_D2 [label="mensaje SIN\nsustancia"];
+    MSGCAL -> MSGWARN [label="mensaje OK pero\nnarra acciones"];
     CMDG -> CMD_OK [label="merge a\ndevelop/main"];
     CMD_OK -> CMDG_D [label="no hay OK"];
     SEC -> SEC_D [label="secreto\ndetectado"];
 
-    GBG_D -> PREC; MSG_D -> PREC; CMDG_D -> PREC; SEC_D -> PREC;
-    GBG -> PREC  [label="no toca base", style=dashed];
-    MSG -> PREC  [label="ya trae --squash /\ndestino main / no es merge", style=dashed];
-    CMDG -> PREC [label="no es merge MR /\nrepo personal", style=dashed];
-    CMD_OK -> PREC [label="OK citado /\ngrant durable", style=dashed];
-    SEC -> PREC  [label="sin secreto /\nno es commit-push", style=dashed];
-    DASH -> PREC [style=dashed]; ENTM -> PREC [style=dashed];
-    RAMV -> PREC [style=dashed]; ARBOL -> PREC [style=dashed];
+    GBG_D -> PREC; MSG_D -> PREC; MSG_D2 -> PREC; CMDG_D -> PREC; SEC_D -> PREC;
+    GBG -> PREC  [label="no toca base"];
+    MSG -> PREC  [label="no es merge\nMR real"];
+    MSQ -> PREC  [label="NO trae --squash,\ndestino main/personal/\nrelease explícito"];
+    MSQ -> PREC  [label="SÍ trae --squash,\ndestino main/personal/\nirresoluble → pasa\n(sin validar mensaje)"];
+    MSGCAL -> PREC [label="mensaje con sustancia"];
+    MSGWARN -> PREC;
+    CMDG -> PREC [label="no es merge MR /\nrepo personal"];
+    CMD_OK -> PREC [label="OK citado /\ngrant durable"];
+    SEC -> PREC  [label="sin secreto /\nno es commit-push"];
+    DASH -> PREC; ENTM -> PREC;
+    RAMV -> PREC; ARBOL -> PREC;
 
     PREC -> BLOCK [label="algún deny"];
     PREC -> RUN   [label="ningún deny"];

@@ -98,6 +98,9 @@ digraph flujos {
     START [fillcolor="#232323", color="#8a8a8a", fontcolor="#cfc8c0",
            label="💡 trabajo PARALELIZABLE (varias piezas independientes)\n📜 → 🎼 Orquesta: delega y quédate en el loop"];
 
+    PREREQ [color="#e08e45",
+            label="🟠 PREREQUISITO: la sesión debe vivir DENTRO de un repo git\nsi no: «Cannot create agent worktree: not in a git repository\ny no hay hooks WorktreeCreate configurados» · multi-repo: ancla en el repo\nprincipal y crea worktrees con `git -C <ruta> worktree add`"];
+
     P1 [color="#7fb069",
         label="1 · 📋 Asigna del backlog (estado-proyecto.md = fuente de verdad)\nreparte archivos DISJUNTOS por agente · inicia cada agente EN el repo destino"];
     AUTOQ [shape=diamond, fillcolor="#2b2622", color="#d97757",
@@ -108,6 +111,8 @@ digraph flujos {
            label="¿el agente MUTA archivos / commitea?"];
     ISO [color="#e08e45",
          label="🔔🌳 WORKTREE AISLADO (isolation: worktree) — regla DURA\nnunca el árbol compartido; si no se puede aislar, lo hace el orquestador.\nproteger-arbol respalda (ver 07). 📜 → 🧱 Aislamiento de fan-out"];
+    ISO_RESET [color="#e08e45",
+               label="🟠 en el PROMPT del agente: `git reset --hard <rama-objetivo>` al iniciar en TU worktree\n(el Agent tool lo crea sobre origin/HEAD=origin/main, NO tu rama activa — evita rehacer trabajo)"];
     ISO_DEPLOY [color="#e08e45",
                 label="🟠 y NUNCA deployes desde ese worktree: no hereda gitignored → rompe el deploy.\nEl deploy sale del clon PRINCIPAL tras `git pull`"];
     RO [color="#7fb069", label="🟢 read-only → sin worktree aislado"];
@@ -115,35 +120,66 @@ digraph flujos {
           label="🔒💸 delegacion-gate · consentimiento de costo (ver 11)"];
 
     AGENT [fillcolor="#232323", color="#8a8a8a", fontcolor="#cfc8c0",
-           label="🤖 agente TERMINAL — ejecuta el trabajo COMPLETO en su turno (no background);\ndevuelve: qué hizo · línea-bitácora · pendiente · estado del worktree.\nPORTA, no REHAGAS: cita+lee la fuente antes de escribir"];
+           label="🤖 agente TERMINAL — ejecuta el trabajo COMPLETO en su turno (no background);\ndevuelve: informe (RUTA del .md escrito a disco — regla DURA, nunca prosa en el retorno) ·\nqué hizo · base (rama + SHA real, verificado con git) · línea-bitácora · pendiente · estado del worktree.\nPORTA, no REHAGAS: cita+lee la fuente antes de escribir"];
+    LATIDO [color="#e08e45",
+            label="🟠 LATIDO: mientras haya agentes EN VUELO, reporta avance periódico\n(qué agente va en qué) — no te quedes mudo. Señal de desvío: te preguntaron «¿ping?»"];
     VERIFY [shape=diamond, fillcolor="#2b2622", color="#d97757",
             label="el orquestador VERIFICA read-only (git / archivo / compila):\n¿el resultado real EXISTE?"];
-    VERIFY_NO [color="#c0392b", penwidth=2,
-               label="🔴 NO lo marques hecho — el reporte NO es evidencia\n(pudo devolver un stub o alucinar «lo dejé en background»). 💡 → 🕵️ revisar-entregables-agentes"];
+    VERIFY_NO [color="#e08e45",
+               label="🟠 NO lo marques hecho — el reporte NO es evidencia\n(pudo devolver un stub o alucinar «lo dejé en background»). 💡 → 🕵️ revisar-entregables-agentes"];
+    WASMUT [shape=diamond, fillcolor="#2b2622", color="#d97757",
+            label="¿este agente MUTÓ archivos/commiteó (venía de ISO)\no fue READ-ONLY (venía de RO, sin worktree)?"];
+    RO_CLOSE [color="#7fb069", penwidth=2,
+              label="cierre AUTOMÁTICO (read-only): 🟢 appenda a bitacora.md · 🟢 cierra el ítem en\nestado-proyecto.md (opcional) — SIN commit que integrar ni worktree/rama que barrer\n(delegacion-reporte.sh: «si fue read-only… ignora este recordatorio y sigue»)"];
+    LINAGE [shape=diamond, fillcolor="#2b2622", color="#d97757",
+            label="¿el PADRE del commit ya está en la rama-objetivo?\n`git merge-base --is-ancestor <commit>^ <rama-objetivo>` (+ `git show --stat`)\nlección C7 2026-07-21: el agente dijo «reseteé a DevelopUnjordi» pero su padre era el tip de main"];
+    REHAZ [color="#e08e45",
+           label="🟠 descarta la rama y REHAZ sobre la base correcta\n(la base envejeció mientras el agente corría)"];
+    INTEGRATE [color="#c62828", penwidth=3,
+               label="⚠ INTEGRA por CHERRY-PICK del delta (no merge)\nla base pudo quedar vieja mientras el agente corría en su turno"];
     CLOSE [color="#7fb069", penwidth=2,
-           label="⚠ ESCRIBE (memoria) · cierre AUTOMÁTICO al terminar (lo recuerda 🔔📮 delegacion-reporte):\n🟢 APPENDA a bitacora.md (con «>>» · parallel-safe) · 🟢 cierra el ítem en estado-proyecto.md\n(TodoWrite = scratch de sesión, NO el backlog durable)"];
+           label="cierre AUTOMÁTICO al terminar (lo recuerda 🔔📮 delegacion-reporte):\n🟢 APPENDA a bitacora.md (con «>>» · parallel-safe) · 🟢 cierra el ítem en estado-proyecto.md\n(TodoWrite = scratch de sesión, NO el backlog durable)"];
 
     SWEEP [shape=diamond, fillcolor="#2b2622", color="#d97757",
            label="⚙ limpiar-worktrees.sh · ¿la rama del worktree ya está mergeada?"];
-    SWEEP_YES [color="#7fb069", label="🟢 borra el worktree"];
+    SWEEP_YES [color="#c62828", penwidth=3, label="⚠ borra el worktree (`git worktree remove --force` + `prune`)"];
     SWEEP_NO [color="#e08e45", label="🟠 déjalo + anota su pendiente en la bitácora"];
 
+    SWEEP2 [shape=diamond, fillcolor="#2b2622", color="#d97757",
+            label="🧹 limpiar-ramas.sh · ¿la rama LOCAL ya está integrada?\n(zombie squash-safe: `git branch -d` no la ve y `fetch --prune` no toca locales)"];
+    SWEEP2_YES [color="#c62828", penwidth=3, label="⚠ borra la rama local (`git branch -D`) + su remota huérfana si cuelga (`git push --delete`)"];
+    SWEEP2_NO [color="#e08e45", label="🟠 consérvala (Develop*/keep/*/base)"];
+
     // Aristas
-    START -> P1;
+    START -> PREREQ;
+    PREREQ -> P1;
     P1 -> AUTOQ;
     AUTOQ -> AUTOQ_W [label="no"];
     AUTOQ -> MUTAQ [label="sí"];
+    AUTOQ_W -> MUTAQ [label="tras serializar/unir"];
     MUTAQ -> ISO [label="sí (muta/commitea)"];
-    MUTAQ -> RO [label="no (read-only)", style=dashed];
-    ISO -> ISO_DEPLOY [style=dashed];
-    ISO -> GATE;
+    MUTAQ -> RO [label="no (read-only)"];
+    ISO -> ISO_RESET;
+    ISO_RESET -> ISO_DEPLOY;
+    ISO_RESET -> GATE;
     RO -> GATE;
     GATE -> AGENT;
-    AGENT -> VERIFY;
+    AGENT -> LATIDO [label="mientras corre"];
+    LATIDO -> VERIFY [label="al terminar"];
     VERIFY -> VERIFY_NO [label="no existe"];
-    VERIFY -> CLOSE [label="sí, verificado"];
+    VERIFY_NO -> AGENT [label="re-spawn con instrucción explícita"];
+    VERIFY -> WASMUT [label="sí, existe"];
+    WASMUT -> LINAGE [label="mutó (venía de ISO)"];
+    WASMUT -> RO_CLOSE [label="read-only (venía de RO)"];
+    LINAGE -> REHAZ [label="no (base equivocada/vieja)"];
+    REHAZ -> AGENT;
+    LINAGE -> INTEGRATE [label="sí (base correcta)"];
+    INTEGRATE -> CLOSE;
     CLOSE -> SWEEP;
+    CLOSE -> SWEEP2;
     SWEEP -> SWEEP_YES [label="sí"];
     SWEEP -> SWEEP_NO [label="no"];
+    SWEEP2 -> SWEEP2_YES [label="sí"];
+    SWEEP2 -> SWEEP2_NO [label="no"];
   }
 }

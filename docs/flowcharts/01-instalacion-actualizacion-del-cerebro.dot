@@ -94,7 +94,7 @@ digraph flujos {
 
   // ───────────────────────────────────── EL PROCESO ─────────────────────────────────────
   subgraph cluster_f8 {
-    label="⓪ Instalación / actualización del cerebro   (install-brain · sincronizar-cerebro · bootstrap-claude · aviso-drift · widget ⬆)";
+    label="01 · Instalación / actualización del cerebro   (bootstrap.sh · install-brain · sincronizar-cerebro · bootstrap-claude · aviso-drift · widget ⬆)";
     fontname="Times"; fontsize=14; fontcolor="#5fa89e";
     color="#5fa89e"; penwidth=1.6; style="rounded"; bgcolor="#1b1712";
 
@@ -108,11 +108,13 @@ digraph flujos {
     AMBITO   [shape=diamond, fillcolor="#2b2622", color="#d97757", label="¿ámbito?"];
 
     // ── Ruta A: GLOBAL (máquina) = install-brain.sh ──
-    GVEZ     [shape=diamond, fillcolor="#2b2622", color="#d97757", label="GLOBAL (máquina):\n¿1ª vez o actualizar?"];
+    GVEZ     [shape=diamond, fillcolor="#2b2622", color="#d97757", label="GLOBAL (máquina):\n¿1ª vez, actualizar, o self-heal?"];
+    GBOOT    [color="#c0392b", penwidth=3,
+              label="⚠ ESCRIBE git · 🟢  bootstrap.sh — ENTRADA REAL en máquina fresca Y VÍA OFICIAL\npara ACTUALIZAR (bootstrap.sh:9 'Idempotente: re-correrlo solo actualiza')\n(curl -fsSL …/bootstrap.sh | bash): instala prereqs con el gestor del OS (git/jq/node;\nen macOS exige brew+Xcode CLT) + clona o `git checkout -B main origin/main` para\nALINEAR el clon a origin/main en ~/.cortex (fuerza-alinea, descarta rama/commits\nleftover — mismo comando que WID_ACT) + `mv`/`git remote set-url` si migra clones\nviejos claude-brain→cortex + despacha a ./install.sh (Linux/KDE) o macos/install.sh\n(macOS) — install-brain.sh NUNCA se corre a pelo, es el instalador INTERNO que esos\nwrappers invocan. También es el manualUpdateHint que ofrece el widget."];
     GINST    [color="#7fb069",
-              label="🟢  install-brain.sh\nDERIVA del MANIFEST la lista {global,both} → copia hooks+libs a ~/.claude/hooks,\ncablea settings.json, siembra dashboard + entorno-esta-maquina + normas, y ESTAMPA\n~/.claude/.brain-version (sello de versión — YA EXISTE, lo lee el widget).\n(install.sh lo envuelve SOLO en Linux/KDE: +daemon+systemd+plasmoide)"];
-    GUPD     [color="#e08e45",
-              label="🟠  re-correr install-brain.sh\nidempotente Y ACTUALIZABLE: refresca hooks, re-cablea,\nREEMPLAZA el bloque de normas en su lugar, re-estampa .brain-version"];
+              label="🟢  install-brain.sh (instalador INTERNO, invocado por los wrappers de arriba)\nDERIVA del MANIFEST la lista {global,both} → copia hooks+libs a ~/.claude/hooks,\ncablea settings.json, siembra dashboard + entorno-esta-maquina + normas, y ESTAMPA\n~/.claude/.brain-version (sello de versión — YA EXISTE, lo lee el widget).\nlo envuelven wrappers GEMELOS por OS: ./install.sh (Linux/KDE: +daemon systemd+plasmoide)\ny macos/install.sh (macOS: +daemon launchd+.app, baja el precompilado o compila fallback).\nrequiere jq: SIN jq no cablea settings.json y los guards quedan fail-open (no bloquean)"];
+    GUPD     [color="#7fb069",
+              label="🟢  self-heal LOCAL: re-correr install-brain.sh DIRECTO (sin pasar por bootstrap/widget)\nidempotente: refresca hooks, re-cablea, REEMPLAZA el bloque de normas en su lugar,\nre-estampa .brain-version — pero NO hace git fetch/pull (sus hits de git son de SOLO LECTURA:\nrev-list del sello de versión + `git config --global fetch.prune`): re-aplica el clon TAL COMO ESTÁ,\nNO trae commits nuevos. Legítimo solo si el clon ya está al día o eres tú quien desarrolla\nen el clon (equivalente al botón «Curar cerebro global» del widget); para traer versión\nNUEVA usa bootstrap.sh (GBOOT) o el ⬆ del widget (WID) — no este atajo"];
     GLIVE    [color="#7fb069", label="🟢  cerebro GLOBAL vivo en la máquina\n(aplica a TODOS los repos)"];
     GWIRE    [color="#7fb069",
               label="🟢  install-brain ahora DERIVA la COPIA *y* el CABLEADO del MANIFEST (ev_de + loop),\nno una lista register_hook hardcodeada → agregar un hook global al MANIFEST lo copia\nY lo cablea. test-brain e6b FALLA si el set PreToolUse/Bash diverge del esperado.\nRESUELTO (refactor MANIFEST-derivado + e6b, en develop 2026-07-30)"];
@@ -133,8 +135,13 @@ digraph flujos {
               label="el brain EVOLUCIONÓ: ¿cómo se actualizan\nlos .claude/ de un repo YA instalado?"];
     SYNC     [color="#7fb069",
               label="🟢  sincronizar-cerebro.sh  (YA EXISTE, resuelve el viejo HUECO)\nFUENTE ÚNICA = MANIFEST; despliega por-repo {repo,both}, diff-aware (NO cp -f ciego),\nCABLEA settings.json, ESTAMPA .brain-version (solo en sync COMPLETO), PODA hooks\nRETIRED. DRY-RUN por default; --apply escribe; --only / --prune-orphans"];
-    DRIFT    [color="#c0392b", penwidth=3,
-              label="⚠ ESCRIBE git · 🔔🧬  aviso-drift-cerebro.sh  (SessionStart · GLOBAL) — es también pieza de 02\ncorre sincronizar en DRY-RUN (diff por CONTENIDO); si la copia por-repo quedó atrás → AVISA.\n⚠ AUTO-APPLY en mini-develop: en rama Develop* con .claude/ limpio → apply+commit+push SOLO\n📜 → 🌿 Flujo de git (en repo compartido «actualizar» = por ramita→MR)"];
+    DRIFT    [color="#7fb069",
+              label="🔔🧬  aviso-drift-cerebro.sh  (SessionStart · GLOBAL) — es también pieza de 02\ncorre sincronizar en DRY-RUN (diff por CONTENIDO); si la copia por-repo quedó atrás →\nBIFURCA por la marca .claude/repo-compartido (REDISEÑO #46, ver drift_chequea_repo)\n📜 → 🌿 Flujo de git (en repo compartido «actualizar» = por ramita→MR)"];
+    CSHARE   [shape=diamond, fillcolor="#2b2622", color="#d97757", label="¿.claude/repo-compartido\n(la marca)?"];
+    DRIFT_SHARED [color="#c0392b", penwidth=3,
+              label="⚠ ESCRIBE git · 🟢  COMPARTIDO (con la marca): el brain por-repo es CORREO para clones/colegas\nSIN brain global → en mini-develop (Develop*) con .claude/ limpio: apply+commit+push SOLO;\nsi no aplica limpio, AVISA para propagar por ramita→MR"];
+    DRIFT_PERSONAL [color="#7fb069",
+              label="🟢  PERSONAL (DEFAULT, sin la marca): guards por-repo NUNCA hacen falta\n(esta máquina ya los saca del install GLOBAL + dedupe) → NO auto-commit/push;\nFLAGGEA los guards del brain que SOBRAN para que los quites. Memoria/skills intactos."];
     DRIFT_CIEGO [color="#7fb069",
               label="🟢  aviso-drift YA VE el drift de CABLEADO: cuenta también el wiring FALTANTE\n(«N cableado faltante») → ya no reporta «al día» con hooks presentes-SIN-cablear.\nRESUELTO en #209 (en develop, 2026-07-30)"];
     DRIFT_STAGE [color="#7fb069",
@@ -143,8 +150,8 @@ digraph flujos {
     // ── Ruta D: UPDATER del widget (⬆) ──
     WID      [color="#7fb069",
               label="🟢  widget (pestaña Cerebro, 3 GUIs): compara el SHA EMBEBIDO del build (version.json,\nque escribe make-app.sh) contra commits/main de github.com/unjordi/cortex (throttle ~15m, fail-open).\nSi el sha DIFIERE y es más nuevo → banner ⬆ Actualizar. (La píldora de salud muestra ~/.claude/.brain-version,\nsello APARTE que estampa install-brain.sh — no es lo que dispara el ⬆)"];
-    WID_ACT  [color="#e08e45",
-              label="🟠  al aceptar ⬆: script DESPRENDIDO (nohup bash -lc) resuelve el clon local\n(resolveClonePath: embebido→$CLAUDE_BRAIN_DIR→~/.cortex→fallback ~/.claude-brain), lo MIGRA al nombre canónico si hace\nfalta, y hace git fetch + `checkout -B main origin/main` (FUERZA-alinea; descarta rama/commits leftover)\n→ re-corre install.sh/ps1 (reconstruye+relanza). Fail-open: sin clon con macos/install.sh → invita a\nactualizar a mano con el one-liner de bootstrap"];
+    WID_ACT  [color="#c0392b", penwidth=3,
+              label="⚠ ESCRIBE git · 🟠  al aceptar ⬆: script DESPRENDIDO (nohup bash -lc) resuelve el clon local\n(resolveClonePath: embebido→$CLAUDE_BRAIN_DIR→~/.cortex→fallback ~/.claude-brain), lo MIGRA al nombre canónico si hace\nfalta, y hace git fetch + `checkout -B main origin/main` (FUERZA-alinea; descarta rama/commits leftover)\n→ re-corre install.sh/ps1 (reconstruye+relanza). Fail-open: sin clon con macos/install.sh → invita a\nactualizar a mano con el one-liner de bootstrap"];
     WID_ASSET [color="#c9a227",
               label="🟡  install.sh baja por DEFAULT el .app/.exe PRECOMPILADO del release rolling 'macos-latest'/\n'windows-latest' (release-macos.yml/release-windows.yml lo republica en CADA push a main, SIN filtro de\npaths → nunca rancio respecto al sha de main). Guard de staleness (#346): si el build-sha del asset ≠ HEAD\ndel clon y hay Xcode CLT → compila desde fuente en vez de instalar un asset rancio (antídoto al loop 'actualiza')"];
     WID_ATOM [color="#7fb069",
@@ -162,8 +169,9 @@ digraph flujos {
     AMBITO -> RTIPO [label="por-repo"];
     AMBITO -> WID   [label="updater ⬆"];
 
-    GVEZ -> GINST [label="1ª vez"];
-    GVEZ -> GUPD  [label="actualizar"];
+    GVEZ -> GBOOT [label="1ª vez (máquina fresca)\nO actualizar (bootstrap.sh idempotente)"];
+    GBOOT -> GINST [label="despacha vía install.sh/macos install.sh"];
+    GVEZ -> GUPD  [label="self-heal local\n(reparar clon actual, NO trae versión nueva)"];
     GINST -> GLIVE;
     GUPD  -> GLIVE;
     GINST -> GWIRE [style=dashed, label="cableado (deriva del MANIFEST)"];
@@ -179,8 +187,11 @@ digraph flujos {
     CUPD -> SYNC  [label="a mano / CI"];
     CUPD -> DRIFT [label="al iniciar sesión"];
     SYNC -> DRIFT_CIEGO [style=dashed];
-    DRIFT -> DRIFT_CIEGO;
-    DRIFT -> DRIFT_STAGE;
+    DRIFT -> CSHARE;
+    CSHARE -> DRIFT_SHARED   [label="COMPARTIDO"];
+    CSHARE -> DRIFT_PERSONAL [label="PERSONAL (default)"];
+    DRIFT_SHARED -> DRIFT_CIEGO;
+    DRIFT_SHARED -> DRIFT_STAGE;
 
     WID -> WID_ACT;
     WID_ACT -> WID_ASSET [label="reinstala"];

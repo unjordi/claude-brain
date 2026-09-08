@@ -107,38 +107,69 @@ digraph flujos {
     SEC_RANGE [shape=diamond, fillcolor="#2b2622", color="#d97757",
                label="¿repo git y rango determinable?\ncommit: staging (+ `add --dry-run`/`-a`) · push: @{u}..HEAD\nsin upstream (1er push de rama nueva) → cae al merge-base con develop/main"];
     SEC_PAT [shape=diamond, fillcolor="#2b2622", color="#d97757",
-             label="¿alguna línea AGREGADA matchea un patrón de SECRETO de alta precisión\n(AKIA · PEM PRIVATE KEY · sk-ant · sk-proj/sk- · gh[posru]_/github_pat · glpat · xox · AIza)\ny NO es placeholder (EXAMPLE/CHANGEME/<...>/your-key…)?"];
+             label="¿alguna línea AGREGADA matchea un patrón de SECRETO de alta precisión\n(AKIA · PEM PRIVATE KEY · sk-ant · sk-proj/sk- · gh[posru]_/github_pat · glpat · xox · AIza ·\n§D: JWT eyJ…eyJ…firma · connstring user:pass@host · Password=/Pwd= .NET 6+ chars)\ny NO es placeholder (EXAMPLE/CHANGEME/<...>/your-key…)?"];
     SEC_OK [color="#7fb069", label="🟢 pasa (sin secretos, o no incumbe, o escape del humano)"];
     SEC_FAILOPEN [color="#c9a227",
-                  label="🟡 pasa (FAIL-OPEN: sin git ni rango determinable no bloquea;\nSTRICT=1 lo vuelve fail-CLOSED)"];
+                  label="🟡 pasa (FAIL-OPEN: sin git ni rango determinable no bloquea;\nSTRICT=1 lo vuelve fail-CLOSED.\nEXCEPCIÓN previa: sin `jq` pasa SIEMPRE en silencio —\nningún STRICT lo convierte, el deny mismo se emite vía jq)"];
     SEC_D [color="#c0392b", penwidth=2,
            label="🔴 DENY — un secreto va a ENTRAR al repo (redacta el match).\nSácalo a env/gestor de secretos/*.local; si YA estaba commiteado, ROTA la credencial.\nFalso positivo → --no-verify o CLAUDE_SKIP_SECRET_SCAN=1"];
+    SEC_D_STRICT [color="#c0392b", penwidth=2,
+                  label="🔴 DENY (STRICT) — no se pudo escanear (sin git en PATH / no es repo / sin upstream\nni base develop·main para acotar el rango) y CLAUDE_SECRET_SCAN_STRICT=1 exige\npoder verificar antes de dejar entrar código. Resuelve la causa, o --no-verify /\nCLAUDE_SKIP_SECRET_SCAN=1 para esta acción"];
 
     // ── proteger-arbol ──
     ARB [shape=diamond, fillcolor="#2b2622", color="#d97757",
-         label="🔔🌳 proteger-arbol\n¿es git DESTRUCTIVO? (reset --hard/--merge/--keep · checkout -f · rebase · branch -d/-D)"];
+         label="🔔🌳 proteger-arbol\n¿es git DESTRUCTIVO? (reset --hard/--merge/--keep · checkout -f · rebase · branch -D)\n(el gate SOLO matchea -D mayúscula; `branch -d` a solas — borrado seguro — no dispara nada)"];
     ARB_ORF [shape=diamond, fillcolor="#2b2622", color="#d97757",
-             label="DOS caminos según el comando:\n• reset/checkout/rebase (MUEVEN HEAD) → ¿orfanaría >0 commits SIN pushear? (@{u}..HEAD)\n• branch -d/-D SOLO (sin los de arriba) → NO usa @{u}..HEAD (ajeno a la rama borrada):\n  chequeo ZOMBIE por CADA rama nombrada (ancestro de la base | equivalencia squash/cherry |\n  remota-gone sin commits únicos) → avisa SOLO por ramas con trabajo PROPIO fuera de la base\n  (mata el FP DOMINANTE del corpus, 10+ casos de limpieza de ramas ya integradas por squash)"];
+             label="DOS caminos según el comando:\n• reset/checkout/rebase (MUEVEN HEAD) → ¿orfanaría >0 commits SIN pushear? (@{u}..HEAD)\n• branch -D SOLO (sin los de arriba) → NO usa @{u}..HEAD (ajeno a la rama borrada):\n  chequeo ZOMBIE por CADA rama nombrada (ancestro de la base | equivalencia squash/cherry |\n  remota-gone sin commits únicos) → avisa SOLO por ramas con trabajo PROPIO fuera de la base\n  (mata el FP DOMINANTE del corpus, 10+ casos de limpieza de ramas ya integradas por squash)"];
     ARB_OK [color="#7fb069", label="🟢 pasa (no incumbe / nada que orfanar → sin ruido)"];
+    ARB_ISO [shape=diamond, fillcolor="#2b2622", color="#d97757",
+             label="H14: ¿worktree AISLADO? (git-dir ≠ git-common-dir)\nen un aislado, orfanar el árbol COMPARTIDO del orquestador es IMPOSIBLE\n(solo tiene SU propia rama) → se sub-clasifica por objetivo, no se avisa igual que el principal"];
+    ARB_ISO_TGT [shape=diamond, fillcolor="#2b2622", color="#d97757",
+                 label="worktree aislado: ¿objetivo del reset/checkout = SU rama actual, su upstream\n(origin/<rama>), o una base develop·main? (sin objetivo → apunta a HEAD)"];
+    ARB_SUP [color="#7fb069",
+             label="🟢 SUPRIME (silencio) — exit 0 SIN additionalContext.\nWorkaround del bug de harness H15: el worktree nace en origin/HEAD viejo y el agente\nhace `git reset --hard <su rama objetivo>` al arrancar → lo 'orfanado' es el base\nRANCIO, no trabajo. CASO DOMINANTE del corpus (4/4 agentes de un fan-out lo\ndisparaban en falso, 2026-07) — antes vivía fusionado dentro del 🟠 AVISA de abajo."];
+    ARB_NOTE [color="#e08e45",
+              label="🟠 nota SUAVE (no bloquea) — worktree aislado, destructivo hacia OTRO objetivo:\npuede rebobinar N commit(s) de TU rama, pero el árbol COMPARTIDO del orquestador\nNO está en riesgo. Si rebobinas a propósito, adelante."];
     ARB_W [color="#e08e45",
-           label="🟠 AVISA (no bloquea) — en el árbol PRINCIPAL (compartido) puede orfanar\nN commits del orquestador. H14: en un worktree AISLADO reseteando a SU rama/base\n(workaround del bug de harness H15) → SUPRIME; a otro objetivo → nota SUAVE.\n📜 → 🧱 Aislamiento de fan-out · 💡 → 🐝 orquestar-fanout (ver 12)"];
+           label="🟠 AVISA (no bloquea) — árbol PRINCIPAL (compartido): este git destructivo puede\nORFANAR N commits sin pushear. Si eres agente de fan-out: NO operes aquí — trabaja\nen tu worktree aislado (isolation: worktree); si hace falta rebobinar, que lo haga\nel orquestador.\n📜 → 🧱 Aislamiento de fan-out · 💡 → 🐝 orquestar-fanout (ver 12)"];
+    ARB_ZOMBIE [color="#e08e45",
+                label="🟠 AVISA (no bloquea) — ACOTADO por rama: 'git branch -D borraría commits PROPIOS\naún NO integrados a <base> en: <rama>'. Sin lógica de worktree aislado/H14-H15\n(esa es exclusiva de la vía reset/checkout/rebase de arriba)"];
+
+    // Nodo de convergencia: la mutación REAL de git (⚠) solo ocurre si NADA la vetó.
+    GIT_EXEC [penwidth=3, color="#c62828", fillcolor="#232323",
+              label="⚠ EJECUTA — el comando MUTA git (commit/push/reset/checkout/rebase/branch -D)\nsolo si TODOS los 9 guards en paralelo dejan pasar (aquí: secret-scan Y proteger-arbol OK\no en aviso no-bloqueante; los otros 7 guards → ver 03)"];
 
     // Aristas — secret-scan
     CMD -> SEC;
-    SEC -> SEC_OK [label="no es commit/push", style=dashed];
+    SEC -> SEC_OK [label="no es commit/push"];
     SEC -> SEC_ESC [label="sí (commit/push)"];
-    SEC_ESC -> SEC_OK [label="sí (el humano manda)", style=dashed];
+    SEC_ESC -> SEC_OK [label="sí (el humano manda)"];
     SEC_ESC -> SEC_RANGE [label="no"];
     SEC_RANGE -> SEC_FAILOPEN [label="no"];
     SEC_RANGE -> SEC_PAT [label="sí"];
-    SEC_PAT -> SEC_OK [label="no", style=dashed];
+    SEC_PAT -> SEC_OK [label="no"];
     SEC_PAT -> SEC_D [label="sí — secreto"];
 
     // Aristas — proteger-arbol
     CMD -> ARB;
-    ARB -> ARB_OK [label="no destructivo", style=dashed];
+    ARB -> ARB_OK [label="no destructivo"];
     ARB -> ARB_ORF [label="sí (destructivo)"];
-    ARB_ORF -> ARB_OK [label="no", style=dashed];
-    ARB_ORF -> ARB_W [label="sí"];
+    ARB_ORF -> ARB_OK [label="no (nada que orfanar / ninguna rama con riesgo)"];
+    ARB_ORF -> ARB_ISO [label="sí — reset/checkout/rebase orfanaría >0 commits"];
+    ARB_ORF -> ARB_ZOMBIE [label="sí — branch -D con rama de riesgo"];
+    ARB_ISO -> ARB_W [label="no — árbol PRINCIPAL"];
+    ARB_ISO -> ARB_ISO_TGT [label="sí — aislado"];
+    ARB_ISO_TGT -> ARB_SUP [label="sí — su rama/upstream/base develop·main (o sin objetivo)"];
+    ARB_ISO_TGT -> ARB_NOTE [label="no — a otro objetivo"];
+
+    // Convergencia hacia la ejecución real (proteger-arbol NUNCA bloquea; solo secret-scan puede DENY)
+    SEC_OK -> GIT_EXEC;
+    SEC_FAILOPEN -> GIT_EXEC [label="STRICT=0 (default)"];
+    SEC_FAILOPEN -> SEC_D_STRICT [label="STRICT=1 → fail-CLOSED (deny)", color="#c0392b"];
+    ARB_OK -> GIT_EXEC;
+    ARB_SUP -> GIT_EXEC;
+    ARB_NOTE -> GIT_EXEC;
+    ARB_W -> GIT_EXEC;
+    ARB_ZOMBIE -> GIT_EXEC;
   }
 }

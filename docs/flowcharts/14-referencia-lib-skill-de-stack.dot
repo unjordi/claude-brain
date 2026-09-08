@@ -96,12 +96,12 @@ digraph flujos {
     fontname="Times"; fontsize=14; fontcolor="#5fa89e";
     color="#5fa89e"; penwidth=1.6; style="rounded"; bgcolor="#1b1712";
 
-    ACG [label="⚙ analizar-comando-git (lib)\nlógica compartida de los git-guards: despoja comillas, normaliza `git -c/-C/--work-tree`,\ndetecta push-que-toca-base y merge-que-nombra-base. FUENTE ÚNICA → no divergen (ver 03/06/07)"];
-    DET [label="⚙ detectar-secretos (lib)\npatrones de alta precisión (AKIA/PEM/sk-ant/sk-/gh_/glpat/xox/AIza) + anti-placeholder.\nla usa secret-scan (ver 07)"];
-    JUEZ [label="⚙ juez-comun (lib)  ·  el JUEZ-LLM compartido (Haiku vía curl→api.anthropic.com, token OAuth)\ntoken + reintento-401 + _juez_cita_casa + votación. FUENTE ÚNICA de comprensión de lenguaje:\nla usan confirmar-merge-develop (ver 06) Y dod-verificar (ver 09) — reemplazó el pilón de regex frágiles"];
-    DELE [label="⚙ delegacion-comun (lib)\nclasificación de costo compartida: la usan delegacion-gate Y delegacion-registrar (ver 11)"];
-    ZOMBIE [label="⚙ ramas-zombie (lib)\nuna sola definición de «rama ya integrada» (squash-merge / remota borrada / equivalencia de parche);\nla usan barrer-ramas y limpiar-ramas.sh (ver 12)"];
-    DRIFT [label="⚙ drift-cerebro-comun (lib)\nlógica compartida del anti-drift del cerebro; la usa aviso-drift-cerebro (ver 01/02)"];
+    ACG [label="analizar-comando-git (lib)\nlógica compartida de los git-guards: despoja comillas, normaliza `git -c/-C/--work-tree`,\ndetecta push-que-toca-base y merge-que-nombra-base; resuelve el repo/dir OBJETIVO cross-repo\n(precedencia -C > cd > cwd > PROJECT_DIR); resuelve el destino/target del MR vía API\n(caché+timeout) para el gate de release-a-main; valida la CALIDAD del mensaje de squash\n(pobre/superficial/sin-traza/editorializa/narra-acciones) y arma el hint de PRs abiertos para el juez-LLM.\nFUENTE ÚNICA → no divergen (ver 03/06/07)"];
+    DET [label="detectar-secretos (lib)\npatrones de alta precisión (AKIA/PEM/sk-ant/sk-/gh_/glpat/xox/AIza) + anti-placeholder.\nla usan secret-scan (ver 07) Y drift-cerebro-comun para el pre-commit del auto-sync (ver 01/02)"];
+    JUEZ [label="juez-comun (lib)  ·  el JUEZ-LLM compartido (Haiku vía curl→api.anthropic.com, token OAuth)\ntoken + reintento-401 + _juez_cita_casa. FUENTE ÚNICA de comprensión de lenguaje:\nla usan confirmar-merge-develop (ver 06) Y dod-verificar (ver 09) — reemplazó el pilón de regex frágiles.\n(el voto múltiple es un lever propio de confirmar-merge-develop, default-off; no vive en esta lib — ver 06)"];
+    DELE [label="delegacion-comun (lib)\nclasificación de costo compartida: la usan delegacion-gate Y delegacion-registrar (ver 11)"];
+    ZOMBIE [label="ramas-zombie (lib)\nuna sola definición de «rama ya integrada» (squash-merge / remota borrada / equivalencia de parche / ancestro de la base);\nla usan limpiar-ramas.sh, limpiar-worktrees.sh y proteger-arbol.sh (barrer-ramas los dispara) (ver 12)"];
+    DRIFT [label="drift-cerebro-comun (lib)\nlógica compartida del anti-drift del cerebro;\nla usan aviso-drift-cerebro, proteger-fuente-cerebro, exportar-sesion-master, verificar-cerebro y barrer-flotilla-cerebro (ver 01/02)"];
 
     SKILLS [fillcolor="#232323", color="#8a8a8a", fontcolor="#cfc8c0",
             label="💡 skills específicos de STACK (viven en el repo CONSUMIDOR, no en cortex)\np.ej. la plantilla .NET: crear-pagina-blazor · migracion-ef · build-produccion · agregar-seed…\nusan el ritual genérico cerrar-slice (ver 10). cortex solo trae los skills GENÉRICOS (ver leyenda 💡)"];

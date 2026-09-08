@@ -1,8 +1,16 @@
 // 08 — Al hacer push: los nudges que se disparan (cortex)  ·  FUENTE editable (.dot)
 // Render:  dot -Tsvg 08-al-hacer-push-nudges.dot -o 08-al-hacer-push-nudges.svg
-// ZOOM del fan-out de 9 hooks (raíz común en 03 · CONVENCIONES §6) sobre los nudges (🔔, no bloquean):
-// recordar-dashboard (dashboard + doc=realidad) y rama-vieja (base atrasada). Reconstruido 2026-08-07
-// desde el CÓDIGO real (brain/hooks/recordar-dashboard.sh, rama-vieja.sh).
+// ZOOM del fan-out de 9 hooks (raíz común en 03 · CONVENCIONES §6) sobre los nudges (🔔, no bloquean)
+// de un `git push`: los 2 PreToolUse en detalle — recordar-dashboard (dashboard + doc=realidad, dispara
+// en CUALQUIER push) y rama-vieja (base atrasada, SOLO en ramitas con origin/develop conocido) — más los
+// PostToolUse del MISMO comando (CONVENCIONES §6): 📈 aviso-contexto foregrounded aquí, con cross-ref por
+// Nº de archivo a **03** para el detalle de 🎼 recordar-orquestar / 🔀 hud-stale / 🧹 barrer-ramas. ESTOS
+// nudges no bloquean, pero el MISMO push pasa además por los guards DENY-capaces del fan-out de 03
+// (🚧 git-branch-guard → ver 06 · 🕵️ secret-scan → ver 07): un gate explícito antes del terminal deja
+// claro que PUSH_OK es "push que ningún guard DENY frenó", no un procede incondicional. Reconstruido
+// 2026-08-07 desde el CÓDIGO real (brain/hooks/recordar-dashboard.sh, rama-vieja.sh); ampliado tras
+// auditoría de coherencia para cubrir PostToolUse + la mutación real del push, y de nuevo tras la
+// auditoría que señaló que el chart omitía los guards DENY del mismo fan-out.
 // Re-canoniza el huérfano 05-al-hacer-push-nudges.svg (viejo «④», sin .dot ni leyenda).
 digraph flujos {
   graph [bgcolor="#1b1712", rankdir=TB, fontname="Helvetica", splines=true,
@@ -92,15 +100,18 @@ digraph flujos {
 
   // ───────────────────────────────────── EL FLUJO ─────────────────────────────────────
   subgraph cluster_f0 {
-    label="08 · Al hacer push: nudges   (ZOOM del fan-out de 9 de 03 · 🔔 recordar-dashboard: dashboard+doc · 🔔 rama-vieja: base vieja — ninguno bloquea)";
+    label="08 · Al hacer push: nudges PRE (🔔 recordar-dashboard: cualquier push · 🔔 rama-vieja: solo ramita) + POST (🔔 aviso-contexto — ver 03 para recordar-orquestar/hud-stale/barrer-ramas)   (ZOOM del fan-out de 9 de 03 · estos NUDGES no bloquean; los guards DENY del mismo fan-out —🚧 git-branch-guard, 🕵️ secret-scan— viven en 06/07)";
     fontname="Times"; fontsize=14; fontcolor="#5fa89e";
     color="#5fa89e"; penwidth=1.6; style="rounded"; bgcolor="#1b1712";
 
-    CMD [fillcolor="#232323", color="#8a8a8a", fontcolor="#cfc8c0",
-         label="comando Bash con git (PreToolUse/Bash · ver 03)\n¿es un `git push` de una ramita?"];
-    SILENT [color="#7fb069", label="🟢 silencio (no es push de ramita)"];
+    CMDINIT [fillcolor="#232323", color="#8a8a8a", fontcolor="#cfc8c0",
+             label="comando Bash con git (PreToolUse/Bash · ver 03)"];
+    PUSHQ [shape=diamond, fillcolor="#2b2622", color="#d97757",
+           label="¿es un `git push`?"];
+    SILENT [color="#7fb069", label="🟢 silencio (no es un `git push`)"];
 
-    // ── recordar-dashboard ──
+    // ── recordar-dashboard: dispara en CUALQUIER git push, sin leer la rama (recordar-dashboard.sh
+    //    solo filtra `git push` en el comando; el filtro de rama vive SOLO en rama-vieja, más abajo) ──
     DASH [color="#e08e45",
           label="🔔📊 recordar-dashboard\n🟠 recuerda: actualiza el Dashboard GLOBAL del cerebro\n(APPENDA «>>» al final de la Bitácora, NO un Edit — dos «>>» no chocan entre sesiones)"];
     DOCQ [shape=diamond, fillcolor="#2b2622", color="#d97757",
@@ -116,16 +127,42 @@ digraph flujos {
             label="🟠 recuerda: actualiza la doc que lo DESCRIBE\n(README/memoria/comentarios) en esta MISMA tanda"];
     NADA [color="#7fb069", label="🟢 nada que recordar"];
 
-    // ── rama-vieja ──
+    // ── rama-vieja: SÍ filtra por rama (excluye develop/main/HEAD) y exige origin/develop conocido;
+    //    umbral configurable por RAMA_VIEJA_UMBRAL (default 40, no fijo) ──
+    RAMPRE [shape=diamond, fillcolor="#2b2622", color="#d97757",
+            label="🕰️ rama-vieja ¿aplica?\n(rama ≠ develop/main/HEAD Y existe origin/develop)"];
+    RAM_NA [color="#7fb069",
+            label="🟢 no evaluable → sin aviso\n(rama develop/main/HEAD, o sin origin/develop — p. ej. clon fresco)"];
     RAMV [shape=diamond, fillcolor="#2b2622", color="#d97757",
-          label="🔔🕰️ rama-vieja\n¿la ramita está ≥40 commits DETRÁS de origin/develop?"];
-    RAMV_OK [color="#7fb069", label="🟢 base fresca (sin aviso)"];
+          label="🔔🕰️ rama-vieja\n¿≥ RAMA_VIEJA_UMBRAL commits DETRÁS de origin/develop?\n(env var, default 40 — no fijo)"];
+    RAMV_OK [color="#7fb069", label="🟢 base fresca, bajo el umbral (sin aviso)"];
     RAMV_W [color="#e08e45",
             label="🟠 AVISA: base vieja → el MR traerá ruido/conflictos.\nRebasa antes: `git fetch origin && git rebase origin/develop`\n(repush con --force-with-lease). 📜 → 🌿 Flujo de git"];
 
+    // ── convergencia de los NUDGES (no bloquean) → pero el MISMO push sigue sujeto a los guards
+    //    DENY-capaces del fan-out de 03 (git-branch-guard, secret-scan) — CONVENCIONES §6 ──
+    GATEQ [shape=diamond, fillcolor="#2b2622", color="#d97757",
+           label="¿algún guard DENY del MISMO fan-out lo frena?\n(🚧 git-branch-guard: push directo a develop/main → ver 06\n· 🕵️ secret-scan: secreto en el diff a pushear → ver 07)"];
+    DENY_STOP [fillcolor="#3a1414", color="#c62828", penwidth=3, fontcolor="#f2ede6",
+               label="🔴 DENY — el push NO procede\n(git-branch-guard o secret-scan lo rechazó; detalle en 06/07)"];
+
+    // ── terminal: ningún guard DENY del fan-out lo frenó → el push PROCEDE y ESCRIBE en el remoto ──
+    PUSH_OK [fillcolor="#2b2622", color="#c62828", penwidth=3, fontcolor="#f2ede6",
+             label="⚠ el push PROCEDE → ESCRIBE git en el remoto\n(push que ningún guard DENY del fan-out frenó)"];
+
+    // ── PostToolUse sobre ese MISMO Bash (CONVENCIONES §6): foreground de aviso-contexto,
+    //    cross-ref por Nº de archivo a 03 para el resto ──
+    POST [fillcolor="#232323", color="#8a8a8a", fontcolor="#cfc8c0",
+          label="PostToolUse sobre ese mismo Bash (push) — corre EN PARALELO"];
+    CTX [color="#e08e45",
+         label="🔔📈 aviso-contexto\n🟠 reporta el watermark de contexto CRUDO (tokens · ventana · %)\nsolo al CRUZAR un escalón de +50K tokens (debounce, STEP=50000)\nsilencioso si no cruza escalón, repo sin .claude/memory, o sin jq/transcript"];
+    POST_OTROS [style="rounded,filled", fillcolor="#232323", color="#8a8a8a", fontcolor="#cfc8c0",
+                label="+ 🔔🎼 recordar-orquestar (toda tool)\n+ 🔔🔀 hud-stale · 🔔🧹 barrer-ramas (Bash)\nninguno bloquea — detalle completo en 03"];
+
     // Aristas
-    CMD -> SILENT [label="no", style=dashed];
-    CMD -> DASH [label="sí (push de ramita)"];
+    CMDINIT -> PUSHQ;
+    PUSHQ -> SILENT [label="no", style=dashed];
+    PUSHQ -> DASH [label="sí (cualquier git push)"];
     DASH -> DOCQ;
     DOCQ -> DOC_OK [label="sí (doc tocada)", style=dashed];
     DOCQ -> HOOKQ [label="no"];
@@ -134,8 +171,20 @@ digraph flujos {
     CODEQ -> CODE_W [label="sí"];
     CODEQ -> NADA [label="no", style=dashed];
 
-    CMD -> RAMV [label="sí (push de ramita)"];
+    PUSHQ -> RAMPRE [label="sí (git push)"];
+    RAMPRE -> RAM_NA [label="no", style=dashed];
+    RAMPRE -> RAMV [label="sí (push de ramita)"];
     RAMV -> RAMV_OK [label="no", style=dashed];
     RAMV -> RAMV_W [label="sí"];
+
+    DOC_OK -> GATEQ; HOOK_W -> GATEQ; CODE_W -> GATEQ; NADA -> GATEQ;
+    RAM_NA -> GATEQ; RAMV_OK -> GATEQ; RAMV_W -> GATEQ;
+
+    GATEQ -> DENY_STOP [label="sí (guard DENY lo rechaza)", style=dashed];
+    GATEQ -> PUSH_OK [label="no"];
+
+    PUSH_OK -> POST;
+    POST -> CTX;
+    CTX -> POST_OTROS [label="ver 03", style=dashed];
   }
 }
