@@ -41,7 +41,12 @@ CODE_DIR="${CLAUDE_CODE_DIR:-$HOME/code}"
 ROOTS_FILE=""
 STATEDIR="${CLAUDE_DRIFT_STATEDIR:-$HOME/.claude/memory/.drift-cerebro}"
 REPORT=""
-DASHBOARD="${CLAUDE_DASHBOARD:-$HOME/.claude/projects/-Users-$(id -un 2>/dev/null || echo user)/memory/dashboard_cerebro.md}"
+# El slug del proyecto en ~/.claude/projects/ es $HOME con las "/" → "-" (Claude Code lo forma así):
+# /Users/unjordi → -Users-unjordi (macOS) · /home/unjordi → -home-unjordi (Linux). Hardcodear "-Users-"
+# rompía en Linux (la Cachy): el path no existía → `[ -f "$DASHBOARD" ]` fallaba → la bitácora del sweeper
+# NUNCA se escribía (en silencio, por el `|| true`). Derivarlo de $HOME lo hace portable Mac/Linux.
+_projslug="$(printf '%s' "$HOME" | sed 's#/#-#g')"
+DASHBOARD="${CLAUDE_DASHBOARD:-$HOME/.claude/projects/${_projslug}/memory/dashboard_cerebro.md}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
