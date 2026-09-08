@@ -8,6 +8,12 @@
 #   C) Es IDEMPOTENTE y NO regenera el token en una segunda corrida.
 #   D) `install.sh --help` anuncia la bandera y no toca nada.
 #   E) uninstall.sh retira todo lo del broker.
+#   F) Con el ENDPOINT OCUPADO, NO habilita ni arranca la unidad — y si una corrida previa la había
+#      habilitado, la DESHABILITA. Es el caso crítico: dos unidades habilitadas en default.target
+#      sobre el mismo puerto y con tokens distintos no se notan hoy y explotan en el próximo reboot
+#      (arrancan las dos, una gana el bind, la otra cicla; si gana la nueva el cliente recibe 401 y
+#      axon se va al shell del contenedor sin una sola pista para el usuario).
+#   G) Los VENDORIZADOS instalados calzan con SHA256SUMS, y los PROBES no se copian al runtime.
 #
 # Cómo es seguro: HOME apunta a un temporal y PATH a un directorio de stubs donde `systemctl`,
 # `kpackagetool6`, `ccusage` y `claude` solo REGISTRAN su invocación en un log. Nada toca el
@@ -49,10 +55,17 @@ export PATH="$STUBS:/usr/bin:/bin"
 
 # Corre el instalador REAL con el sandbox puesto; la salida va a un archivo (no a una variable:
 # incrustarla en un `bash -c` rompe con las comillas del propio texto del instalador).
+# El endpoint que vigila el instalador se apunta a valores LIBRES del sandbox: si se dejara en el
+# 8799 real, el probe tomaría la rama de "endpoint ocupado" por el broker que el usuario está usando
+# — y de paso el resultado dependería de si hay o no un broker vivo en la máquina. `ss` es real aquí
+# (no está stubeado), así que esto no es cosmético.
+export AXON_TERM_BROKER_PORT=18799
+export AXON_TERM_BROKER_SOCKET="$SANDBOX/probe-instalador.sock"
 run_install() { ( cd "$ROOT" && bash ./install.sh --no-brain --no-plasmoid --no-claude-code --no-reload-shell "$@" ) > "$SANDBOX/out.txt" 2>&1; }
 
 LIB="$HOME/.local/lib/cortex/term-broker"
 BIN="$HOME/.local/bin/cortex-term-broker"
+MIG="$HOME/.local/bin/migrar-term-broker.sh"
 UNIT="$HOME/.config/systemd/user/cortex-term-broker.service"
 ENVF="$HOME/.config/cortex/term-broker.env"
 
@@ -83,8 +96,13 @@ ck "install con bandera sale 0"     test "$rc_b" -eq 0
 for f in term-host-broker term-session term-pty-bridge ws pty-session; do
   ck "módulo $f.ts instalado"       test -f "$LIB/$f.ts"
 done
-ck "módulos idénticos a la fuente"  diff -r "$ROOT/src/term-broker" "$LIB" --exclude="*.md" --exclude="*.sh"
+ck "módulos idénticos a la fuente"  bash -c 'cd "'"$LIB"'" && sha256sum -c "'"$ROOT"'/src/term-broker/SHA256SUMS"'
+# El instalador copiaba con `*.ts`, que arrastraba también los PROBES al runtime del usuario. Lo que
+# se instala es lo que el servicio EJECUTA, ni un archivo más.
+ck "los probes NO se copiaron al runtime" test ! -e "$LIB/probe-pty-ws.ts"
+ck "en el lib SOLO están los 5 módulos"   bash -c '[[ "$(ls -1 "'"$LIB"'" | wc -l)" == "5" ]]'
 ck "lanzador instalado y ejecutable" test -x "$BIN"
+ck "migrador instalado y ejecutable" test -x "$MIG"
 ck "unidad instalada"               test -f "$UNIT"
 ck "unidad usa %h para ExecStart"   grep -q "ExecStart=%h/.local/bin/cortex-term-broker" "$UNIT"
 ck "unidad sin rutas absolutas de \$HOME" not_in_file "/home/" "$UNIT"
@@ -106,10 +124,37 @@ TOK2="$(grep '^AXON_TERM_BROKER_TOKEN=' "$ENVF" | cut -d= -f2-)"
 ck "token intacto tras reinstalar"  test "$TOK1" = "$TOK2"
 
 echo
+echo "— F) endpoint OCUPADO: ni habilita ni arranca (el hallazgo C-1) —"
+# Se levanta un listener de mentiras en un puerto propio y se apunta ahí el instalador. No se usa el
+# 8799 real ni se toca ningún servicio: lo que se prueba es la DECISIÓN del instalador, no el broker.
+BUSY_PORT=18811
+python3 - "$BUSY_PORT" <<'PY' &
+import socket, sys, time
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(1)
+time.sleep(30)
+PY
+BUSY_PID=$!
+for _ in $(seq 1 40); do ss -ltnH "sport = :$BUSY_PORT" 2>/dev/null | grep -q . && break; sleep 0.1; done
+: > "$CALLS"
+( export AXON_TERM_BROKER_PORT="$BUSY_PORT"; run_install --con-term-broker ); rc_f=$?
+kill "$BUSY_PID" 2>/dev/null; wait "$BUSY_PID" 2>/dev/null
+ck "el install sale 0 igual (instala, solo no arranca)" test "$rc_f" -eq 0
+ck "avisa que el endpoint está ocupado"  grep -q "endpoint del broker YA está ocupado" "$SANDBOX/out.txt"
+ck "NO hizo enable --now del broker"     not_in_file "enable --now cortex-term-broker" "$CALLS"
+ck "NO hizo start del broker"            not_in_file_re "(^| )start[^\n]*cortex-term-broker" "$CALLS"
+ck "manda al migrador, no a pegar comandos" grep -q "migrar-term-broker.sh" "$SANDBOX/out.txt"
+# …y si una corrida previa (con el bug) dejó la unidad habilitada, la deshabilita: el stub de
+# systemctl responde 0 a `is-enabled`, así que aquí SÍ se dispara esa rama.
+ck "deshabilita la unidad que estaba habilitada" grep -q "disable cortex-term-broker.service" "$CALLS"
+ck "a la legacy no le hizo NADA"         not_in_file_re "(disable|stop|start|restart|enable)[^\n]*axon-term-broker" "$CALLS"
+
+echo
 echo "— E) uninstall retira el broker —"
 ( cd "$ROOT" && bash ./uninstall.sh --no-brain --keep-cfg >/dev/null 2>&1 )
 ck "módulos retirados"              test ! -e "$LIB"
 ck "lanzador retirado"              test ! -e "$BIN"
+ck "migrador retirado"              test ! -e "$MIG"
 ck "unidad retirada"                test ! -e "$UNIT"
 ck "systemd recibió disable del broker" grep -q "disable --now cortex-term-broker.service" "$CALLS"
 ck "--keep-cfg conserva el token"   test -f "$ENVF"

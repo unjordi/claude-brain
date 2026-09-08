@@ -12,7 +12,22 @@
 #   6. sin AXON_TERM_BROKER_TOKEN el proceso NO arranca (fail loud, nunca "sin auth").
 #   7. el canal PTY (`/pty`, WebSocket): 401 sin Bearer, y con Bearer un PTY real que ejecuta,
 #      acepta resize y cierra limpio (delegado a probe-pty-ws.ts, que habla con el MISMO ws.ts).
+#   8. el SOCKET UNIX (el transporte del cliente contenerizado): sirve /health y /run con el token,
+#      401 sin token, y queda en 0600 — no basta con que exista el archivo.
+#   9. `GET /health` responde 200 con token y 401 sin él (es lo que el badge de la terminal SONDEA;
+#      un broker sin /health devuelve 404 y el badge miente en la otra dirección).
+#  10. EL TOKEN NO APARECE EN EL `env` DE UNA SESIÓN REAL. Es el único check que ATA las dos mitades
+#      de la defensa del prefijo `AXON_`: el NOMBRE de la variable (definido en el instalador, en la
+#      unidad y en el lanzador) y el literal `"AXON_"` enterrado en `buildSessionEnv()` de un módulo
+#      vendorizado. Hasta hoy eso era una coincidencia de strings sin una sola prueba que la sostenga:
+#      renombrar la variable a `CORTEX_*` dejaría de barrerla y el token del broker saldría en el
+#      `env` de cada terminal del widget, sin que nada fallara.
 # Al final mata el broker de prueba. NO toca ningún servicio de systemd.
+#
+# AISLAMIENTO: puerto propio (18799) Y SOCKET propio (en el tmpdir). Sin lo segundo, este probe
+# abriría `$XDG_RUNTIME_DIR/axon/term-broker.sock` — el socket del broker que el usuario ESTÁ USANDO.
+# El broker de hoy sondea antes y se niega a pisarlo (falla ruidoso), pero depender de eso sería
+# apostar la terminal de alguien a que ese sondeo nunca tenga una carrera.
 #
 # Uso:  bash src/term-broker/probe-broker-vivo.sh
 set -uo pipefail
@@ -26,6 +41,11 @@ ck()    { if "${@:2}" >/dev/null 2>&1; then check "$1" ok; else check "$1" no; f
 command -v curl >/dev/null 2>&1 || { echo "necesita curl"; exit 1; }
 
 TMP="$(mktemp -d)"
+SOCK="$TMP/probe-broker.sock"     # NUNCA el socket real del servicio — ver AISLAMIENTO arriba
+# Centinela del CONTROL POSITIVO del barrido de env (abajo). Valor DISTINTO del token a propósito:
+# si reusara el mismo, el check "el valor del token no aparece" fallaría por el control mismo — y de
+# hecho falló al escribir esto, que es justo la demostración de que ese check no es decorativo.
+CONTROL_FUGA="control-fuga-$$-no-es-un-secreto"
 TOKEN="probe-$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"
 BROKER_PID=""
 # El broker se lanza con `exec` (abajo) para que $BROKER_PID sea el PID de NODE y no el de un bash
@@ -49,13 +69,15 @@ fi
 # ── 6) fail loud sin token (se prueba ANTES de levantar el bueno) ──
 echo "— arranque —"
 out="$(cd "$ROOT" && env -u AXON_TERM_BROKER_TOKEN CORTEX_TERM_BROKER_LIB="$ROOT/src/term-broker" \
-      AXON_TERM_BROKER_PORT="$PORT" bash bin/cortex-term-broker 2>&1)"; rc=$?
+      AXON_TERM_BROKER_PORT="$PORT" AXON_TERM_BROKER_SOCKET="$SOCK" bash bin/cortex-term-broker 2>&1)"; rc=$?
 ck "sin token NO arranca (exit != 0)"      test "$rc" -ne 0
 ck "y dice por qué"                        grep -q "AXON_TERM_BROKER_TOKEN" <<<"$out"
 
 # ── levanta el bueno ──
 ( cd "$ROOT" && exec env CORTEX_TERM_BROKER_LIB="$ROOT/src/term-broker" \
     AXON_TERM_BROKER_TOKEN="$TOKEN" AXON_TERM_BROKER_PORT="$PORT" AXON_TERM_BROKER_HOME="$TMP" \
+    AXON_TERM_BROKER_SOCKET="$SOCK" \
+    CORTEX_TERM_BROKER_TOKEN="$CONTROL_FUGA" \
     bash bin/cortex-term-broker > "$TMP/broker.log" 2>&1 ) &
 BROKER_PID=$!
 for _ in $(seq 1 40); do
@@ -95,6 +117,61 @@ curl -s -N --max-time 25 -X POST "http://127.0.0.1:$PORT/run" \
      -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
      -d '{"cmd":"pwd","session":"probe"}' > "$TMP/run2.txt"
 ck "el cd del comando anterior persiste"   grep -q "subdir" "$TMP/run2.txt"
+
+echo
+echo "— GET /health (lo que SONDEA el badge de la terminal) —"
+code="$(curl -s -o "$TMP/health.json" -w '%{http_code}' --max-time 5 \
+        -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/health")"
+ck "con token -> 200"                      test "$code" = "200"
+ck "responde {\"ok\":true}"                 grep -q '"ok":true' "$TMP/health.json"
+code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$PORT/health")"
+ck "sin token -> 401"                      test "$code" = "401"
+
+echo
+echo "— SOCKET UNIX (el transporte del cliente EN CONTENEDOR) —"
+# Un contenedor NO alcanza un bind a 127.0.0.1 del host: si esto no sirve, la terminal del widget
+# está muerta aunque el TCP responda perfecto desde el host. Por eso se prueba aparte, no "por
+# simetría": es el transporte que de verdad usa el cliente.
+ck "el socket existe"                      test -S "$SOCK"
+ck "el socket es 0600"                     bash -c '[[ "$(stat -c %a "'"$SOCK"'")" == "600" ]]'
+code="$(curl -s -o "$TMP/sock-health.json" -w '%{http_code}' --max-time 5 --unix-socket "$SOCK" \
+        -H "Authorization: Bearer $TOKEN" http://localhost/health)"
+ck "socket: /health con token -> 200"      test "$code" = "200"
+code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --unix-socket "$SOCK" http://localhost/health)"
+ck "socket: /health sin token -> 401"      test "$code" = "401"
+curl -s -N --max-time 25 --unix-socket "$SOCK" -X POST http://localhost/run \
+     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"cmd":"echo SOCKET-OK","session":"probe-sock"}' > "$TMP/sockrun.txt"
+ck "socket: /run ejecuta de verdad"        grep -q "SOCKET-OK" "$TMP/sockrun.txt"
+ck "socket: wire con exit 0 y [DONE]"      bash -c 'grep -q "\"type\":\"exit\",\"code\":0" "'"$TMP"'/sockrun.txt" && grep -q "data: \[DONE\]" "'"$TMP"'/sockrun.txt"'
+# El pool de sesiones es UNO SOLO para ambos listeners: una `session` entra por donde entre y es la
+# misma shell. Si esto se rompiera, el widget vería su cwd resetearse al cambiar de transporte.
+curl -s -N --max-time 25 --unix-socket "$SOCK" -X POST http://localhost/run \
+     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"cmd":"pwd","session":"probe"}' > "$TMP/sock-misma-sesion.txt"
+ck "socket y TCP comparten el pool de sesiones" grep -q "subdir" "$TMP/sock-misma-sesion.txt"
+
+echo
+echo "— el token NO se filtra al \`env\` de la sesión (el prefijo AXON_ tiene que servir de verdad) —"
+# Esto es lo que convierte la nota de PROCEDENCIA.md en MECANISMO. La seguridad del prefijo depende
+# de que el NOMBRE de la variable (que se define en install.sh, en la unidad y en el lanzador)
+# empiece con `AXON_`, porque `buildSessionEnv()` (term-session.ts) barre exactamente ese prefijo.
+# Son dos strings en archivos distintos que nadie ataba: renombrar a CORTEX_* pasaría todos los
+# demás checks y filtraría el token a CADA terminal del widget.
+curl -s -N --max-time 25 -X POST "http://127.0.0.1:$PORT/run" \
+     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"cmd":"env","session":"probe-env"}' > "$TMP/env.txt"
+ck "la sesión respondió (hay wire)"        grep -q '"type":"exit","code":0' "$TMP/env.txt"
+ck "el VALOR del token no está en el env"  bash -c '! grep -qF "'"$TOKEN"'" "'"$TMP"'/env.txt"'
+ck "ni el NOMBRE AXON_TERM_BROKER_TOKEN"   bash -c '! grep -q "AXON_TERM_BROKER_TOKEN" "'"$TMP"'/env.txt"'
+ck "ninguna AXON_* sobrevive al barrido"   bash -c '! grep -qE "AXON_[A-Z_]+=" "'"$TMP"'/env.txt"'
+ck "ANTHROPIC_API_KEY tampoco"             bash -c '! grep -q "ANTHROPIC_API_KEY" "'"$TMP"'/env.txt"'
+# CONTROL POSITIVO — que los checks de arriba no sean vacíos. El broker se arrancó con una variable
+# gemela SIN el prefijo (`CORTEX_TERM_BROKER_TOKEN`, el nombre "coherente" que alguien va a proponer
+# tarde o temprano): tiene que APARECER en el env. Si un día NO aparece, es que el barrido cambió y
+# los 4 checks de arriba dejaron de demostrar algo. Esta es la mitad que convierte la nota en prueba.
+ck "control: una var SIN prefijo AXON_ SÍ se filtra (por eso el nombre no se cambia)" \
+   grep -q "$CONTROL_FUGA" "$TMP/env.txt"
 
 echo
 echo "— canal PTY (WebSocket /pty) —"

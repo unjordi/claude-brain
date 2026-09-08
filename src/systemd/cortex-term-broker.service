@@ -1,7 +1,19 @@
 [Unit]
-Description=cortex terminal broker (shell de ESTA máquina en 127.0.0.1:8799, loopback + token)
+Description=cortex terminal broker (shell de ESTA máquina: socket unix + 127.0.0.1:8799, con token)
 Documentation=https://github.com/unjordi/cortex/blob/main/docs/term-broker.md
-After=default.target
+# SIN `After=default.target`: esta unidad es `WantedBy=default.target`, y ordenarse DESPUÉS del target
+# que la arrastra no aporta nada (el target se da por alcanzado cuando sus wants arrancaron) e invita
+# a ciclos de ordenamiento. No hay nada real que esperar: el broker solo necesita $XDG_RUNTIME_DIR,
+# que ya existe cuando corre `systemd --user`.
+
+# Cortafuegos del BUCLE DE REINICIO. Con `Restart=on-failure` + `RestartSec=3` y los defaults
+# (burst=5 en 10 s) el servicio arranca ~3 veces por ventana: NUNCA alcanza el burst, NUNCA cae en
+# `failed`, y cicla indefinidamente y en silencio contra un error permanente (puerto ocupado, socket
+# de otro broker vivo, falta node). Con la ventana en 60 s, 5 intentos separados 3 s SÍ la agotan
+# (~15 s) y systemd deja la unidad en `failed` — visible en `systemctl --user status`, que es el
+# punto: un servicio que no puede arrancar debe DECIRLO, no reintentar para siempre en el journal.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 # PRIMER servicio long-running de cortex. El resto del repo es un `Type=oneshot` disparado por un
@@ -14,6 +26,24 @@ Type=simple
 # limits.env: si el archivo no está, systemd falla de inmediato y lo dice, en vez de dejar un
 # Restart=on-failure ciclando cada 3 s contra el mismo error. Lo siembra ./install.sh --con-term-broker.
 EnvironmentFile=%h/.config/cortex/term-broker.env
+
+# ── El socket unix, y por qué systemd tiene que crear su directorio ────────────────────────────
+# El SOCKET UNIX (`$XDG_RUNTIME_DIR/axon/term-broker.sock`) es el transporte del cliente
+# CONTENERIZADO: un contenedor NO alcanza un bind a 127.0.0.1 del host (en Linux
+# `host.docker.internal` resuelve a la gateway, no a loopback), y abrir un puerto a la red sería
+# exponer ejecución de comandos arbitrarios. El contenedor monta el DIRECTORIO que lo contiene, no
+# el archivo (un bind-mount de archivo se ata al inodo, y el broker recrea el socket en cada arranque).
+#
+# RuntimeDirectory=axon hace que systemd cree /run/user/<uid>/axon ANTES del ExecStart, con el dueño
+# correcto. Sin esto gana el primero que llegue: si el stack de Docker levanta antes, Docker crea el
+# source del bind-mount como root:root y el broker no puede escribir el socket (`listen EACCES`).
+RuntimeDirectory=axon
+RuntimeDirectoryMode=0700
+# …y PRESERVE=yes porque el default (`no`) BORRA el directorio al parar el servicio. El contenedor
+# lo tiene bind-mounteado: si desaparece y se recrea, el mount del contenedor queda atado a un inodo
+# muerto y la terminal se cae en el siguiente `restart` — el mismo modo de falla que ya se midió el
+# 2026-09-07 al montar el ARCHIVO en vez del directorio.
+RuntimeDirectoryPreserve=yes
 
 ExecStart=%h/.local/bin/cortex-term-broker
 Restart=on-failure
@@ -32,6 +62,12 @@ MemoryAccounting=yes
 
 # KillMode se deja en el default (control-group): parar el servicio mata las sesiones, que es lo
 # correcto — son hijos suyos y no sobreviven sin el broker que las multiplexa.
+
+# SIN `Conflicts=axon-term-broker.service`, y es deliberado — ver docs/term-broker.md § migración.
+# `Conflicts=` haría que systemd APAGARA la unidad legacy en cuanto ésta arrancara: mataría las
+# terminales que el usuario tiene abiertas sin que nadie lo pidiera, con la excusa de "arbitrar el
+# puerto". La arbitración correcta es NO habilitar esta unidad mientras la legacy esté activa (lo
+# hace el instalador) y hacer el cambio con `bin/migrar-term-broker.sh`, que ordena los pasos.
 
 [Install]
 WantedBy=default.target

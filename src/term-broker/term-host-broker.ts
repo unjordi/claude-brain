@@ -13,15 +13,30 @@
 //   1. TOKEN compartido (env AXON_TERM_BROKER_TOKEN) — sin token configurado el broker NO ARRANCA (fail loud,
 //      nunca expone ejecución de comandos sin auth "por accidente"). El request debe traer
 //      `Authorization: Bearer <token>` exacto o se responde 401 ANTES de leer el body / tocar el shell.
-//   2. BIND SOLO A LOOPBACK (127.0.0.1) — jamás 0.0.0.0. Solo es alcanzable desde el HOST mismo, o desde un
-//      contenedor con `--add-host=host.docker.internal:host-gateway` (Linux) / Docker Desktop (Mac/Windows,
-//      donde `host.docker.internal` ya resuelve al host de fábrica).
+//   2. NADA DE PUERTO EN LA LAN. El transporte por default para el contenedor es un SOCKET UNIX
+//      (AXON_TERM_BROKER_SOCKET), que no tiene dirección de red: se alcanza solo montando el socket en el
+//      contenedor, y lo protegen los permisos del filesystem (0600, dueño = el usuario del broker). El
+//      listener TCP sigue existiendo para clientes NATIVOS del host, y bindea 127.0.0.1 por default
+//      (AXON_TERM_BROKER_BIND lo hace configurable; cualquier valor que no sea loopback es exponer RCE).
+//
+// ⚠️ CORRECCIÓN DE DOC (2026-09-07) — el comentario que vivía aquí AFIRMABA que el bind a loopback era
+// alcanzable "desde un contenedor con --add-host=host.docker.internal:host-gateway (Linux)". Es FALSO, y
+// costó una terminal muerta: en Linux `host-gateway` resuelve a la IP del host en `docker0` (172.17.0.1),
+// NO a loopback — un servidor bindeado a 127.0.0.1 nunca acepta ahí. (En Docker Desktop sí funciona, pero
+// porque el host es una VM y `host.docker.internal` entra por otra vía; no es el caso de este Linux.)
+// Medido el 2026-09-07 en esta máquina: bindear al gateway de la red de compose (172.23.0.1) TAMPOCO basta
+// — `ufw` está activo y su política de INPUT descarta el tráfico contenedor→host (timeout, no refused).
+// Por eso el transporte elegido es el socket unix: no pasa por la pila de red ni por el firewall.
+//
 // NO hay whitelist/denylist de comandos: quien tenga el token puede correr CUALQUIER cosa como el usuario del
-// broker (unjordi). Aceptable en este scope (LAN de casa, token secreto compartido solo con el contenedor
-// maincar) — NUNCA expongas este puerto más allá de loopback ni relajes el bind.
+// broker (unjordi). Aceptable en este scope (socket local + token secreto compartido solo con el contenedor
+// maincar) — NUNCA expongas este broker más allá de loopback/socket unix ni relajes el bind.
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import { connect as netConnect } from "node:net";
 import { homedir } from "node:os";
+import { accessSync, chmodSync, constants as fsConstants, mkdirSync, statSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Duplex } from "node:stream";
 import { ShellSessionPool, buildSessionEnv } from "./term-session.ts";
@@ -31,11 +46,45 @@ import { servePtyOverWs } from "./term-pty-bridge.ts";
 /** Puerto default del broker — debe calzar con el `AXON_TERM_BROKER_URL` que se le pasa al maincar. */
 export const DEFAULT_PORT = 8799;
 
+/** Host default del listener TCP. LOOPBACK — cambiarlo expone ejecución de comandos arbitrarios a la red. */
+export const DEFAULT_BIND = "127.0.0.1";
+
+/**
+ * Ruta default del SOCKET UNIX (el transporte que usa el maincar contenerizado).
+ * `$XDG_RUNTIME_DIR/axon/term-broker.sock` cuando existe (tmpfs 0700 del usuario, se limpia al cerrar
+ * sesión — el lugar correcto para un socket de runtime), si no `$HOME/.axon/term-broker.sock`.
+ *
+ * Se monta en el contenedor por DIRECTORIO, no por archivo: un bind-mount de archivo se ata al INODO, y el
+ * broker recrea el socket en cada arranque ⇒ tras un `systemctl --user restart` el contenedor se quedaría
+ * hablándole a un inodo muerto. Medido el 2026-09-07: con el archivo montado, tras recrear el socket el
+ * contenedor da ECONNREFUSED; con el directorio montado, sigue conectando.
+ */
+export function defaultBrokerSocketPath(): string {
+  const runtime = process.env.XDG_RUNTIME_DIR;
+  if (runtime) return join(runtime, "axon", "term-broker.sock");
+  return join(homedir(), ".axon", "term-broker.sock");
+}
+
 export interface BrokerOptions {
   readonly port?: number;   // default: env AXON_TERM_BROKER_PORT, o DEFAULT_PORT
   readonly token?: string;  // default: env AXON_TERM_BROKER_TOKEN — REQUERIDO, sin default (fail loud)
   readonly home?: string;   // default: env AXON_TERM_BROKER_HOME, o os.homedir() (cwd de arranque del comando)
   readonly shell?: string;  // default: env SHELL, o "/usr/bin/zsh" — shell de LOGIN del usuario
+  readonly bind?: string;   // default: env AXON_TERM_BROKER_BIND, o DEFAULT_BIND (127.0.0.1). Loopback o RCE.
+  /** Socket unix. `null`/"off" lo desactiva. default: env AXON_TERM_BROKER_SOCKET, o defaultBrokerSocketPath(). */
+  readonly socketPath?: string | null;
+}
+
+/** Lo que devuelve `startTermHostBroker`: los DOS listeners (TCP loopback + socket unix) y su cierre. */
+export interface BrokerHandle {
+  /** Listener TCP en `bind:port` — para clientes NATIVOS del host (el `axon` de la terminal de unjordi). */
+  readonly tcp: Server;
+  /** Listener sobre socket unix — el que usa el maincar contenerizado. `null` si se desactivó. */
+  readonly unix: Server | null;
+  readonly socketPath: string | null;
+  /** Resuelve cuando AMBOS listeners están escuchando; rechaza si alguno no pudo bindear. */
+  readonly ready: Promise<void>;
+  close(): void;
 }
 
 function readBody(req: IncomingMessage, maxBytes = 1024 * 1024): Promise<string> {
@@ -61,14 +110,43 @@ function tokenMatches(got: string, want: string): boolean {
 }
 
 /**
- * Arranca el broker (no bloquea; el caller decide si mantiene el proceso vivo). Lanza SI falta el token —
- * jamás arranca en modo "sin auth" por accidente. El servidor bindea explícitamente a 127.0.0.1 (loopback).
+ * ¿Hay un broker VIVO escuchando en `p`, o es un socket huérfano de un proceso muerto?
+ * Un socket unix NO se borra solo al morir el proceso: si no distinguiéramos, o bien fallaríamos con
+ * EADDRINUSE tras cada crash, o bien borraríamos el socket de un broker que SÍ está sirviendo.
  */
-export function startTermHostBroker(opts: BrokerOptions = {}): Server {
+function probeUnixSocket(p: string, timeoutMs = 500): Promise<boolean> {
+  return new Promise((resolve) => {
+    let done = false;
+    const settle = (alive: boolean): void => { if (!done) { done = true; resolve(alive); } };
+    const s = netConnect(p);
+    s.setTimeout(timeoutMs);
+    s.on("connect", () => { settle(true); s.destroy(); });
+    s.on("timeout", () => { settle(false); s.destroy(); });
+    s.on("error", () => { settle(false); s.destroy(); });
+  });
+}
+
+/**
+ * Arranca el broker (no bloquea; el caller decide si mantiene el proceso vivo). Lanza SI falta el token —
+ * jamás arranca en modo "sin auth" por accidente.
+ *
+ * DOS listeners, un solo handler:
+ *   • TCP en `bind:port` (default 127.0.0.1) — clientes NATIVOS del host.
+ *   • SOCKET UNIX en `socketPath` (default `defaultBrokerSocketPath()`) — el maincar CONTENERIZADO, que
+ *     lo monta como volumen. Es el que arregla el bug: un contenedor NO alcanza un bind a loopback
+ *     (host.docker.internal→172.17.0.1 en Linux), y abrir un puerto a la red sería exponer RCE.
+ * Son dos `http.Server` porque `listen()` solo se puede llamar UNA vez por instancia; comparten handler,
+ * token y —clave— el MISMO `ShellSessionPool`: una `session` del widget es la misma shell entre por donde
+ * entre. Node aplica al socket el umask del proceso, así que se le fuerza 0600 tras bindear.
+ */
+export function startTermHostBroker(opts: BrokerOptions = {}): BrokerHandle {
   const port = opts.port ?? Number(process.env.AXON_TERM_BROKER_PORT ?? DEFAULT_PORT);
+  const bind = opts.bind ?? process.env.AXON_TERM_BROKER_BIND ?? DEFAULT_BIND;
   const token = opts.token ?? process.env.AXON_TERM_BROKER_TOKEN ?? "";
   const home = opts.home ?? process.env.AXON_TERM_BROKER_HOME ?? homedir();
   const shell = opts.shell ?? process.env.SHELL ?? "/usr/bin/zsh";
+  const rawSocket = opts.socketPath !== undefined ? opts.socketPath : (process.env.AXON_TERM_BROKER_SOCKET ?? defaultBrokerSocketPath());
+  const socketPath = !rawSocket || rawSocket === "off" || rawSocket === "0" ? null : rawSocket;
   if (!token) {
     throw new Error(
       "AXON_TERM_BROKER_TOKEN no está seteado — el broker NO arranca sin token (evitaría exponer ejecución de comandos sin auth).",
@@ -78,19 +156,71 @@ export function startTermHostBroker(opts: BrokerOptions = {}): Server {
   // Pool de sesiones de shell PERSISTENTES (una por `session` id del widget) — cwd/env perduran entre
   // comandos, igual que una sesión SSH. Ver term-session.ts. Vive mientras viva el broker.
   const pool = new ShellSessionPool({ shell, loginArgs: ["-l"], home });
+  const cfg = { token, home, shell, pool };
 
-  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    void handleRequest(req, res, { token, home, shell, pool });
+  const mkServer = (): Server => {
+    const s = createServer((req: IncomingMessage, res: ServerResponse) => { void handleRequest(req, res, cfg); });
+    // TERMINAL INTERACTIVA (PTY real): upgrade a WebSocket en `/pty`. Mismo scope de seguridad que `/run` —
+    // corre como el usuario del broker (unjordi), con SU shell de login y SU $HOME. Auth por el MISMO Bearer
+    // token (axon-en-contenedor es el cliente y SÍ puede setear el header). Ver term-pty-bridge.ts.
+    s.on("upgrade", (req: IncomingMessage, socket: Duplex) => { handlePtyUpgrade(req, socket, { token, home, shell }); });
+    return s;
+  };
+
+  const tcp = mkServer();
+  const tcpReady = new Promise<void>((resolve, reject) => {
+    tcp.once("error", reject);
+    tcp.listen(port, bind, () => { tcp.removeListener("error", reject); resolve(); });
   });
-  // TERMINAL INTERACTIVA (PTY real): upgrade a WebSocket en `/pty`. Mismo scope de seguridad que `/run` — corre
-  // como el usuario del broker (unjordi), con SU shell de login y SU $HOME. Auth por el MISMO Bearer token
-  // (axon-en-contenedor es el cliente y SÍ puede setear el header en el handshake). Ver term-pty-bridge.ts.
-  server.on("upgrade", (req: IncomingMessage, socket: Duplex) => {
-    handlePtyUpgrade(req, socket, { token, home, shell });
-  });
-  server.listen(port, "127.0.0.1"); // ⚠️ SOLO loopback — ver comentario de seguridad arriba
-  server.on("close", () => pool.closeAll());
-  return server;
+
+  let unix: Server | null = null;
+  let unixReady: Promise<void> = Promise.resolve();
+  if (socketPath) {
+    unix = mkServer();
+    const srv = unix;
+    unixReady = (async () => {
+      const sockDir = dirname(socketPath);
+      mkdirSync(sockDir, { recursive: true, mode: 0o700 });
+      // Si el directorio existía pero NO es nuestro, decirlo con nombre y apellido en vez de dejar un
+      // `listen EACCES` críptico. Caso probable: Docker crea el source de un bind-mount que no existe, y lo
+      // crea **root:root** — si el stack levanta ANTES que este servicio, el directorio queda de root.
+      try { accessSync(sockDir, fsConstants.W_OK); }
+      catch {
+        throw new Error(
+          `no puedo escribir en ${sockDir} (¿lo creó Docker como root al levantar el stack antes que este servicio?). ` +
+          `Arréglalo con \`sudo chown -R "$USER" ${sockDir}\` y arranca el broker ANTES del stack.`,
+        );
+      }
+      // Socket huérfano de un crash previo → se borra. Socket VIVO → error ruidoso, jamás se lo quitamos
+      // a un broker que está sirviendo (dos brokers sobre el mismo pool sería un bug silencioso).
+      let exists = false;
+      try { exists = statSync(socketPath).isSocket(); } catch { /* no existe */ }
+      if (exists) {
+        if (await probeUnixSocket(socketPath)) {
+          throw new Error(`otro broker ya escucha en ${socketPath} — no lo piso. Detén ese proceso o usa AXON_TERM_BROKER_SOCKET.`);
+        }
+        try { unlinkSync(socketPath); } catch { /* carrera: alguien más lo quitó */ }
+      }
+      await new Promise<void>((resolve, reject) => {
+        srv.once("error", reject);
+        srv.listen(socketPath, () => { srv.removeListener("error", reject); resolve(); });
+      });
+      // 0600: solo el usuario del broker puede conectarse. El contenedor corre con el MISMO uid
+      // (docker/axon.yml → `user: "${PUID:-1000}:${PGID:-1000}"`), así que le basta; cualquier otro
+      // usuario del host queda fuera aunque llegue al directorio.
+      chmodSync(socketPath, 0o600);
+    })();
+  }
+
+  const close = (): void => {
+    try { tcp.close(); } catch { /* ya cerrado */ }
+    if (unix) { try { unix.close(); } catch { /* ya cerrado */ } }
+    if (socketPath) { try { unlinkSync(socketPath); } catch { /* ya no está */ } }
+    pool.closeAll();
+  };
+  tcp.on("close", () => pool.closeAll());
+
+  return { tcp, unix, socketPath, ready: Promise.all([tcpReady, unixReady]).then(() => undefined), close };
 }
 
 /** Handshake WS + PTY para `/pty` en el broker host-side. Auth por Bearer token ANTES de tocar el shell. */
@@ -134,6 +264,24 @@ async function handleRequest(
 ): Promise<void> {
   const url = req.url ?? "/";
   const method = req.method ?? "GET";
+
+  // GET /health — LIVENESS con auth, para que el badge de la terminal pueda decir la VERDAD.
+  // `/api/axon/term/mode` (http-server.ts) lo sondea antes de responder "host": sin esto, el único dato
+  // disponible era "las env están puestas", que es exactamente lo que mentía cuando el broker no se
+  // alcanzaba. Pide el MISMO Bearer que /run — así el sondeo distingue "no llego" de "llego pero el token
+  // no calza" (dos fallas distintas que se veían igual). No toca el shell ni el pool: es barato a propósito.
+  if (method === "GET" && (url === "/health" || url.startsWith("/health?"))) {
+    const hAuth = req.headers.authorization ?? "";
+    const hTok = hAuth.startsWith("Bearer ") ? hAuth.slice("Bearer ".length) : "";
+    if (!tokenMatches(hTok, cfg.token)) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, home: cfg.home, shell: cfg.shell }));
+    return;
+  }
 
   if (method !== "POST" || !(url === "/" || url.startsWith("/run"))) {
     res.writeHead(404, { "Content-Type": "application/json" });
@@ -213,15 +361,31 @@ async function handleRequest(
  *  de env vars — ver docs/terminal.md (o el reporte de cierre del slice) para el comando exacto de arranque. */
 function main(): void {
   const port = Number(process.env.AXON_TERM_BROKER_PORT ?? DEFAULT_PORT);
+  const bind = process.env.AXON_TERM_BROKER_BIND ?? DEFAULT_BIND;
   const home = process.env.AXON_TERM_BROKER_HOME ?? homedir();
   const shell = process.env.SHELL ?? "/usr/bin/zsh";
+  let handle: BrokerHandle;
   try {
-    startTermHostBroker();
-    console.log(`[term-host-broker] escuchando en 127.0.0.1:${port} (home=${home}, shell=${shell} -l)`);
+    handle = startTermHostBroker();
   } catch (e) {
     console.error(`[term-host-broker] no arrancó: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(1);
+    return;
   }
+  handle.ready.then(
+    () => {
+      console.log(`[term-host-broker] escuchando en ${bind}:${port} (home=${home}, shell=${shell} -l)`);
+      if (handle.socketPath) console.log(`[term-host-broker] socket unix: ${handle.socketPath} (0600) — el que usa el maincar contenerizado`);
+      else console.log("[term-host-broker] socket unix DESACTIVADO (AXON_TERM_BROKER_SOCKET=off) — un maincar en contenedor NO lo alcanzará");
+      if (bind !== "127.0.0.1" && bind !== "::1" && bind !== "localhost") {
+        console.warn(`[term-host-broker] ⚠️  AXON_TERM_BROKER_BIND=${bind} NO es loopback: este broker ejecuta comandos arbitrarios como ${process.env.USER ?? "el usuario"}. Solo el token te separa de un RCE en la red.`);
+      }
+    },
+    (e: unknown) => {
+      console.error(`[term-host-broker] no pudo escuchar: ${e instanceof Error ? e.message : String(e)}`);
+      process.exit(1);
+    },
+  );
 }
 
 // Ejecuta main() solo si se invoca DIRECTAMENTE (mismo patrón que cli.ts) — no al importarlo desde un test/probe.

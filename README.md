@@ -249,15 +249,17 @@ o sin credenciales, caen a una estimación calibrada desde los transcripts local
 
 ## Opcional: el broker de terminal (apagado por defecto)
 
-Además del daemon de cuota, cortex puede servir **un shell de esta máquina** en `127.0.0.1:8799`
-para que un cliente en contenedor (el widget de Terminal de Odysseus, vía axon) dé la computadora
-real y no el interior del contenedor — la capacidad detrás de un contrato acotado, en vez de un
-agujero en el aislamiento (`--pid=host`, `docker.sock`).
+Además del daemon de cuota, cortex puede servir **un shell de esta máquina** por un socket unix
+(`$XDG_RUNTIME_DIR/axon/term-broker.sock`, `0600`) y por `127.0.0.1:8799`, para que un cliente en
+contenedor (el widget de Terminal de Odysseus, vía axon) dé la computadora real y no el interior del
+contenedor — la capacidad detrás de un contrato acotado, en vez de un agujero en el aislamiento
+(`--pid=host`, `docker.sock`). El socket no es un extra: un contenedor **no alcanza** un bind a
+loopback del host, y abrir el puerto a la red sería exponer ejecución de comandos arbitrarios.
 
 Es **opt-in y solo Linux**, porque el precio es real: un servicio `Type=simple` vivo 24/7 y padre de
 tus shells (cortex deja de ser solo un recolector periódico), y **quien tenga el token puede correr
 cualquier cosa como tú**. Por eso: nada se instala sin la bandera, el token lo **genera** el
-instalador (`0600`, nunca uno por defecto ni horneado en el repo), y el bind es loopback y punto.
+instalador (`0600`, nunca uno por defecto ni horneado en el repo), y nada queda expuesto a la red.
 
 ```sh
 ./install.sh --con-term-broker

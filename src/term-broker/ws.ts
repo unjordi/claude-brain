@@ -254,23 +254,32 @@ export function rejectWebSocket(socket: Duplex, status = 401, message = "unautho
 export interface WsConnectOptions {
   readonly headers?: Record<string, string>;
   readonly timeoutMs?: number;
+  /**
+   * SOCKET UNIX en vez de TCP. Con esto puesto, el host/puerto de la URL se IGNORAN (la URL solo aporta
+   * path+query) y el handshake viaja por ese socket. Es el transporte del PTY hacia el broker host-side:
+   * el maincar corre en un contenedor y NO alcanza un bind a loopback del host, mientras que abrir un
+   * puerto de red sería exponer ejecución de comandos arbitrarios. Ver term-host-broker.ts.
+   */
+  readonly socketPath?: string;
 }
 
 /**
  * Abre una conexión WebSocket como CLIENTE hacia `url` (ws:// o wss://). Resuelve con una WsConn ya
  * handshakeada, o rechaza con Error. Usado por axon (en el contenedor) para hablarle al broker host-side.
+ * Con `opts.socketPath` el transporte es un socket unix (la URL solo aporta path+query).
  */
 export function wsConnect(url: string, opts: WsConnectOptions = {}): Promise<WsConn> {
   return new Promise((resolve, reject) => {
     let target: URL;
     try { target = new URL(url); } catch (e) { reject(new Error(`URL WS inválida (${url}): ${e instanceof Error ? e.message : String(e)}`)); return; }
-    const secure = target.protocol === "wss:";
+    const secure = !opts.socketPath && target.protocol === "wss:";
     const key = randomBytes(16).toString("base64");
     const reqFn = secure ? httpsRequest : httpRequest;
     const req = reqFn({
       protocol: secure ? "https:" : "http:",
-      hostname: target.hostname,
-      port: target.port || (secure ? 443 : 80),
+      ...(opts.socketPath
+        ? { socketPath: opts.socketPath }
+        : { hostname: target.hostname, port: target.port || (secure ? 443 : 80) }),
       path: (target.pathname || "/") + (target.search || ""),
       method: "GET",
       headers: {

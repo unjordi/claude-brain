@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # cortex-term-broker — lanza el BROKER DE TERMINAL de cortex (opt-in, Linux).
 #
-# Sirve un shell de ESTA máquina (el del usuario que lo arranca, con su $HOME y su login shell) en
-# 127.0.0.1:8799, autenticado con un token compartido. Lo consume axon-en-contenedor para que el
-# widget de Terminal de Odysseus dé la computadora real y no el interior del contenedor.
+# Sirve un shell de ESTA máquina (el del usuario que lo arranca, con su $HOME y su login shell) por
+# DOS transportes, ambos con el mismo token: un SOCKET UNIX (el que usa el cliente contenerizado) y
+# 127.0.0.1:8799 (clientes nativos del host). Lo consume axon para que el widget de Terminal de
+# Odysseus dé la computadora real y no el interior del contenedor.
 # Doc completa (postura de seguridad, perfil de recursos, migración): docs/term-broker.md.
 #
 # Config — todo por variables de entorno; el servicio las toma de ~/.config/cortex/term-broker.env:
-#   AXON_TERM_BROKER_TOKEN  (REQUERIDO — sin él el broker NO arranca; nunca hay modo "sin auth")
-#   AXON_TERM_BROKER_PORT   (default 8799)
-#   AXON_TERM_BROKER_HOME   (default $HOME — cwd inicial de las sesiones)
-#   SHELL                   (default /usr/bin/zsh — el login shell del usuario)
+#   AXON_TERM_BROKER_TOKEN   (REQUERIDO — sin él el broker NO arranca; nunca hay modo "sin auth")
+#   AXON_TERM_BROKER_SOCKET  (default $XDG_RUNTIME_DIR/axon/term-broker.sock; `off` lo desactiva)
+#   AXON_TERM_BROKER_PORT    (default 8799)
+#   AXON_TERM_BROKER_BIND    (default 127.0.0.1 — cualquier otra cosa es exponer RCE a la red)
+#   AXON_TERM_BROKER_HOME    (default $HOME — cwd inicial de las sesiones)
+#   SHELL                    (default: el login shell REAL del usuario, ver abajo)
 # Los nombres `AXON_*` son el CONTRATO con el cliente y además lo que `buildSessionEnv()` barre del
 # entorno de cada shell; ver src/term-broker/PROCEDENCIA.md antes de "arreglar" el prefijo.
 #
@@ -29,6 +32,16 @@ fi
 if ! command -v node >/dev/null 2>&1; then
   echo "cortex-term-broker: falta 'node' (>=22, por --experimental-strip-types)" >&2
   exit 1
+fi
+
+# SHELL: resolverlo AQUÍ, no dejarlo al fallback del módulo. Un servicio de `systemd --user` NO
+# hereda el $SHELL de tu terminal (el manager de usuario no lo exporta), así que el módulo caería a
+# su literal `/usr/bin/zsh` — correcto para quien usa zsh, y un broker que no arranca para quien usa
+# bash o fish. Este es el ÚNICO lugar donde se decide el default, para que no haya dos.
+if [[ -z "${SHELL:-}" ]]; then
+  SHELL="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)"
+  [[ -n "$SHELL" && -x "$SHELL" ]] || SHELL="/bin/sh"
+  export SHELL
 fi
 
 # --experimental-strip-types: corre TypeScript sin transpilar. Los módulos no tienen NINGUNA

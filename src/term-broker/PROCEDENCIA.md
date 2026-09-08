@@ -5,35 +5,63 @@ editan aquí: si hay que cambiarlos, se cambian en axon y se re-vendorizan (abaj
 
 | archivo | origen en axon | líneas |
 |---|---|---|
-| `term-host-broker.ts` | `src/server/term-host-broker.ts` | 230 |
+| `term-host-broker.ts` | `src/server/term-host-broker.ts` | 394 |
 | `term-session.ts` | `src/server/term-session.ts` | 263 |
 | `term-pty-bridge.ts` | `src/server/term-pty-bridge.ts` | 70 |
-| `ws.ts` | `src/server/ws.ts` | 297 |
+| `ws.ts` | `src/server/ws.ts` | 306 |
 | `pty-session.ts` | `src/server/pty-session.ts` | 188 |
-| | **total** | **1048** |
+| | **total** | **1221** |
 
-**Commit de origen:** `cf840e625edfdd408e0ec2b573a3fc941c3c84c2` (`origin/develop` de axon, 2026-09-07).
+**Commit de origen:** `341fb53` (`origin/develop` de axon, 2026-09-07). Re-vendorizado desde
+`cf840e6` para traer el **socket unix** (`fix/term-broker-alcanzable`, #75): un cliente en
+contenedor NO alcanza un bind a loopback del host, así que la copia anterior servía un broker que la
+terminal del widget no podía usar. De paso llegan `GET /health` (lo que sondea el badge) y el
+manejo de error de `listen()` — que en la copia anterior faltaba: `EADDRINUSE` es asíncrono, el
+`try/catch` de `main()` no lo veía, un `'error'` sin listener reventaba como excepción no capturada,
+y el log *"escuchando en …"* se imprimía **antes** de que el bind hubiera tenido éxito. O sea: en el
+escenario central de esta migración —el puerto ya ocupado— el journal decía "escuchando" y a
+renglón seguido escupía un stack trace.
 
-```
-bbf2362427eac1035de4e88b204740221a0b8ec74216212ecd3d2b066c570d5c  pty-session.ts
-f2c7b9c3717ea08b77511b8e002e14cfc0fa86dcd5e8a6b0895bec2fabd541f6  term-host-broker.ts
-7175a4966b4a6351ef349ce4dcc9f382931374d10ce43bb9904c439f8a7ba711  term-pty-bridge.ts
-791affbea4c74238c2adc68bda2823f87b55d3ff53064baddffcf77d82a10987  term-session.ts
-fd3cc4c43b50359b3595a5784adac540acb5705e240982b52047fa1312f9f119  ws.ts
-```
+Los `sha256` de la copia viven en [`SHA256SUMS`](SHA256SUMS), al lado. No es decoración: es lo que
+se **verifica**.
 
-**Verificar drift** (desde un clon de axon, sin salir de la terminal):
+## El anti-drift, que ahora SÍ se ejecuta
+
+Había un problema con el chequeo que vivía aquí: nadie lo corría, y apuntaba a `origin/develop` —una
+ref **móvil**—, así que "idéntico" solo significaba "idéntico a lo que develop tenga hoy", que es
+otra cosa que "idéntico a lo que dice este archivo". Se parte en dos, y la primera es automática:
+
+**(1) ¿La copia local sigue siendo la que se vendorizó?** Lo corre `probe-instalador.sh` en cada
+pasada (check *"módulos idénticos a la fuente"*), y no necesita un clon de axon:
 
 ```bash
-for f in term-host-broker term-session term-pty-bridge ws pty-session; do
-  diff <(git -C ~/code/axon show origin/develop:src/server/$f.ts) src/term-broker/$f.ts \
-    && echo "$f: idéntico" || echo "$f: DRIFT"
-done
+cd src/term-broker && sha256sum -c SHA256SUMS
 ```
+
+Éste es el que atrapa el riesgo REAL de una copia vendorizada: que alguien "arregle" un módulo
+**aquí** en vez de en axon, y la copia deje de ser copia sin que nada se queje.
+
+**(2) ¿axon cambió desde el commit anotado?** Necesita un clon, y se corre a mano cuando toca
+re-vendorizar. Contra el **commit fijado**, no contra la punta móvil:
+
+```bash
+VEND=341fb53   # el commit anotado arriba — NO 'origin/develop'
+for f in term-host-broker term-session term-pty-bridge ws pty-session; do
+  diff <(git -C ~/code/axon show $VEND:src/server/$f.ts) src/term-broker/$f.ts >/dev/null \
+    && echo "$f: idéntico al commit vendorizado" || echo "$f: DRIFT vs el commit vendorizado"
+done
+# y qué se ha movido en axon desde entonces (lo que faltaría por traer):
+git -C ~/code/axon diff --stat $VEND origin/develop -- src/server/{term-host-broker,term-session,term-pty-bridge,ws,pty-session}.ts
+```
+
+Re-vendorizar = copiar los 5 desde el nuevo commit, regenerar `SHA256SUMS`
+(`sha256sum term-host-broker.ts term-session.ts term-pty-bridge.ts ws.ts pty-session.ts > SHA256SUMS`),
+actualizar el commit y las líneas de la tabla de arriba, y el commit en `NOTICE`.
 
 Como la copia es byte-a-byte, ese `diff` es el chequeo completo: cualquier cambio en axon aparece
 como un diff legible, no como "a ver quién cambió qué". Por eso **no** se tocan los comentarios
-(hablan de axon/Odysseus/maincar: es correcto, ése es el cliente).
+(hablan de axon/Odysseus/maincar: es correcto, ése es el cliente) — ni siquiera los que a un lector
+de cortex le sobran.
 
 ---
 
@@ -43,13 +71,14 @@ Se evaluaron las dos y ganó la copia, por razones medibles — no por comodidad
 
 1. **El cierre de dependencias son 5 módulos, no 4.** El inventario previo decía
    "`term-host-broker` + `term-session` + `term-pty-bridge` + `ws` = 860 líneas". Falta
-   `pty-session.ts` (188): `term-pty-bridge.ts:15` lo importa (`spawnPty`). El total real es 1048.
+   `pty-session.ts` (188): `term-pty-bridge.ts:15` lo importa (`spawnPty`). El total real era 1048
+   con aquel commit; con el vendorizado de hoy (`341fb53`, socket unix + `/health`) son **1221**.
 2. **Cuatro de los cinco NO se pueden "mover": axon los sigue necesitando.** El contrato exige que
    axon **degrade** al shell del contenedor cuando no hay token, y esa ruta usa exactamente los
    mismos módulos (`src/server/http-server.ts`: `ShellSessionPool` de `term-session.ts`,
    `servePtyOverWs`+`relayWsToWs` de `term-pty-bridge.ts`, `acceptWebSocket`/`rejectWebSocket`/
    `wsConnect` de `ws.ts`; y `term-pty-bridge` arrastra `pty-session.ts`). Solo
-   `term-host-broker.ts` (230 líneas, el `main()` + el servidor) es exclusivo del servidor. O sea:
+   `term-host-broker.ts` (394 líneas, el `main()` + los dos listeners) es exclusivo del servidor. O sea:
    **la duplicación existe pase lo que pase**; lo único que se decide es si cortex la obtiene por
    copia versionada o por descarga.
 3. **El artefacto invertiría la dependencia justo al revés de #26i.** cortex es el lado ESTABLE del
