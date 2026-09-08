@@ -222,6 +222,25 @@ CERRADA"*. En cross-máquina el mtime se chequea en el host remoto (`ssh <host> 
 > **Consecuencia clave:** la sesión que EJECUTA esta skill NO puede moverse a sí misma (mtime caliente +
 > self-check). Por eso el move de cada master lo dispara **el OTRO** — ver la danza §6.
 
+### G-QUIESCE · CERO sesiones de Claude vivas — ANTES **y DESPUÉS** del move
+> **[verificado 2026-09-08, mudanza de axon-master]** G-LIVENESS solo prueba que la sesión OBJETIVO está
+> fría. **No basta:** cualquier sesión viva puede deshacer la mudanza *después* de que las postcondiciones
+> de S4/S5 pasaron. Lo que pasó de verdad: el move quedó impecable y medido; luego un resume escribió un
+> transcript NUEVO en el slug viejo, **reescribió el `target` de `masters.json` de vuelta al viejo**, y al
+> morir **volcó 5 líneas con el `cwd` viejo dentro del transcript ya migrado**. Ninguna de las tres las ve
+> el skill, porque las tres ocurren fuera de su ventana.
+
+```bash
+# ANTES de S3/S4 — y OTRA VEZ antes de dar por cerrado S6:
+vivos=$(pgrep -af claude | grep -vE 'grep|bash -s' | wc -l)
+[ "$vivos" -eq 0 ] || { echo "BLOQUEO G-QUIESCE: $vivos proceso(s) de Claude vivos; cierralos TODOS"; pgrep -af claude; exit 1; }
+# El daemon transitorio CUENTA: arrastra el PWD de quien lo lanzo y respawnea solo al proximo arranque.
+```
++ **CITA HUMANA obligatoria:** *"cerré todas las sesiones de Claude en `<máquina>`"*. El humano ES el gate
+de quiescencia; el `pgrep` solo lo corrobora.
+> **Corolario para el QA de S6:** el resume de verificación debe ser **el único** proceso de Claude en la
+> máquina. Con otro encendido no sabrás si un síntoma es de la mudanza o del vecino.
+
 ### G-GITIGNORE · BLINDAR el `.gitignore` del destino ANTES de depositar nada sensible
 Un destino cuyo `.gitignore` no cubra el `CLAUDE.local.md` de la raíz dejaría lo sensible TRACKEADO = fuga
 [verificado en `cortex`; **compruébalo en TU destino**, no lo asumas]. Se blinda ANTES de tocar T2 — y aplica
@@ -347,6 +366,25 @@ node "$BIN/session-move.js" "$ID" --to-cwd "$DST_REPO"          # {ok, fromSlug,
 [ -f "$NEW_JSONL" ] || { echo "ABORTO: no se creó $NEW_JSONL"; exit 1; }
 uniqcwd=$(grep -o '"cwd":"[^"]*"' "$NEW_JSONL" | sort -u)
 [ "$uniqcwd" = "\"cwd\":\"$DST_REPO\"" ] || { echo "ABORTO: cwd no uniforme: $uniqcwd"; exit 1; }
+# 2b) ⚠️ `session-move.js` reescribe SOLO `cwd` — lo dice su propio encabezado. El `gitBranch` se queda con
+# la rama del repo VIEJO, y el resume hereda del ULTIMO evento el par (cwd, gitBranch) en vez de re-derivarlo
+# del proceso: con eso escribe en el slug viejo y revierte el target. [verificado: axon-master, 2026-09-08 —
+# el registro de sesion decia cwd=destino y los eventos escritos decian cwd+rama del origen]
+# NO se aplastan las ramas HISTORICAS (falsificaria el registro, igual que aplastar el cwd historico):
+# se normaliza el ULTIMO evento, que es el que el resume lee.
+RAMA_DST=$(git -C "$DST_REPO" branch --show-current)
+node -e '
+const fs=require("fs"); const [f,cwd,br]=process.argv.slice(1);
+const L=fs.readFileSync(f,"utf8").split("\n"); let i=L.length-1;
+while(i>=0 && !L[i].trim()) i--;
+const o=JSON.parse(L[i]); o.cwd=cwd; if(o.gitBranch!==undefined) o.gitBranch=br;
+L[i]=JSON.stringify(o);
+const tmp=f+".tmp"; fs.writeFileSync(tmp,L.join("\n"));
+fs.chmodSync(tmp, fs.statSync(f).mode & 0o777); fs.renameSync(tmp,f);
+' "$NEW_JSONL" "$DST_REPO" "$RAMA_DST"
+# 2c) `session-move.js` escribe el destino con el umask, NO con el modo del origen: queda 644 donde el resto
+# del slug esta en 600. Alinealo. [verificado 2026-09-08: 1 de 131 fuera de convencion]
+chmod 600 "$NEW_JSONL"
 # 3) INMEDIATAMENTE corregir masters.json target POR-ID — y el NAME si hay renombre (mktemp, sin sponge):
 NOMBRE_FINAL="${MASTER_NAME_NUEVO:-$MASTER_NAME}"
 tmpm=$(mktemp)
@@ -374,7 +412,8 @@ fi
 **Postcondiciones S4:** `find ~/.claude/projects -name "$ID.jsonl"` = **exactamente 1** (el nuevo); cwd
 único = `$DST_REPO`; `jq -r --arg id "$ID" '.masters[]|select(.id==$id).target' "$MJ"` = `${DST_REPO#$HOME/}`;
 `jq -r --arg id "$ID" '.masters[]|select(.id==$id).name' "$MJ"` = `$NOMBRE_FINAL`; alias puesto (y el viejo
-retirado si hubo renombre).
+retirado si hubo renombre); **el ÚLTIMO evento del transcript con `cwd` = `$DST_REPO` y `gitBranch` = la
+rama real del destino**; **modo del `.jsonl` = 600**, igual que el resto del slug.
 
 ### S5 · Depositar T2 + barrido QUIRÚRGICO + symlink verificado
 ```bash
@@ -389,9 +428,15 @@ git -C "$DST_REPO" status --porcelain | grep -iE 'local\.md|CLAUDE\.local' && { 
 # esto es defensivo/idempotente (por si quedó copia o se vino de import). NUNCA el symlink 'memory'.
 [ -f "$HOME/.claude/projects/$OLD_SLUG/$ID.jsonl" ] && /bin/rm -f "$HOME/.claude/projects/$OLD_SLUG/$ID.jsonl"
 find "$HOME/.claude/projects/$OLD_SLUG" -maxdepth 1 -name memory -type l   # VERIFICAR que el symlink compartido SIGUE vivo
-# symlink 'memory' del slug NUEVO → debe apuntar al cerebro COMPLETO del DESTINO:
-readlink "$HOME/.claude/projects/$NEW_SLUG/memory"     # esperado: $DST/memory
-find -L "$DST" -type l                                 # sin symlinks rotos; si faltara: bash "$DST_REPO/bootstrap-claude.sh"
+# ⛔ NO se crea symlink 'memory' en el slug NUEVO. Decision de unjordi (2026-09-08, textual):
+#   "QUIERO QUE ESTO QUEDE SIN SIMLINKS. PUNTO"  ·  "son un pinche bug que no logro que dejen de propagar"
+# El cerebro del repo se lee NATIVO porque el destino es el cwd; el 'memory' del slug es el canal
+# per-maquina y va como DIRECTORIO REAL o no existe. Medido en cachy: de 20 slugs con 'memory', los 5 que
+# unjordi considera BIEN hechos tienen dir real y los 15 con symlink los sembro `claude-proyecto-autocontenido`,
+# que lo PRESCRIBE (su diagrama, sus dos modos y su bootstrap). Si el bootstrap ya lo creo, quitalo —
+# borra SOLO el enlace, sin -r y sin slash final, para no tocar lo apuntado:
+[ -L "$HOME/.claude/projects/$NEW_SLUG/memory" ] && /bin/rm "$HOME/.claude/projects/$NEW_SLUG/memory"
+find -L "$DST" -type l    # el cerebro del destino NO debe tener symlinks: ni rotos ni sanos
 ```
 
 ### S6 · doc=realidad + commit + QA FUNCIONAL (humano = sello LISTO)
@@ -409,10 +454,37 @@ find -L "$DST" -type l                                 # sin symlinks rotos; si 
 
 ---
 
+### S7 · RE-VERIFICAR DESPUÉS DEL QA (el paso que faltaba)
+> **El skill terminaba en S6, y el daño ocurre en S6.** El QA es un resume, y un resume MUTA: escribe
+> eventos, puede derivar un slug y puede reescribir `masters.json`. Declarar LISTO con las postcondiciones
+> de S4/S5 es declarar sobre un estado que el propio QA ya cambió. [verificado 2026-09-08]
+
+Tras el resume de S6 —y con G-QUIESCE otra vez en verde— re-evaluar las MISMAS invariantes:
+```bash
+# 1) sigue habiendo UNA sola copia? (un resume desde el cwd equivocado crea otra en el slug viejo)
+[ "$(find "$HOME/.claude/projects" -name "$ID.jsonl" | wc -l)" -eq 1 ] || { echo "S7: hay >1 copia"; find "$HOME/.claude/projects" -name "$ID.jsonl"; exit 1; }
+# 2) el target NO se revirtio?
+[ "$(jq -r --arg id "$ID" '.masters[]|select(.id==$id).target' "$MJ")" = "${DST_REPO#$HOME/}" ] || { echo "S7: el target se revirtio"; exit 1; }
+# 3) el cwd sigue uniforme? (un proceso al morir vuelca su buffer con el cwd viejo en memoria)
+[ "$(grep -o '"cwd":"[^"]*"' "$NEW_JSONL" | sort -u | wc -l)" -eq 1 ] || { echo "S7: cwd contaminado"; grep -o '"cwd":"[^"]*"' "$NEW_JSONL" | sort | uniq -c; exit 1; }
+# 4) el ULTIMO evento quedo con el par correcto? (es lo que heredara el PROXIMO resume)
+tail -1 "$NEW_JSONL" | jq -r '"ultimo evento: cwd=\(.cwd) rama=\(.gitBranch)"'
+# 5) no reaparecio el symlink del slug? (el bootstrap lo re-siembra)
+[ -L "$HOME/.claude/projects/$NEW_SLUG/memory" ] && { echo "S7: reaparecio el symlink"; exit 1; } || true
+```
+**Si (1) falla**, la copia del slug viejo es un transcript NUEVO, no un duplicado: **no se borra** — se saca
+del árbol de proyectos (`mv` a `session-move-backups/`, nunca `rm`) para que nada la resuelva, y se conserva.
+**Si (3) falla**, normalizar con `lib.rewriteCwd(texto, destino)` — ojo: recibe el **TEXTO**, no la ruta; el
+llamador lee, transforma y escribe (temp + rename, preservando el modo).
+
+**Postcondición S7 = la de S4/S5, re-medida.** Solo entonces el humano puede sellar LISTO.
+
+---
+
 ## 5 · Resumen del flujo (una máquina)
 `S0 canónico-origen → G-GITIGNORE → S1 T1(PR) → S2 T2-bundle → G-LIVENESS(cerrada) → S3 export-first →
 S4 {move + target-fix + alias} uninterrumpido → G-PARITY → S5 {deposita T2 + residuo quirúrgico + symlink} →
-S6 doc + QA-humano.` Re-entrante: cada S deja postcondición verificable; una corrida a medias se reanuda
+S6 doc + QA-humano → **S7 re-verificar POST-QA**.` Con **G-QUIESCE** antes de S3 y otra vez antes de cerrar S6. Re-entrante: cada S deja postcondición verificable; una corrida a medias se reanuda
 desde el primer S cuya postcondición falle.
 
 ---
@@ -574,6 +646,10 @@ por-id serializada, nunca en ambas máquinas dentro de la ventana de sync.
 | Borrar symlink `memory` compartido | barrido no-quirúrgico en slug de ~130 sesiones | barrer SOLO `<id>.jsonl`; verificar que el symlink sigue vivo |
 | Conflicto Drive de masters.json | edición concurrente de UN archivo | edición por-id serializada; vigilar `masters (1).json` |
 | Move NO atómico (a medias) | `session-move.js` hace copy-a-slug-nuevo + unlink-viejo (no es un rename atómico) | respaldado (backup `session-move.js:62-66`) + aborta-si-colisiona (`:60`) + máquina de estados re-entrante: la postcondición S4 detecta un estado a medias y reanuda |
+| **Mudanza revertida por el propio QA** | el resume MUTA: deriva slug del par (cwd,gitBranch) heredado, reescribe `target` y al morir vuelca buffer con el cwd viejo | **G-QUIESCE** (cero sesiones, antes y después) + **S7** re-mide las invariantes tras el QA |
+| **Resume aterriza en el slug VIEJO aunque el `cwd` sea el correcto** | `session-move.js` reescribe `cwd` pero NO `gitBranch`; el harness hereda el par del último evento en vez de re-derivarlo del proceso | S4 paso **2b**: normalizar `cwd`+`gitBranch` del ÚLTIMO evento a los del destino; postcondición S4 lo exige |
+| Transcript world-readable tras el move | `session-move.js` escribe con el umask, no con el modo del origen | S4 paso **2c**: `chmod 600`; postcondición S4 lo exige |
+| Symlink `memory` re-sembrado en el slug nuevo | `claude-proyecto-autocontenido` lo PRESCRIBE y el bootstrap lo crea | S5 lo retira explícitamente; S7 verifica que no reapareció |
 | Backups sin poda | `session-move.js` respalda sin límite | anotar poda de `~/.claude/session-move-backups/` |
 | **Identidad a medias** (target movido, `name` viejo) | el renombre del master no iba en el bloque atómico | S4 fija `target` **y** `name` en el mismo `jq`, reescribe el alias con el nombre final y lista el alias viejo para retirarlo |
 | **Mueve la sesión EQUIVOCADA** | elegir el `<id>` desde `masters.json` sin cruzarlo con los `.jsonl` reales; el registro solo AÑADE ids y puede no tener el vivo | G-ID cruza registro ∩ disco por frescura y avisa si el id vivo no está registrado; S4 hace **UPSERT** |
