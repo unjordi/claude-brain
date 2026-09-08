@@ -63,6 +63,12 @@ ciegas.** Para el cerebro son:
 5. **Las normas que los guards HACEN CUMPLIR** — flujo de git (nunca push a develop/main; ramita→MR→
    develop con squash; main release-only con OK super-explícito) y la **definición de LISTO**. El auditor
    necesita saber QUÉ debe pasar para juzgar si el guard lo logra.
+6. **El corpus de FALSOS POSITIVOS** (`docs/guards-falsos-positivos.md`) — cuando el target toca un guard
+   (o un flowchart de guards), dale al auditor los FP RELEVANTES a ese guard. Uso doble: (a) el chart/afirmación
+   debe reflejar la conducta **TUNEADA** del guard (no la pre-tuning), y (b) un patrón de FP recurrente suele
+   ser un **edge REAL** que el diagrama debería depictar o anotar. Blinda contra que el auditor marque como
+   "bug del chart" algo que es solo cómo se comporta el guard de verdad. (Decisión unjordi 2026-09-08:
+   "aliméntaselos también a los auditores cuando corras el loop sobre ESE flowchart".)
 
 > **Cuando el target es el cerebro de un PROYECTO** (no el `cortex` meta), los "zapatos" se traducen:
 > audita contra la **FIRMA** = `CLAUDE.md` (thin, TOC) → el **detalle operativo** → la memoria/skill →

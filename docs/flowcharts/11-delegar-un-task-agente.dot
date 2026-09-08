@@ -104,17 +104,19 @@ digraph flujos {
          label="🔒🛑 limite-gasto\n¿ventana 5h AGOTADA (≥99%) Y overage SIN holgura? (AND)"];
     LIM_D [color="#c0392b", penwidth=2,
            label="🔴 FRENO DURO — sin capacidad en ningún lado; el agente moriría a medias.\nNO reintentar en auto (espera el reset / mete saldo / hazlo tú)"];
+    LIM_OPEN [fillcolor="#2b2622", color="#c9a227", style="rounded,filled",
+              label="🟡 fail-open DELIBERADO: sin jq / sin snapshot / snapshot rancio (>30 min) → NO frena\n(no es 'hay capacidad confirmada': el guard no pudo medir; riesgo latente aceptado,\nnunca frena a ciegas — no es deuda ni hueco por construir)"];
 
     // ── delegacion-gate ──
     JQ [shape=diamond, fillcolor="#2b2622", color="#d97757",
-        label="🔒💸 delegacion-gate\n¿hay jq + snapshot para clasificar el costo?"];
+        label="🔒💸 delegacion-gate\n¿hay jq para clasificar el costo?"];
     ASKFAIL [color="#e08e45",
-             label="🟠 ASK — no puedo clasificar; ¿autorizas ESTA delegación?\n(fail-safe de gasto)"];
+             label="🟠 ASK — no puedo clasificar; ¿autorizas ESTA delegación?\n(fail-safe de gasto, SOLO sin jq)"];
     NIVEL [shape=diamond, fillcolor="#2b2622", color="#d97757",
-           label="¿NIVEL de costo? (agentes-costo.json + snapshot de la ventana 5h)"];
+           label="¿NIVEL de costo? (agentes-costo.json + snapshot de la ventana 5h;\nsin snapshot fresco → clase 'claude' cae a metered, NO a ASKFAIL)"];
 
     FREE [shape=diamond, fillcolor="#2b2622", color="#d97757",
-          label="gratis (local) / incluido (Claude en la ventana 5h)\n¿ya consentido en ESTA compu?"];
+          label="gratis (local) / incluido (Claude en la ventana 5h)\n¿ya consentido en ESTA compu PARA ESTA firma de costo?\n(clave = nivel:firma, no la máquina a secas)"];
     FREE_OK [color="#7fb069", label="🟢 corre silencioso (ya consentido)"];
     G3 [shape=diamond, fillcolor="#2b2622", color="#d97757",
         label="G3 · fan-out paralelo: ¿otro gate del MISMO lote (sesión+key)\nya tomó el lock atómico?"];
@@ -124,31 +126,42 @@ digraph flujos {
               label="🟠 ASK 1×/compu (toma el lock · se recuerda por máquina)"];
 
     METER [shape=diamond, fillcolor="#2b2622", color="#d97757",
-           label="metered (overage / API externa / desconocido)\n¿ya consentido en ESTE workflow?"];
+           label="metered (overage / API externa / desconocido)\n¿ya consentido en ESTE workflow PARA ESTA firma de costo?\n(clave = nivel:firma, no el workflow a secas)"];
     METER_OK [color="#7fb069", label="🟢 corre silencioso (ya consentido en este workflow)"];
     METER_ASK [color="#e08e45",
                label="🟠 ASK 1×/workflow (por session_id)\n(metered NO se coalesce: cada uno confirma)"];
 
     // ── delegacion-registrar ──
-    REG [color="#e08e45",
-         label="🔔📝 delegacion-registrar (PostToolUse/Task)\ntras aprobar el ask y correr el agente, GRABA el consentimiento:\ngratis/incluido → por COMPU · metered → por WORKFLOW\n→ la próxima delegación corre SILENCIOSA (así se cumple «pregunta 1×»)"];
+    REG [fillcolor="#232323", color="#8a8a8a", fontcolor="#cfc8c0",
+         label="🔔📝 delegacion-registrar (PostToolUse/Task)\ntras aprobar el ask y correr el agente, GRABA el consentimiento\n(clave nivel:firma): gratis/incluido → por COMPU × firma · metered → por WORKFLOW × firma\n→ la próxima delegación de ESA firma corre SILENCIOSA (así se cumple «pregunta 1×»)\n(requiere jq: SOLO recibe la rama con jq — ver ASKFAIL/REG_NOOP)"];
+    REG_NOOP [fillcolor="#232323", color="#9e9e9e", style="rounded,filled", fontcolor="#cfc8c0",
+              label="⬜ delegacion-registrar también exige jq (exit 0 sin grabar si falta)\n→ el consentimiento de ASKFAIL NO se persiste:\nla PRÓXIMA delegación sin jq vuelve a preguntar (instala jq para 'pregunta 1×')"];
+
+    NOTA_PARALELO [shape=note, fillcolor="#eceff1", color="#607d8b", fontcolor="#2b2622",
+                   label="⬜ limite-gasto y delegacion-gate son 2 hooks PreToolUse/(Task|Agent)\nINDEPENDIENTES que corren en PARALELO sobre el MISMO disparo (no cascada).\nPrecedencia deny>ask>allow: el 🔴 DENY de limite-gasto gana\nsobre cualquier 🟠 ASK / 🟢 allow de delegacion-gate."];
 
     // Aristas
     START -> LIM;
     LIM -> LIM_D [label="sí (AND)"];
-    LIM -> JQ [label="no (hay capacidad)", style=dashed];
-    JQ -> ASKFAIL [label="no / sin snapshot"];
+    LIM -> JQ [label="no (capacidad OK)"];
+    LIM -> LIM_OPEN [label="no pudo medir\n(sin jq / sin snapshot / rancio)"];
+    LIM_OPEN -> JQ [label="fail-open → sigue"];
+    JQ -> ASKFAIL [label="no jq"];
     JQ -> NIVEL [label="sí"];
     NIVEL -> FREE [label="gratis / incluido"];
     NIVEL -> METER [label="metered"];
-    FREE -> FREE_OK [label="sí", style=dashed];
+    FREE -> FREE_OK [label="sí"];
     FREE -> G3 [label="no (aún sin consentir)"];
-    G3 -> G3_COALESCE [label="sí (soy hermano)", style=dashed];
+    G3 -> G3_COALESCE [label="sí (soy hermano)"];
     G3 -> FREE_ASK [label="no (soy el 1º del lote)"];
-    METER -> METER_OK [label="sí", style=dashed];
+    METER -> METER_OK [label="sí"];
     METER -> METER_ASK [label="no"];
-    ASKFAIL -> REG [label="apruebas → corre"];
+    ASKFAIL -> REG_NOOP [label="apruebas → corre"];
     FREE_ASK -> REG [label="apruebas → corre"];
     METER_ASK -> REG [label="apruebas → corre"];
+
+    // Nota de paralelismo (no-op visual, solo posiciona la anotación cerca de LIM/JQ)
+    NOTA_PARALELO -> LIM [style=invis];
+    NOTA_PARALELO -> JQ [style=invis];
   }
 }

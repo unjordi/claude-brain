@@ -98,6 +98,20 @@ for h in $GLOBAL_HOOKS; do
     echo "warn: falta el hook fuente $h"
   fi
 done
+# ── (a2) PODA de hooks REPO-TIER filtrados al global ────────────────────────────────────────────────
+# Un hook tier=repo (dod-verificar, sesion-inicio, …) NUNCA debe vivir en ~/.claude/hooks/: se cablea SOLO
+# per-repo (en <repo>/.claude/settings.json → ${CLAUDE_PROJECT_DIR}/.claude/hooks/), jamás global. Si uno se
+# FILTRÓ al global (era vieja, o un sincronizar-cerebro mal-apuntado a ~), queda de HUÉRFANO INERTE (nadie
+# lo cablea global) y CONFUNDE ("el script está pero no dispara"). install-brain no lo instala, pero antes
+# tampoco lo PODABA → ahora sí. SEGURO/ACOTADO: solo borra los que el MANIFEST declara tier=repo (esos por
+# definición no pueden ser propios del usuario ni {global,both}). Caso real 2026-09-08: dod-verificar.sh
+# huérfano en el global de la Cachy, presente pero sin cablear.
+if [ -f "$SRC_HOOKS/MANIFEST" ]; then
+  REPO_HOOKS="$(awk '$1!~/^#/ && NF>=3 && $2=="repo" && $3=="hook"{print $1".sh"}' "$SRC_HOOKS/MANIFEST")"
+  for rh in $REPO_HOOKS; do
+    [ -f "$HOOKS_DIR/$rh" ] && rm -f "$HOOKS_DIR/$rh" && echo "poda: retiré el hook repo-tier huérfano '$rh' del global $HOOKS_DIR (se cablea per-repo, nunca global)"
+  done
+fi
 # Config de clasificación de costo (la lee delegacion-comun.sh en $HOME/.claude/agentes-costo.json)
 if [ -f "$SRC_HOOKS/agentes-costo.json" ]; then
   atomic_install "$SRC_HOOKS/agentes-costo.json" "$CLAUDE_DIR/agentes-costo.json" || echo "warn: no pude instalar agentes-costo.json"
@@ -117,7 +131,16 @@ register_hook() {
       if any(.hooks[$ev][]?; ([.hooks[]?.command] | join(" ")) | test($pat))
       then .hooks[$ev] = [ .hooks[$ev][] | if (([.hooks[]?.command] | join(" ")) | test($pat)) then (if $m=="" then del(.matcher) else .matcher=$m end) else . end ]
       else .hooks[$ev] += [ (if $m=="" then {} else {"matcher":$m} end) + {"hooks":[{"type":"command","command":$cmd,"shell":"bash"}]} ] end
-    ' "$GSET" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then mv "$tmp" "$GSET"; else rm -f "$tmp"; echo "warn: no pude fusionar hook ($pat)"; fi
+    ' "$GSET" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    mv "$tmp" "$GSET"
+  else
+    rm -f "$tmp"
+    if ! jq empty "$GSET" 2>/dev/null; then
+      echo "ERROR: $GSET es JSON INVÁLIDO — los guards NO se cablearon. Repáralo (jq . \"$GSET\") o bórralo y re-corre install-brain." >&2
+      exit 1
+    fi
+    echo "warn: no pude fusionar hook ($pat)"
+  fi
 }
 
 # Evento+matcher de cada hook GLOBAL a cablear. El MANIFEST declara tier/kind pero NO el evento →
@@ -153,10 +176,12 @@ ev_de() {
 # de ev_de(). El command conserva el literal `$HOME` (se expande al correr el hook, no aquí). ──
 WIRE_HOOKS="$(awk '$1!~/^#/ && NF>=3 && ($2=="global"||$2=="both") && $3=="hook"{print $1}' "$SRC_HOOKS/MANIFEST" 2>/dev/null)"
 wired_names=""
+unwired_names=""
 for h in $WIRE_HOOKS; do
   evm="$(ev_de "$h")"
   if [ -z "$evm" ]; then
     echo "warn: no tengo evento para cablear el hook global '$h' (agrégalo a ev_de en install-brain.sh) — NO cableado"
+    unwired_names="$unwired_names $h"
     continue
   fi
   # evm puede traer VARIOS pares "Event|Matcher" (space-separated) → cablear cada uno (multi-evento).
@@ -166,7 +191,18 @@ for h in $WIRE_HOOKS; do
   done
   wired_names="$wired_names $h"
 done
-echo "ok: hooks cableados en $GSET (derivados del MANIFEST):$wired_names"
+if [ -n "$unwired_names" ]; then
+  echo "ERROR: hooks COPIADOS pero SIN cablear:$unwired_names — agrega su evento en ev_de() (install-brain.sh). El cerebro quedaría con guards inertes." >&2
+  exit 1
+fi
+# Mensaje HONESTO: sin jq, register_hook hizo return sin cablear nada → NO afirmar "cableados" (mentiría).
+# Fail-open se CONSERVA (no exit 1: memorias/skills sí se instalaron), pero se dice la verdad: guards inertes
+# hasta que haya jq. (Antes: el loop sumaba el hook a wired_names aunque register_hook no cableara sin jq.)
+if command -v jq >/dev/null 2>&1; then
+  echo "ok: hooks cableados en $GSET (derivados del MANIFEST):$wired_names"
+else
+  echo "ADVERTENCIA: hooks COPIADOS a $HOOKS_DIR pero NO CABLEADOS en $GSET (falta jq) — los guards NO disparan (fail-open) hasta que instales jq y re-corras. Esto NO es una instalación completa de guards."
+fi
 
 # ── (c) Skills genéricas del cerebro (cerrar-slice, orquestar-fanout, …) — tier {global,both} del
 # brain/skills/MANIFEST (fuente única de tiers; hoy TODAS son `global`). Copia el ÁRBOL COMPLETO de cada
@@ -183,9 +219,26 @@ if [ -d "$SRC_SKILLS" ]; then
   for name in $_sk_names; do
     sk="$SRC_SKILLS/$name"
     [ -f "$sk/SKILL.md" ] || { echo "warn: skill '$name' en el manifiesto pero falta $sk/SKILL.md"; continue; }
-    mkdir -p "$SKILLS_DIR/$name"
-    cp -Rf "$sk"/. "$SKILLS_DIR/$name"/    # árbol COMPLETO (SKILL.md + subdirs como reference/)
-    echo "ok: skill $name instalada (árbol completo) en $SKILLS_DIR/$name"
+    mkdir -p "$SKILLS_DIR"
+    t="$(mktemp -d "$SKILLS_DIR/.tmp.$name.XXXX")" || { echo "warn: no pude crear tmp para skill $name"; continue; }
+    cp -Rf "$sk"/. "$t"/ || { rm -rf "$t"; echo "warn: no pude copiar skill $name"; continue; }
+    # Swap con rollback (NO `rm -rf` antes del `mv`): aparta la vieja, entra la nueva, restaura si falla.
+    # Un `rm -rf` previo dejaría una VENTANA sin skill (una sesión viva leería "not found") y, peor, BORRARÍA
+    # sin reemplazo si el `mv` falla (disk full/permisos). Con el swap, la skill vieja sobrevive hasta que la
+    # nueva entra; ambos `mv` son renames atómicos en el mismo filesystem (ventana ~0).
+    old=""
+    if [ -e "$SKILLS_DIR/$name" ]; then
+      old="$SKILLS_DIR/.old.$name.$$"
+      mv "$SKILLS_DIR/$name" "$old" || { rm -rf "$t"; echo "warn: no pude apartar la skill vieja $name"; continue; }
+    fi
+    if mv "$t" "$SKILLS_DIR/$name"; then
+      [ -n "$old" ] && rm -rf "$old"
+      echo "ok: skill $name instalada (árbol completo, swap atómico con rollback) en $SKILLS_DIR/$name"
+    else
+      [ -n "$old" ] && mv "$old" "$SKILLS_DIR/$name"    # rollback: la vieja vuelve a su sitio
+      rm -rf "$t"
+      echo "warn: no pude instalar skill $name (rollback aplicado; la versión previa sigue en su sitio)"
+    fi
   done
 fi
 

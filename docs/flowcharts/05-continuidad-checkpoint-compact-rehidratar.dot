@@ -101,17 +101,17 @@ digraph flujos {
 
     // ── El watermark ──
     AVISO [color="#e08e45",
-           label="🔔📈 aviso-contexto  (PostToolUse · GLOBAL · tras CADA tool)\nmétrica = TOKENS REALES del último `usage`, ANCLADO al último /compact (isCompactSummary → descarta el usage viejo pre-compact)\nREPORTERO TONTO: surface ctx · ventana ([1m]→1M, si no 200K) · % · autoCompactWindow — SIN techo derivado ni bandas\ndebounce por escalón de 50K; /context manda, TÚ decides (sin veredicto de urgencia)"];
+           label="🔔📈 aviso-contexto  (PostToolUse · GLOBAL · tras CADA tool)\nmétrica = TOKENS REALES del último `usage`, ANCLADO al último /compact (isCompactSummary → descarta el usage viejo pre-compact)\nREPORTERO TONTO: surface ctx · ventana (marcador [1m], o modelo 1M-nativo opus-4-7/4-8/5·sonnet-5·fable-5·mythos-5 → 1M; si no, 200K;\nauto-corrige a 1M si ctx>ventana detectada) · % · autoCompactWindow — SIN techo derivado ni bandas\n🟡 fail-open silencioso: sin jq / sin transcript / sin usage fresco post-compact → no emite nada\ndebounce por escalón de 50K; /context manda, TÚ decides (sin veredicto de urgencia)"];
 
     // ── checkpoint (skill, proactivo) ──
     CHK   [shape=diamond, fillcolor="#2b2622", color="#d97757",
            label="💾 checkpoint  (skill — TÚ lo invocas, PROACTIVO)\n¿nivel? viene compact / >2h / crítico → COMPLETO ; pausa casual → ligero\n(ante la duda: COMPLETO)"];
     DUMP  [color="#7fb069", penwidth=2,
-           label="⚠ ESCRIBE (memoria) · 🟢 vuelca el HILO → .claude/memory/hilo-mental-actual.md\nLIGERO: en qué estamos · decisión abierta · siguiente paso\nCOMPLETO: + PLAN con el CÓMO · RESUELTO HOY (anti-fantasma) · COSECHA DURABLE a memorias/skills\n(en las PROPIAS palabras del modelo → re-instanciar releyendo, no confabular)"];
+           label="📝 ESCRIBE (memoria, NO git) · 🟢 vuelca el HILO → .claude/memory/hilo-mental-actual.md\nGARANTÍA DURA antes de pisar: LEE el hilo previo y fusiona lo vivo (read-before-overwrite)\n+ SUBE todo pendiente/decisión DURABLE a estado-proyecto.md/bitácora (>>) — el hilo volátil\nSUBE al backlog durable, NUNCA al revés\nLIGERO: en qué estamos · decisión abierta · siguiente paso\nCOMPLETO: + PLAN con el CÓMO · RESUELTO HOY (anti-fantasma) · COSECHA DURABLE a memorias/skills\n(en las PROPIAS palabras del modelo → re-instanciar releyendo, no confabular)\n(repos COMPARTIDOS: gitignoreado per-dev — ver skill checkpoint §Compartido vs local)"];
 
     // ── El compact ──
     COMPACT [shape=diamond, fillcolor="#2b2622", color="#d97757",
-             label="COMPACTACIÓN\n/compact manual (proactivo) · o AUTO-COMPACT sorpresa (contexto lleno, sin aviso)"];
+             label="COMPACTACIÓN\n/compact manual (proactivo) · o AUTO-COMPACT sorpresa (contexto lleno, sin aviso, SIN checkpoint previo)"];
     NOPRE [color="#c9a227",
            label="🟡 SIN hook de PreCompact (por decisión, no olvido):\nPreCompact no tiene canal para inyectar contexto ni pedir acción → inútil ahí\n(la versión vieja rompía la validación del CLI). El hilo lo salva checkpoint+rehidratar"];
     CLAUDEMD [color="#e08e45",
@@ -123,11 +123,19 @@ digraph flujos {
     SINI  [color="#e08e45",
            label="🔔🧭 sesion-inicio  (SessionStart · POR-REPO)\n🟠 reinyecta rama + NORMA de git + orden de leer MEMORY/estado-proyecto/AGENTS"];
     REHID [shape=diamond, fillcolor="#2b2622", color="#d97757",
-           label="🔔🧵 rehidratar-hilo  (SessionStart · GLOBAL)\n¿existe hilo-mental-actual.md? → reinyecta vía additionalContext (canal FIABLE)\nGATE DE FRESCURA: ¿la rama del hilo = la actual?"];
+           label="🔔🧵 rehidratar-hilo  (SessionStart · GLOBAL)\n¿existe hilo-mental-actual.md (no vacío)? → reinyecta vía additionalContext\nGATE DE FRESCURA: ¿la rama del hilo = la actual?\n🟡 canal FIABLE depende de jq: sin jq, emite printf crudo (SessionStart NO lo consume como contexto)"];
+    NOHILO [style="rounded,filled", fillcolor="#232323", color="#8a8a8a", fontcolor="#cfc8c0",
+            label="silencioso: no existe hilo-mental-actual.md, o está vacío → exit 0\n(caso normal en repos que no usan el sistema)"];
     FRESCO [color="#7fb069",
-            label="🟢 «🧵 HILO MENTAL ACTUAL»\n(rama coincide → la vigencia la manda la RAMA, no el reloj; A8)"];
+            label="🟢 «🧵 HILO MENTAL ACTUAL»\n(rama coincide → la vigencia la manda la RAMA, no el reloj; A8\n· o rama indeterminada —sin git/sin línea de rama— y mtime<12h → proxy de respaldo aún fresco)"];
     STALE [color="#c9a227",
-           label="🟡 «⚠️ HILO POSIBLEMENTE OBSOLETO»\n(rama distinta, o sin git y mtime > 12h → proxy de respaldo)"];
+           label="🟡 «⚠️ HILO POSIBLEMENTE OBSOLETO»\n(rama distinta, o rama indeterminada y mtime≥12h → proxy de respaldo)"];
+    NOJQ  [color="#c9a227",
+           label="🟡 SIN jq: el hook emite el bloque como printf CRUDO (no JSON)\nSessionStart NO consume stdout crudo como additionalContext → el hilo NO se reinyecta\ncontinuidad ROTA EN SILENCIO (aunque hilo-mental-actual.md exista y esté fresco)"];
+
+    // ── Caso OBSOLETO: validar antes de retomar (NO a ciegas) ──
+    VALIDA [color="#c9a227",
+            label="🟡 caso OBSOLETO: la nota del hook YA dice «trátalo como OBSOLETO: valida antes»;\nsi TÚ invocas el skill, anuncia «⚠️ Rehidraté un hilo POSIBLEMENTE OBSOLETO...\nVerifico antes de seguir — ¿aún aplica?» (skill rehidratar-hilo, paso 2)\nNO retomes a ciegas: valida primero"];
 
     // ── Retomar ──
     RESUME [color="#7fb069", penwidth=2,
@@ -143,17 +151,25 @@ digraph flujos {
     AVISO -> CHK [label="el dato es para TU decisión\n(TÚ corres checkpoint si lo ves alto)", style=dashed];
     WORK -> CHK [label="o TÚ, proactivo\n(en una pausa / >2h)", style=dashed];
     CHK -> DUMP;
-    DUMP -> COMPACT;
-    COMPACT -> NOPRE [style=dashed, label="PreCompact\nNO ayuda"];
+    DUMP -> COMPACT [label="checkpoint COMPLETO\nya volcado"];
+    DUMP -> WORK [label="ligero: punto de retorno\nsigue la corrida (NO compacta)", style=dashed];
+    WORK -> COMPACT [label="🟡 AUTO-COMPACT sorpresa:\nsin checkpoint previo (caso peligroso\nque el sistema entero defiende)", color="#c9a227", fontcolor="#c9a227"];
+    COMPACT -> NOPRE [label="PreCompact\nNO ayuda"];
     COMPACT -> CLAUDEMD [label="al compactar el CLI\nre-lee el heading"];
     CLAUDEMD -> SS;
-    NOPRE -> SS [style=dashed];
+    NOPRE -> SS;
     SS -> SINI;
     SS -> REHID [label="misma SessionStart"];
-    SINI -> RESUME [style=dashed];
-    REHID -> FRESCO [label="rama coincide"];
-    REHID -> STALE  [label="rama distinta /\nmtime>12h"];
-    FRESCO -> RESUME; STALE -> RESUME;
+    SINI -> RESUME;
+    REHID -> NOHILO [label="no existe / vacío\n(exit 0, silencioso)"];
+    REHID -> FRESCO [label="rama coincide  ·  o\nindeterminada y mtime<12h"];
+    REHID -> STALE  [label="rama distinta, o\nindeterminada y mtime≥12h"];
+    REHID -> NOJQ   [label="sin jq: printf crudo\n(SessionStart lo ignora)", color="#c9a227", fontcolor="#c9a227"];
+    FRESCO -> RESUME;
+    STALE -> VALIDA;
+    VALIDA -> RESUME [label="si aplica\n(validado)"];
+    VALIDA -> CHK [label="si NO aplica\n→ re-vuelca (checkpoint)", color="#c9a227", fontcolor="#c9a227"];
+    NOJQ -> SKILL [label="recuperación:\ncorre el .sh a mano /\nsi sale vacío, lee el archivo", color="#c9a227", fontcolor="#c9a227"];
     RESUME -> SKILL [label="o TÚ invocas\nel skill", style=dashed];
     RESUME -> BACK;
     SKILL -> BACK;

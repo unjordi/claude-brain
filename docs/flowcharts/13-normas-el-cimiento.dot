@@ -1,6 +1,10 @@
 // 13 — Normas: el cimiento (cortex)  ·  FUENTE editable (.dot)
 // Render:  dot -Tsvg 13-normas-el-cimiento.dot -o 13-normas-el-cimiento.svg
 // El PORQUÉ: cada flujo de los charts anteriores hace cumplir una de estas normas (CLAUDE.md / brain/norms/).
+// 2026-09-07: agregadas 5 normas duras que faltaban (DECISION/CORREO/HERRAMIENTA/HUD/MAQUINA) — su
+// mecanismo YA vivía en la leyenda-árbol pero no tenían tarjeta en el cuerpo; el cluster ahora declara
+// explícito que es un SUBCONJUNTO curado, no el set completo (brain/norms/global-claude-md.md manda).
+// DOC ya NO dice "hecho cumplir en 08": recordar-dashboard es un nudge advisory, no un guard DENY.
 // Reconstruido 2026-08-07. Cross-refs re-numeradas a los NUEVOS nº de archivo (viejo circulado → nuevo):
 //   ② integrar=06 · ③ comando-git=07 · ④ push-nudges=08 · ⑤ declarar-listo=09 · ⑥ cerrar-slice=10 · ⑦ delegar=11 · ⑧ orquestar=12.
 // Re-canoniza el huérfano 10-normas-el-cimiento.svg (sin .dot ni leyenda).
@@ -92,13 +96,13 @@ digraph flujos {
 
   // ───────────────────────────────────── LAS NORMAS ─────────────────────────────────────
   subgraph cluster_f0 {
-    label="13 · Normas: el cimiento   (el porqué; cada flujo de los charts anteriores las hace cumplir)";
+    label="13 · Normas: el cimiento   (el porqué; cada flujo de los charts anteriores las hace cumplir)\nsubconjunto CURADO, no el set completo — todas las normas duras: brain/norms/global-claude-md.md";
     fontname="Times"; fontsize=14; fontcolor="#5fa89e";
     color="#5fa89e"; penwidth=1.6; style="rounded"; bgcolor="#1b1712";
 
     LISTO [label="📜 🎯 Definición de LISTO\nverde técnico ≠ LISTO (build+tests+memoria es necesario\npero NO suficiente): falta (1) QA del usuario o (2) su OK expreso.\nProducto INSTALABLE: verde en 1 máquina ≠ LISTO (checklist multi-OS)\n— hecho cumplir en 09 · 10 · 06"];
     GIT [label="📜 🌿 Flujo de git\nramita → MR → develop (con squash); main es release-only;\nNUNCA push directo a develop/main.\nel gate confirmar ≠ «no puedes»: con tu OK, Claude mergea por CLI\n— hecho cumplir en 03 · 06"];
-    DOC [label="📜 🪞 doc = realidad\nal cambiar algo, su doc se actualiza en la MISMA tanda\n(README/memoria/dashboard/comentarios)\n— hecho cumplir en 08"];
+    DOC [color="#e08e45", label="📜 🪞 doc = realidad\n🟠 al cambiar algo, su doc se actualiza en la MISMA tanda\n(README/memoria/dashboard/comentarios)\n— SIN guard DENY: recordado en 08 (🔔 recordar-dashboard = nudge advisory, no bloquea)"];
     MINI [label="📜 🌱 Modelo MINI-DEVELOP\nramitas → rama personal/integración por merge LOCAL (sin fricción);\nsolo el MR a develop se gatea\n— habilitado en 06"];
     COSTO [label="📜 💰 Consentimiento de costo de delegación\ndelegar cuesta por nivel: gratis (local) / incluido (ventana 5h) /\nmetered (overage o API externa)\n— hecho cumplir en 11"];
     ORQ [label="📜 🎼 Orquesta: delega y quédate en el loop\ncon trabajo paralelizable: fan-out + supervisión (no grind serial);\nauto-reporte sin niñera\n— operacionalizada en 12"];
@@ -108,14 +112,31 @@ digraph flujos {
            label="🛡️📜 Integridad de los guardarraíles (norma SIN mecanismo LOCAL)\nClaude NO afloja sus propios candados de supervisión para desatorarse;\ncambiar un control exige el OK EXPLÍCITO a cambiar ESE control (≠ el OK a la acción).\nNO hay hook in-repo que lo imponga: es AUTODISCIPLINA; el enforcement es EXTERNO\n(el clasificador auto-mode = backstop) — aplica a dod 09 · confirmar/squash/branch 06 · proteger-arbol 07"];
     TMPL [label="📜 🧬 Al templatizar: DOMINIO vs regla genérica\nal derivar un template de un concreto, quita el dominio pero\nCONSERVA las reglas genéricas (diff PORTAR-vs-OK-EXCLUIDO)"];
 
+    // ── 5 normas duras que faltaban: su mecanismo YA vive en la leyenda-árbol (familia 🔔 Automático)
+    //    pero no tenían tarjeta aquí. Todas 🟠 (nudge advisory, no guard DENY) — mismo tratamiento que DOC.
+    DECISION [color="#e08e45",
+              label="📜 🗣️ Decisiones / hallazgos NO viven solo en el chat\n🟠 se persisten a estado-proyecto.md/memoria en el MISMO turno\n(lo que TÚ hallas → backlog; lo que se DECIDE junto con el usuario → memoria)\n— nudge 🌾 recordar-cosechar (leyenda; sin chart propio aún)"];
+    MAQUINA [color="#e08e45",
+             label="📜 🖥️ El entorno de MÁQUINA vive GLOBAL, jamás en un repo\nOS/shell/aliases/rutas de $HOME/runtime local NUNCA en el repo\n(mentiría al clonar en otro OS) — vive en la memoria global per-máquina\n— avisado en 03 (🔔🖥️ entorno-maquina-guard)"];
+    HERRAMIENTA [color="#e08e45",
+                 label="📜 🚧 Actualiza por la HERRAMIENTA REAL, nunca el instalador a mano\nun install.sh/deploy.sh corrido crudo se salta backup+atómico+sello+verificación\n(excepción: --dry-run/--help/-n, o correr dentro de CI)\n— no-opea sobre git; parte del fan-out de 9 en 03 · 06 · 07 (sin detalle propio)"];
+    HUD [color="#e08e45",
+         label="📜 🔀 Tu lista de TODOs es TU HUD — mantenla fresca\nscratch de sesión (no el backlog durable); resetéala al cambiar de rama/proyecto\nsi diverge del backlog, MANDA estado-proyecto.md\n— avisado en 02 · 08 (🔔🔀 hud-stale)"];
+    CORREO [color="#e08e45",
+            label="📜 🧬 Cerebro por-repo = CORREO\nrepo PERSONAL: memoria/skills sí, guards por-repo NUNCA (los saca el global+dedupe);\nrepo COMPARTIDO (marca .claude/repo-compartido): guards por-repo SÍ, en git\n— mantenido fresco / avisado en 01 · 02 (🔔🧬 aviso-drift-cerebro)"];
+
     // Layout: filas de ~3, con aristas invisibles; INTEG «protege» a los candados que nombra.
     LISTO -> GIT -> DOC [style=invis];
     MINI -> COSTO -> ORQ [style=invis];
     AISL -> MECA -> TMPL [style=invis];
+    DECISION -> CORREO -> HERRAMIENTA [style=invis];
+    MAQUINA -> HUD [style=invis];
     DOC -> MINI [style=invis];
     ORQ -> AISL [style=invis];
+    TMPL -> DECISION [style=invis];
+    HERRAMIENTA -> MAQUINA [style=invis];
     INTEG -> LISTO [label="protege", style=dashed, constraint=false];
-    INTEG -> GIT [style=dashed, constraint=false];
-    INTEG -> AISL [style=dashed, constraint=false];
+    INTEG -> GIT [label="protege", style=dashed, constraint=false];
+    INTEG -> AISL [label="protege", style=dashed, constraint=false];
   }
 }

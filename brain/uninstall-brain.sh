@@ -51,8 +51,16 @@ rm -f "$CLAUDE_DIR/agentes-costo.json"
 echo "ok: hooks globales + lib + config de costo eliminados de $HOOKS_DIR"
 
 # ── (b) Des-cablear del settings.json SOLO las entradas de esos hooks (idempotente, jq) ──
-# Patrón que casa el 'command' de las entradas que sembró el instalador (por basename del hook).
-BRAIN_PAT='git-branch-guard\.sh|merge-squash-guard\.sh|confirmar-merge-develop\.sh|recordar-dashboard\.sh|secret-scan\.sh|rama-vieja\.sh|proteger-arbol\.sh|limite-gasto\.sh|rehidratar-hilo\.sh|aviso-contexto\.sh|aviso-drift-cerebro\.sh|hud-stale\.sh|barrer-ramas\.sh|delegacion-gate\.sh|delegacion-registrar\.sh|delegacion-reporte\.sh'
+# BRAIN_PAT = regex de basenames a des-cablear, DERIVADO del MANIFEST ({global,both} kind=hook = EXACTAMENTE
+# el set que install-brain cablea vía ev_de) → NO es una 3ª lista hardcodeada que driftee. ANTES sí lo era
+# y HABÍA drifteado: omitía entorno-maquina-guard, exportar-sesion-master, no-bypass-deploy,
+# proteger-fuente-cerebro y recordar-orquestar → tras un uninstall quedaban 5 cableados ZOMBIE en
+# settings.json apuntando a hooks ya borrados del disco (Claude Code invocaría hooks inexistentes).
+if [ -f "$MANIFEST" ]; then
+  BRAIN_PAT="$(awk '$1!~/^#/ && NF>=3 && ($2=="global"||$2=="both") && $3=="hook"{print $1}' "$MANIFEST" | sed 's/$/\\.sh/' | paste -sd'|' -)"
+fi
+# Fallback COMPLETO si falta el MANIFEST (los 21 {global,both} kind=hook actuales — sin omisiones):
+[ -n "${BRAIN_PAT:-}" ] || BRAIN_PAT='git-branch-guard\.sh|merge-squash-guard\.sh|confirmar-merge-develop\.sh|recordar-dashboard\.sh|secret-scan\.sh|entorno-maquina-guard\.sh|no-bypass-deploy\.sh|hud-stale\.sh|rama-vieja\.sh|proteger-arbol\.sh|proteger-fuente-cerebro\.sh|limite-gasto\.sh|rehidratar-hilo\.sh|aviso-contexto\.sh|aviso-drift-cerebro\.sh|exportar-sesion-master\.sh|barrer-ramas\.sh|delegacion-gate\.sh|delegacion-registrar\.sh|delegacion-reporte\.sh|recordar-orquestar\.sh'
 if command -v jq >/dev/null 2>&1; then
   if [ -f "$GSET" ]; then
     tmp="$(mktemp)" || tmp=""

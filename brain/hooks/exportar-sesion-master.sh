@@ -140,8 +140,13 @@ nohup bash -c '
   tmp=$(mktemp -d 2>/dev/null) || { rm -f "$lock"; exit 0; }
   node "$EXP" "$sid" --repo "$tmp" --name "$title" --force >/dev/null 2>&1
   gz="$tmp/.claude/sessions/$sid.jsonl.gz"; meta="$tmp/.claude/sessions/$sid.meta.json"
-  [ -f "$gz" ]   && cp -f "$gz"   "$DRIVE/" 2>/dev/null
-  [ -f "$meta" ] && cp -f "$meta" "$DRIVE/" 2>/dev/null
+  # Solo copia el .gz si PASA la verificación de integridad (gzip -t): si node crasheó a media escritura,
+  # un gz truncado NO debe SOBREESCRIBIR el backup bueno anterior en $DRIVE (mejor un backup viejo-pero-válido
+  # que uno nuevo-corrupto). Sin gzip -t, un export corrupto pasaba silencioso y reventaba al `claude --resume`.
+  if [ -f "$gz" ] && gzip -t "$gz" 2>/dev/null; then
+    cp -f "$gz" "$DRIVE/" 2>/dev/null
+    [ -f "$meta" ] && cp -f "$meta" "$DRIVE/" 2>/dev/null   # el meta acompaña SOLO a un gz válido
+  fi
   rm -rf "$tmp" 2>/dev/null
   rm -f "$lock" 2>/dev/null
 ' _ "$EXP" "$sid" "$title" "$DRIVE" "$lock" >/dev/null 2>&1 &

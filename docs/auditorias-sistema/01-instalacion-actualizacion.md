@@ -1,0 +1,204 @@
+# Auditoría de SISTEMA — 01 · Instalación / actualización del cerebro
+> 2026-09-08 · barrido proceso-por-proceso del cortex (ollama qwen3.8:27b local, 3 lentes) · flowchart 01 como zapato, CÓDIGO como verdad.
+> ⚠️ Hallazgos = CANDIDATOS; cada C/A/M se verifica contra código antes de fixear. CRÍTICO del updater YA verificado real (Updater.swift:144-172 sin lock).
+
+## Lente PROCESO+ALGORITMO
+
+## Hallazgos de auditoría — Sistema de instalación/actualización del cerebro (cortex)
+
+**SEV=medio** · `brain/hooks/aviso-drift-cerebro.sh:~L118-121` (bloque `drift_skills_global`) · problema: si `drift_skills_global` falla (exit≠0) sin producir stdout, `GLOBAL_SK_WARN` queda vacío y el stamp se escribe → el resultado de ERROR se cachea como "limpio" durante `AVISO_DRIFT_HORAS` (6 h). Un drift real de skills globales pasa desapercibido hasta que el throttle expira. · impacto/repro: cualquier fallo transitorio de la función (permiso, lib ausente, jq corrupto) en una SessionStart → 6 h de ceguera sobre drift de skills. · fix: distinguir "sin drift" (stdout vacío + exit 0) de "error" (exit≠0): solo stamp si exit==0; si exit≠0, NO stamp (reintenta próxima sesión) y opcionalmente emitir un warn genérico.
+
+**SEV=medio** · `brain/install-brain.sh:~L108-118` (`register_hook`, rama `else` del `if jq …`) · problema: si `~/.claude/settings.json` existe pero está corrupto (JSON inválido), `jq` falla, el hook NO se cablea, y el único feedback es `warn: no pude fusionar hook ($pat)`. El script sigue corriendo y termina con `echo "listo: cerebro global instalado"`. El usuario cree que los guards están activos; en realidad fallan abierto (no bloquean). · impacto/repro: settings.json corrompido por un crash de Claude Code o un edit manual → re-correr install-brain → guards ausentes sin señal clara. · fix: tras el primer fallo de jq, detectar que el JSON es inválido (`jq empty "$GSET"`), emitir un error EXPLÍCITO ("settings.json corrupto — los guards NO están cableados; repara o borra el archivo"), y opcionalmente `exit 1` o al menos no imprimir "listo".
+
+**SEV=medio** · `brain/install-brain.sh:~L130-155` (loop de cableado + `ev_de`) · problema: el MANIFEST es "fuente única" para la COPIA, pero el CABLEADO depende de una tabla manual (`ev_de`). Un hook nuevo en el MANIFEST se copia a `~/.claude/hooks/` pero NO se cablea si falta su entrada en `ev_de`. El loop avisa (`warn: no tengo evento…`) pero el hook queda en disco sin trigger. Solo `test-brain e2` lo detecta. · impacto/repro: dev agrega hook al MANIFEST, corre install-brain localmente sin CI → hook presente pero inerte hasta que alguien corra el test. · fix: hacer que `ev_de` derive del MANIFEST (agregar columna `event`/`matcher` al MANIFEST) o, como mínimo, si `ev_de` devuelve vacío para un hook que SÍ está en la lista de copia, emitir `exit 1` (no solo warn) para que el instalador no termine "listo" con un hook huérfano.
+
+**SEV=medio** · `macos/Sources/Cortex/Updater.swift:~L148-165` (`runUpdate`, timeout 60 s) · problema: el script detached hace `sleep 1 + git fetch + checkout -B + pkill + install.sh` (que incluye cp de hooks, jq sobre settings, cp de skills, etc.). En red lenta o repo grande, el total puede exceder 60 s. La UI muestra "el update no completó" mientras el proceso sigue vivo. Si el usuario re-dispara ⬆, se lanzan DOS `git checkout -B main origin/main` concurrentes sobre el mismo clon → el segundo puede fallar o corromper el working tree. · impacto/repro: red 3G / repo con submódulos / disco lento → timeout UI → usuario re-clickea → race en git. · fix: (a) aumentar timeout a 180 s; (b) antes de lanzar, verificar si ya hay un proceso `cortex-update` activo (`pgrep -f cortex-update`) y si existe, no relanzar; (c) escribir un lockfile (`~/.cortex/.updating`) que el script crea al inicio y borra al fin; el segundo intento lo detecta y no actúa.
+
+**SEV=medio** · `no-bypass-deploy` (guard, corpus FP 2026-08-08/14/29/09-03) · problema: el guard matchea el substring `install-brain`/`install.sh` en CUALQUIER posición del comando Bash, incluyendo argumentos de `git log --`, `ls`, `grep`, `git add`. Esto genera ruido en operaciones read-only legítimas (auditoría, forense, listado). El fix (#351) restringe a "posición de ejecución" pero el corpus muestra que aún hay FPs residuales (caso b: `bash -lc` con "install.sh" dentro de un string de repro en /tmp). · impacto/repro: cualquier sesión de auditoría/forense que mencione el nombre del instalador → nudge innecesario → el usuario aprende a ignorar el guard → cuando SÍ hay un bypass real, el nudge se pierde en el ruido. · fix: (a) excluir comandos read-only (`ls`, `find`, `grep`, `git log/show/diff --`) de la detección; (b) excluir paths bajo `/tmp`; (c) exigir que el nombre del script aparezca como primer token del comando o tras un runner (`bash`, `sh`, `./`) y NO como argumento de otro binario.
+
+**SEV=bajo** · `brain/install-brain.sh:~L72` (awk GLOBAL_HOOKS) · problema: `print $1".sh"` apende `.sh` a TODA entrada del MANIFEST con tier global/both, incluyendo archivos no-`.sh` (p. ej. `agentes-costo.json`). El loop intenta copiar `agentes-costo.json.sh` (no existe) → warn. El archivo real se instala por un bloque hardcodeado aparte. La "fuente única" del MANIFEST se viola parcialmente. · impacto/repro: ruido de warn en cada instalación; si alguien elimina el bloque hardcodeado creyendo que el MANIFEST lo cubre, `agentes-costo.json` deja de instalarse. · fix: en el awk, solo apender `.sh` si `$3=="hook"`; para otros kinds (config, script), usar el nombre tal cual. O eliminar el bloque hardcodeado y dejar que el loop genérico lo maneje.
+
+**SEV=bajo** · `brain/install-brain.sh:~L170` (`cp -Rf "$sk"/. "$SKILLS_DIR/$name"/`) · problema: la copia de skills NO es atómica (a diferencia de los hooks que usan `atomic_install`). Un kill/OOM a mitad de `cp -Rf` deja el directorio de la skill en estado mixto (algunos archivos nuevos, otros viejos). Una SessionStart en esa ventana leería una skill corrupta. · impacto/repro: Ctrl+C durante la instalación + abrir Claude inmediatamente → skill parcialmente actualizada. Ventana muy estrecha. · fix: usar el mismo patrón `atomic_install` (cp a tmp dir + `mv` del directorio) o al menos `cp -Rf` a un tmp y `mv` al final.
+
+**SEV=bajo** · `macos/Sources/Cortex/Updater.swift:~L97-103` (`resolveClonePath`) · problema: la resolución del clon exige que `macos/install.sh` exista en el candidato. Si el archivo fue renombrado, eliminado, o el clon es un shallow/partial sin esa ruta, `canSelfUpdate=false` y el usuario cae a "actualiza a mano" aunque el clon sea perfectamente utilizable. · impacto/repro: refactor del repo que mueve `macos/install.sh` → widget deja de auto-actualizar hasta el próximo release. · fix: verificar la presencia de `.git` (no de un script específico) como criterio de "clon válido"; la ruta del instalador se resuelve después (con fallback a `install.sh` raíz).
+
+**SEV=bajo** · `bootstrap.sh:~L55-62` (bloqueo de migración) · problema: no hay lockfile ni `flock`. Dos corridas simultáneas de `bootstrap.sh` (doble-click, script + terminal) ambas hacen `git clone`/`checkout -B` sobre `$DIR`. La segunda falla con un error de git poco claro. · impacto/repro: usuario doble-click en un .command que invoca bootstrap + corre el one-liner en terminal al mismo tiempo. · fix: al inicio, `exec 9>"$DIR/.bootstrap.lock"; flock -n 9 || { say "otra instancia de bootstrap ya está corriendo"; exit 1; }`.
+
+---
+
+**Nota de fidelidad del .dot (menor, no es foco):** El nodo `GUPD` describe el self-heal como "NO hace git fetch/pull" y "re-aplica el clon TAL COMO ESTÁ". El código de `install-brain.sh` confirma esto (no hay `git fetch`/`pull` en el script). Sin embargo, el nodo `GBOOT` dice que bootstrap hace `git checkout -B main origin/main` para "ALINEAR el clon a origin/main" — esto es correcto en el código (`bootstrap.sh:~L84`). El diagrama es fiel. Un detalle: el nodo `WID_ACT` menciona "resolveClonePath: embebido→$CLAUDE_BRAIN_DIR→~/.cortex→fallback ~/.claude-brain" que coincide con `Updater.swift:resolveClonePath`. Sin discrepancias materiales.
+
+**Veredicto general:** El proceso de instalación/actualización es **sólido en su diseño** (idempotencia, atomicidad de hooks, fail-safe sin jq, derivación del MANIFEST, red de seguridad anti-truncado en CLAUDE.md). Los hallazgos medios son **huecos de edge-case** (error cacheado como limpio, settings corrupto, hook sin cablear, race de timeout) que no rompen el flujo normal pero sí muerden en operación real. No hay hallazgo crítico: no hay pérdida de datos, no hay evasión de guards en el happy path, y las races identificadas son de baja probabilidad con mitigación parcial ya presente (atomic_install, pkill antes de reinstall).
+
+## Lente COHERENCIA
+
+SEV=alto · `aviso-drift-cerebro.sh` / flowchart DRIFT node · **hueco real: no hay detección automática de drift de HOOKS GLOBALES (~/.claude/hooks/ vs fuente)** · El hook chequea per-repo (hooks+skills) y global **skills** (`drift_skills_global`), pero NO global **hooks**. El corpus FP lo demuestra: el fix de no-bypass-deploy (#351) está en el repo, pero "el GLOBAL de esta Mac está congelado en Sep 1" → FPs continúan sin que ningún mecanismo lo detecte ni avise. El widget ⬆ solo corre si el usuario abre la pestaña Cerebro; no hay SessionStart que diga "tus hooks globales están N commits atrás de la fuente". · fix: añadir a `aviso-drift-cerebro.sh` (o a `drift-cerebro-comun.sh`) un chequeo `drift_hooks_global` análogo a `drift_skills_global`: diff de contenido entre `~/.claude/hooks/*.sh` y `brain/hooks/*.sh` del clon canónico; warn-only + throttle propio; emitir en `emit_and_exit` como `GLOBAL_HOOK_WARN`.
+
+SEV=medio · `no-bypass-deploy` (guard) · **el guard dispara sobre menciones NO-ejecución del instalador, contradiciendo su propia descripción** · Doc/leyenda: "correr el instalador/deploy a mano → avisa". FP corpus (5+ casos): `git add brain/install-brain.sh`, `git log -- …/install-brain.sh`, `grep -rn … install.sh`, `ls -1 install.sh bootstrap.sh`, `bash -lc` con "install.sh" en string /tmp. El guard matchea el substring del nombre del script en CUALQUIER posición del comando, no solo en posición de ejecución (raíz/runner). El fix (#351) existe en el repo pero la copia global está stale (ver hallazgo alto) → el FP persiste en producción. · fix: en el guard, exigir que el nombre del instalador aparezca como primer token del comando, tras `bash`/`sh`/`./`, o como argumento de `cd … &&` — NO como argumento de `git add/log/show/diff --`, `grep`, `ls`, `find`, o dentro de un string en `/tmp`. El corpus FP ya sugiere la regla; falta que la copia global la lleve.
+
+SEV=bajo · `install-brain.sh` §(d2b) / flowchart GINST node · **doc omite un artefacto que el código siembra** · El código siembra `como-trabajar-con-<usuario>.md` en la memoria global (bloque d2b, ~línea 230 del script), pero el nodo GINST del flowchart lista "siembra dashboard + entorno-esta-maquina + normas, genera aliases-activos.md" sin mencionar este cuarto artefacto. No es una contradicción (el flowchart es resumen), pero un lector del chart que siga la lista para verificar la instalación no sabría que ese archivo debe existir. · fix: añadir "+ como-trabajar-con-‹usuario›" a la lista del nodo GINST, o al menos un "(+ esqueleto de trato personal)".
+
+SEV=bajo · `CONVENCIONES.md` §6 / flowchart 01 header comment · **ambigüedad menor: "el único 🚧 vigente es BOOT_INV" vs APLICA también 🚧** · El header del .dot dice "el único 🚧 vigente es BOOT_INV, en la PLANTILLA (fuera de este repo)". Pero el nodo APLICA también está marcado 🚧 ("sembrar .claude/ sigue siendo MANUAL"). La intención del header es "el único 🚧 en la plantilla es BOOT_INV", pero la redacción "el único 🚧 vigente" sin calificar "en la plantilla" en la misma frase crea una lectura que contradice el propio chart. · fix: reescribir el header: "los 🚧 vigentes son BOOT_INV (plantilla, fuera de este repo) y APLICA (proceso, no scriptado)".
+
+---
+
+**Coherencia general del sistema (lo que SÍ cierra):**
+
+- El MANIFEST como fuente única de tiers → deriva tanto la COPIA (install-brain) como el CABLEADO (ev_de + loop) como el drift-check (test-brain e6b). No hay lista paralela hardcodeada. Coherente.
+- `atomic_install` (cp→tmp + mv) resuelve la ventana de lectura a-medio-sobrescribir con sesión viva. El flowchart lo marca RESUELTO; el código lo implementa. Coherente.
+- El throttle per-repo (6h, solo cachea chequeos LIMPIOS) + la identidad (conocimiento-propio) que viaja en TODOS los exit paths (incluso throttle) + el drift de skills global con throttle propio: tres capas independientes que no se pisan. Coherente.
+- `checkout -B main origin/main` en bootstrap.sh y Updater.swift: mismo patrón, mismo efecto (fuerza-alinea, descarta leftover). Documentado como ⚠ ESCRIBE git en ambos nodos. Coherente.
+- El fail-open sin jq está documentado en el código, en el flowchart (GINST), y en la leyenda. No es un hueco oculto; es una decisión de diseño explícita con warning. Aceptable.
+- Los 9 hooks PreToolUse|Bash del fan-out coinciden 1:1 entre CONVENCIONES §6, ev_de(), y el flowchart. Coherente.
+- La bifurca COMPARTIDO/PERSONAL del drift hook (marca `.claude/repo-compartido`) es consistente entre el código (comentario + `drift_chequea_repo`), el flowchart (CSHARE → DRIFT_SHARED / DRIFT_PERSONAL), y la leyenda. Coherente.
+
+## Lente SUFICIENCIA OPERATIVA
+
+SEV=critico · Updater.swift:runUpdate() (línea ~155-170) · hueco operativo: no hay lock/mutex ni idempotencia en el script desprendido (`nohup bash -lc "…pkill…install.sh…"`). Un doble-clic en ⬆ (o un clic + el timer de 15 min que dispara `checkIfStale`→`runUpdate`) lanza DOS scripts concurrentes; el segundo `pkill` mata el `install.sh` del primero a mitad de `cp`/`jq`/`mv`, dejando hooks a medio sobrescribir y settings.json corrupto. El `sleep 1` no protege: el segundo script puede llegar 2 s después. · impacto: instalación corrupta (hooks parciales, settings.json JSON inválido) que NO se repara con re-correr install-brain.sh porque el cableado jq falla sobre un JSON roto; el usuario no sabe qué pasó (el log /tmp/cortex-update.log lo pisa el segundo script). · fix: al inicio del script desprendido, `flock -n /tmp/.cortex-update.lock` (o `mkdir` como lock atómico); si no se puede, `exit 1` y el UI muestra "ya hay un update en curso". Alternativa: el `pkill` va DENTRO del lock, no antes.
+
+SEV=alto · install-brain.sh:~línea 195 (`cp -Rf "$sk"/. "$SKILLS_DIR/$name"/`) · hueco operativo: la copia de SKILLS es no-atómica (cp -Rf directo), a diferencia de los hooks que usan `atomic_install` (cp→tmp + mv). Una skill con árbol (SKILL.md + reference/ + scripts) puede quedar a medio copiar si el proceso se interrumpe (kill, disk full, o el pkill del updater). El hook `aviso-drift-cerebro` luego detecta "drift" y auto-aplica, pero la skill está en estado inconsistente (SKILL.md nuevo, reference/ viejo). · impacto: skill funcionalmente rota (el SKILL.md referencia archivos de reference/ que no existen o son de la versión anterior); el drift-check la marca "al día" por checksum del SKILL.md solo, no del árbol completo → el problema persiste silenciosamente. · fix: extender `atomic_install` a árboles: `cp -Rf` a un tmp-dir en el mismo filesystem + `mv` (rename atómico del dir), o al menos `rsync --delete` a tmp + swap. Documentar en el header de install-brain.sh que skills NO son atómicas (hoy solo dice "hooks con atomic_install").
+
+SEV=alto · install-brain.sh:ev_de() (línea ~120-155) + MANIFEST · hueco operativo: agregar un hook global nuevo al MANIFEST exige un paso MANUAL en `ev_de()` (mapear nombre→evento). Si se olvida, el hook se COPIA a ~/.claude/hooks/ pero NO se cablea en settings.json. El único safeguard es un `echo "warn:…"` a stdout (fácil de perder en un scroll) + test-brain en CI. En una instalación local sin CI, el resultado es un hook presente en disco pero inactivo, sin error visible. · impacto: el operador cree que el guard está activo (el archivo está en ~/.claude/hooks/), pero no dispara nunca. No hay comando "verificar que todo lo copiado está cableado" documentado como rutina de post-instalación. · fix: (a) al final de install-brain.sh, emitir un RESUMEN tabular "copiado ✓ / cableado ✓ / cableado ✗ (falta en ev_de)" y si hay ✗, `exit 1` (no solo warn). (b) Documentar en docs/autoupdate.md (o README) el paso "al agregar un hook al MANIFEST: actualizar ev_de() + correr test-brain" como checklist de release.
+
+SEV=alto · bootstrap.sh:~línea 84 (`git checkout -B main origin/main`) + Updater.swift:runUpdate() (mismo patrón) · hueco operativo: `checkout -B` descarta rama/commits locales de ~/.cortex SIN verificar si hay un working tree dirty (cambios no commiteados). Si el usuario tiene edits pendientes en el clon (p. ej. está desarrollando un hook en el clon local, o un test dejó artefactos), `checkout -B` los arrastra o los descarta silenciosamente. No hay `git status --porcelain` previo ni `git stash`. · impacto: pérdida de trabajo no commiteado en el clon de infraestructura. El usuario no recibe aviso; el bootstrap termina con "listo 🎀" y el trabajo está ido. · fix: antes del `checkout -B`, `git -C "$DIR" status --porcelain` → si hay cambios, `git stash push -m "cortex-bootstrap-$(date +%s)"` (o `exit 1` con mensaje "hay cambios no commiteados en $DIR; commítalos o stashea antes de actualizar").
+
+SEV=medio · install-brain.sh:~línea 280 (bloque normas CLAUDE.md) · hueco operativo: el respaldo es un ÚNICO `CLAUDE.md.bak` (sobrescrito en cada corrida). Si la segunda corrida produce un resultado indeseado (p. ej. el awk trunca algo por un edge-case de BEGIN/END), el .bak ya es la versión corrupta. No hay historial ni verificación post-mv. · impacto: pérdida de la sección personal del usuario sin posibilidad de rollback a la versión anterior (solo a la corrupta). · fix: `cp "$GCLAUDE" "$GCLAUDE.bak.$(date +%Y%m%d%H%M%S)"` (o al menos .bak.1 rotando 2-3 generaciones). Post-mv: `grep -c 'BEGIN cortex' "$GCLAUDE"` debe ser 1 y `grep -c 'END cortex'` debe ser 1; si no, restaurar del .bak.
+
+SEV=medio · aviso-drift-cerebro.sh:~línea 60-75 (conocimiento-propio) · hueco operativo: el doc llama a `conocimiento-propio.md` "imborrable", pero el mecanismo es SOLO "si el archivo existe, lo inyecto". No hay watchdog, no hay backup, no hay hook PreToolUse/Edit que bloquee su borrado. Un `rm` o un `git clean -fd` lo elimina y la identidad del repo se pierde sin rastro. · impacto: la "identidad del proyecto" desaparece tras un cleanup agresivo; el operador no sabe que existía ni qué contenía (no viaja por git si es .local.md). · fix: (a) si es .local.md (gitignored), el hook SessionStart podría detectar su AUSENCIA (si el repo tiene un placeholder `.claude/memory/conocimiento-propio.local.md.example`) y avisar "tu identidad local no está — ¿la recreas?". (b) Documentar en el README del repo que este archivo es crítico y no debe ir en .gitignore del repo (o sí, pero con backup en la memoria global).
+
+SEV=medio · Updater.swift:runUpdate() → `/tmp/cortex-update.log` · hueco operativo: el log de la actualización va a una ruta FIJA en /tmp. (1) /tmp se limpia en reboot → si el update falla y el usuario reinicia, la evidencia está perdida. (2) Dos updates concurrentes (ver hallazgo crítico) se pisan. (3) No hay rotación ni timestamp en el nombre. El UI dice "revisa /tmp/cortex-update.log" pero no hay forma de saber SI ese log es del intento actual o de uno anterior. · impacto: diagnóstico imposible tras un update fallido + reboot; el operador no puede distinguir intentos. · fix: log en `~/.cortex/.update-log-$(date +%Y%m%d-%H%M%S).log` (o `~/.claude/.cortex-update.log` con append + timestamp por línea). El UI muestra la ruta exacta del log de ESTE intento.
+
+SEV=medio · install-brain.sh:~línea 170 (skills) + MANIFEST skills · hueco operativo: la copia de skills usa `cp -Rf` (sobrescribe todo) pero NO hace poda de skills RETIRADAS del MANIFEST. Si una skill se elimina del MANIFEST (o se renombra), la carpeta vieja queda en ~/.claude/skills/ para siempre. El drift-check de skills (aviso-drift) compara "fuente vs instalado" pero si la fuente ya no la lista, no la ve → no la poda. · impacto: skills obsoletas acumulan en ~/.claude/skills/, consumen contexto (Claude las ve en el listing), y pueden contener instrucciones obsoletas que contradigan las actuales. · fix: al final del loop de skills, listar ~/.claude/skills/ y comparar contra el set del MANIFEST; las que no estén en el MANIFEST → `rm -rf` (o mover a ~/.claude/skills._retired/). Documentar en el header de install-brain.sh.
+
+SEV=medio · no-bypass-deploy guard (FP corpus 2026-08-08 → 2026-09-03) · hueco operativo: el guard sigue disparando sobre comandos READ-ONLY (git log, ls, grep, find) que mencionan el nombre del instalador como ARGUMENTO, no como ejecución. El FP del 2026-09-03 dice "verificar contra #351-fixed antes de tunear (puede ser residual)" → el tuning NO está cerrado. Cada forense/auditoría sobre el instalador genera un aviso que el operador debe ignorar, diluyendo la señal del aviso legítimo (alguien que SÍ corre el instalador a mano). · impacto: el operador aprende a ignorar el aviso (habituation) → cuando el aviso SÍ importa (alguien realmente bypassa el widget), se pierde en el ruido. · fix: cerrar el tuning (excluir `git log/show/diff --`, `ls`, `find`, `grep` como verbos; exigir que el nombre del instalador aparezca en posición de ejecución: `bash install.sh`, `./install.sh`, `sh install.sh`). Documentar en el FP doc que el caso está RESUELTO (o dejar el ticket abierto con owner).
+
+SEV=bajo · install-brain.sh:~línea 310 (`git config --global fetch.prune true`) · hueco operativo: efecto secundario global (modifica ~/.gitconfig del usuario) que no se documenta en el README ni en docs/autoupdate.md como "el instalador toca tu git config global". Solo está en un comentario del script. Un usuario que no quiere fetch.prune global no sabe que el brain lo impuso. · impacto: menor (es idempotente y razonable), pero viola el principio de "el instalador no tiene efectos secundarios no documentados". · fix: añadir a la sección "Qué instala" del README: "setea `git config --global fetch.prune true` (necesario para que barrer-ramas detecte ramas remotas eliminadas)".
+
+SEV=bajo · install-brain.sh:persist_env_active (línea ~230) · hueco operativo: captura CLAUDE_SESSIONS_DRIVE / CLAUDE_SESSIONS_DEBOUNCE_MIN si están exportadas al correr el bootstrap. Si un dev tiene CLAUDE_SESSIONS_DRIVE apuntando a un path de test y corre el bootstrap, ese valor se persiste GLOBAL en settings.json para TODAS las sesiones. No hay validación de que el path sea "razonable" (no sea /tmp, no sea un path de CI). · impacto: sesiones master se exportan a un path de test que se limpia; el dev no se da cuenta hasta que las sesiones desaparecen. · fix: al persistir, validar que el valor no contenga "/tmp/" ni "/ci/" ni sea un path que no existe; si no pasa, warn y no persistir.
+
+---
+
+**Resumen de operabilidad:** El sistema es MAYORITARIAMENTE operable: el flujo bootstrap→install-brain→widget-update está documentado, idempotente, y tiene fail-open en los puntos de fallo (sin jq → guards no bloquean; sin clon → widget invita a mano). Los hallazgos críticos/altos son edge-cases de concurrencia (doble-update) y de atomicidad (skills), no del camino feliz. La ruta de recuperación principal (re-correr bootstrap.sh) existe y está documentada. Lo que FALTA como rutina operativa: un comando "diagnosticar/verificar integridad del brain instalado" (test-brain existe pero no está documentado como herramienta de recuperación del operador; solo se menciona como CI check). Sugerencia: documentar en docs/autoupdate.md una sección "Si algo se rompió" con: (1) `bash ~/.cortex/brain/test-brain.sh` (diagnóstico), (2) `bash ~/.cortex/brain/install-brain.sh` (self-heal), (3) `curl … bootstrap.sh | bash` (rebuild completo), en ese orden de invasividad.
+
+---
+
+## RESOLUCIÓN — RONDA 1 (2026-09-08, cada fix verificado contra el código en el merge)
+
+Los 7 hallazgos C/A/M reales de la ronda 1 se aplicaron+commitearon+pushearon en `docs/pulido-flowcharts`.
+Cada uno se verificó contra el código antes de aplicar (el 27B da CANDIDATOS, yo garantizo la corrección):
+
+| # | sev | hallazgo | fix | commit |
+|---|-----|----------|-----|--------|
+| 1 | **crítico** | `runUpdate` sin lock → doble-⬆ = 2 checkout-B+install concurrentes = corrupción irreparable | lock atómico `mkdir ~/.cortex/.updating` + `trap rmdir EXIT` al inicio del script detached | a36fdbd |
+| 2 | **alto** | `checkout -B` descarta trabajo no-commiteado en el clon sin stash | `git status --porcelain` → `git stash push -u` antes del checkout | a36fdbd |
+| 3 | **alto** | copia de skills NO atómica (a diferencia de hooks) → skill a medio copiar | `mktemp -d` en el mismo FS + `cp` + `rm` viejo + `mv` (rename atómico) | a36fdbd |
+| 4 | **alto** | hook nuevo del MANIFEST copiado pero SIN cablear (ev_de manual) → solo warn, guard inerte | acumulador `unwired_names` + `exit 1` si queda alguno sin cablear | 1bdf638 |
+| 5 | **alto (coherencia)** | NO había drift-check de HOOKS globales (solo skills) → "global congelado con FPs vivos" | `drift_hooks_global` nueva + wiring con throttle propio; **alcance corregido**: TODO {global,both} que install-brain copia (hooks+libs+scripts), no solo kind=hook | **1625f99** |
+| 6 | medio | settings.json corrupto → guards fail-open pero install imprime "listo" | `jq empty` en la rama `else` de register_hook → error explícito + `exit 1` | a36fdbd |
+| 7 | medio | `drift_skills_global` que falla (exit≠0) cachea el ERROR como "limpio" 6h | chequeo de `_rc` antes de sellar el stamp (solo cachea exit 0 + stdout vacío) | 1625f99 |
+
+**DIFERIDO a su propio slice (NO es del proceso 01 — es tuning de un guard):**
+- **medio · `no-bypass-deploy` FP residual** (lo flaggearon las 3 lentes vía el zapato de install-01, pero el
+  FIX vive en el GUARD, no en el proceso de instalación). El corpus ya tiene ~5 casos → califica para una
+  pasada de TUNING DE PRECISIÓN dedicada (con OK de unjordi + cada fix con su test, por Integridad de
+  guardarraíles). Se anota en el backlog vivo (`estado-proyecto.md`) para su slice propio; NO se resuelve aquí.
+
+**Bajos (piso aceptable "solo-bajos", no bloquean convergencia):** awk GLOBAL_HOOKS apende `.sh` a no-hooks
+(agentes-costo.json) · `resolveClonePath` exige `macos/install.sh` en vez de solo `.git` · bootstrap sin flock ·
+`.bak` único de CLAUDE.md sin rotación · conocimiento-propio sin watchdog · log en /tmp se pierde en reboot ·
+skills retiradas no se podan · fetch.prune global sin doc · persist_env sin validar path. Quedan como backlog.
+
+## RESOLUCIÓN — RONDA 2 (2026-09-08, re-audit sobre el código ya arreglado; cada hallazgo verificado contra código)
+
+El re-audit (3 lentes ollama sobre `material-02.txt` = código con la ronda 1 aplicada) NO convergió: cazó
+debilidades REALES en los propios fixes de la ronda 1 (el loop funcionando). Verificadas y arregladas:
+
+| sev | hallazgo (lente) | fix | commit |
+|-----|------------------|-----|--------|
+| **crítico** (proceso) / bajo (suf) | skills `rm -rf` ANTES del `mv` → ventana sin skill + data-loss si `mv` falla | swap con rollback (aparta vieja→entra nueva→restaura si falla); sandbox ✓ | 18ad38b |
+| **alto** (proceso+suf) | updater lock `mkdir`+`trap EXIT` no se limpia con kill-9 → botón ⬆ muerto para siempre | lock PID-aware: guarda pid, recicla lock huérfano (`kill -0`) | 18ad38b |
+| **alto** (coherencia+suf) | `Updater.swift checkout -B` SIN stash (arreglé el gemelo bootstrap.sh, no el del widget) | stash pre-checkout en el `inner` (mismo patrón que bootstrap) | 18ad38b |
+| medio (proceso+suf) | auto-sync `push \|\| true` + STATUS=synced → push-fail reporta éxito falso → nunca reintenta → colega stale | STATUS=synced-push-failed (no cacheado) + mensaje re-push; manejado en el sweeper | 4d2adc3 |
+| medio (suf+coherencia) | sin jq, `register_hook` return pero el loop suma a wired_names → "ok: cableados" miente | mensaje honesto sin jq (fail-open conservado, sin exit 1) | 4d2adc3 |
+
+**Ya cubierto por la ronda 1 (suficiencia lo re-reportó sobre el código pre-fix):** stash de bootstrap.sh, drift de hooks global.
+
+**DIFERIDO / bajos (no bloquean convergencia del 01):**
+- **bajo · `conocimiento-propio` sin límite de tamaño** (aviso-drift L~72): se reinyecta íntegro en cada SessionStart → bloat de contexto si crece. Backlog: decidir cap + aviso "…truncado" (no truncar identidad en silencio).
+- **enhancement · doc+test de `ev_de`**: FIX-4 ya hace exit-1 si un hook queda sin cablear; falta un test que falle si un hook {global,both} kind=hook del MANIFEST no tiene entrada en `ev_de`, + doc del checklist "agregar hook → añadir a ev_de". Backlog.
+- **fuera de repo · `bootstrap-claude.sh` de la PLANTILLA** (`cp -f` de 3/6 hooks both, pisa globales con stale): es el 🚧 BOOT_INV ya conocido, vive en plantilladotnet, no en cortex. Ya trackeado (EPIC del ciclo brain-widget).
+- **guard-precision** (confirmar-merge match "develop", git-branch push pelón, dod B2, AskUserQuestion, no-bypass self-heal): FPs de guards, no del proceso 01 → backlog #9 (slice de tuning con OK + test).
+
+## RESOLUCIÓN — RONDA 3 (2026-09-08, re-audit sobre el código de rondas 1+2)
+
+Las 3 lentes dejaron el `.response` vacío (quirk qwen3: todo al `.thinking`) → hallazgos extraídos del razonamiento.
+**Ningún hallazgo fue regresión de los fixes de rondas 1-2** (se sostienen). Los nuevos son doc/operabilidad/
+mantenimiento, NO bugs activos del camino de instalación/actualización:
+
+| sev real | hallazgo | disposición |
+|----------|----------|-------------|
+| **medio** | sweeper `DASHBOARD` hardcodea slug `-Users-` → rompe en Linux (la Cachy) → bitácora nunca se escribe | **ARREGLADO 31febb6** (deriva el slug de $HOME; portable Mac/Linux, verificado) |
+| medio (refactor) | `ev_de()` duplicado en install-brain.sh + sincronizar-cerebro.sh | backlog #17a (extraer a lib compartida; test-brain ya caza divergencia) |
+| bajo (robustez) | contrato de formato de sincronizar-cerebro implícito (drift lo parsea por grep) | backlog #17b (contrato/test) |
+| bajo (doc) | sweeper no aparece en el flowchart 01 | backlog #17c (añadir nodo) |
+| bajo (dismiss) | descubrimiento del sweeper solo por `.brain-version` | por DISEÑO (el sello es el marcador intencional) — no es bug |
+
+**Convergencia:** el proceso de instalación/actualización (camino feliz + edge-cases de concurrencia/atomicidad)
+ya no tiene C/A/M sin atender. Lo que resta es doc/refactor/robustez (backlog) — el piso "solo-bajos". Falta una
+ronda LIMPIA (thinking desactivado, salida estructurada) para confirmarlo formalmente + el Opus gate.
+
+## RESOLUCIÓN — RONDA 4 (2026-09-08, re-audit LIMPIO con `think:false` → salida estructurada)
+
+Las 3 lentes con salida `.response` limpia. **NINGÚN C/A/M nuevo real** — el proceso de instalación/actualización
+CONVERGIÓ a solo-bajos. Triage (cada hallazgo verificado contra código real):
+
+**Falsos positivos (descartados con evidencia):**
+- proceso: `drift_hooks_global` cmp+`-nt` "falso positivo por mtime" → FALSO: el código hace `cmp -s && continue` PRIMERO (contenido idéntico nunca es drift); el `-nt` solo corre si difieren. El 27B recomendó exactamente lo que el código YA hace.
+- proceso: `emit_and_exit` jq-escaping → FALSO: `jq --arg` escapa cualquier string (backticks/$/saltos); el propio hallazgo admite "jq debería escapar".
+- suficiencia: "las libs no se copian" → FALSO: el MANIFEST lista las libs (kind=lib) y el copy de install-brain (L76, sin filtro de kind) las incluye — verificado.
+- **proceso+coherencia (ALTO): auto-sync `git add -A .claude/` + commit bypassa secret-scan / sobre-stagea** → FALSO/ya-mitigado: (a) el auto-sync SOLO corre si `.claude/` está LIMPIO antes (precondición L152) → no barre cambios ajenos; (b) el bypass de secret-scan YA está cerrado (L161-181, audit 2026-08-06) con escaneo inline `ds_buscar` de **la MISMA lib** `detectar-secretos.sh` que el guard real → no puede divergir. El residual "regex no exhaustivo" es limitación deliberada/documentada de TODO el secret-scan, no un bug del 01.
+
+**Ya cubierto:** coherencia "sin jq → mensaje engañoso" = arreglado en 4d2adc3 (mensaje honesto).
+
+**Bajos/doc/robustez → backlog #18** (no bloquean convergencia): register_hook dedupe por substring frágil ante un hook custom con path distinto · `pkill -f` mata TODAS las instancias del widget · flowchart GUPD dice "NO git fetch/pull" pero install-brain sí hace `git config --global fetch.prune` (nit de fidelidad) · doc "bootstrap/widget ⬆ son para máquinas de CONSUMO, no para dev del cerebro" · helper de propagación manual del drift en ramas ≠ Develop<user> · check post-copy de `SKILL.md` en el swap de skills.
+
+**VEREDICTO ronda 4:** proceso 01 convergió — sin C/A/M sin atender. Falta solo el **Opus gate** (Claude Opus fresco, solo-tooling, proceso-algoritmo, SIN contexto, como ronda 1): si coincide en 0 observaciones C/A/M → proceso 01 CERRADO (verificado técnicamente), se pasa al proceso 02.
+
+---
+
+## OPUS GATE (2026-09-08, Claude Opus fresco, solo-tooling, SIN contexto — el sello final del user)
+
+El gate **NO dio cero** — cazó **1 CRÍTICO que las 4 rondas de ollama NO vieron** (justo su razón de ser). Triage:
+
+- **CRÍTICO → ARREGLADO (92fb814):** `Updater.swift` `pkill -f 'Cortex Widget…'` corre dentro de un `bash -lc`
+  cuya cmdline CONTIENE ese patrón → `pkill -f` se auto-envía SIGTERM (footgun de la memoria de entorno).
+  **Verificado empíricamente:** NO es breakage determinista (race — el fork de install.sh suele ganar y
+  sobrevive como huérfano), pero la ventana existe. Fix: `pgrep -f … | grep -vx $$ | xargs kill` (excluye el
+  PID propio). Probado: el bash sobrevive + mata el widget. El Opus lo rateó "crítico determinista"; la
+  verificación empírica lo baja a race real (footgun) — arreglado igual.
+- **2 bajos → ARREGLADOS (e703dac):** bootstrap tolera `git fetch` offline (sigue desde el clon local) ·
+  detalle del drift incluye `SIN CABLEAR` (antes salía vacío si el único drift era cableado faltante).
+- **DIFERIDOS a backlog #19 (reales, pero refactor/moderados o policy — no se arreglan bajo presión de contexto):**
+  · **ALTO** race entre el auto-apply del hook interactivo y el sweeper (no comparten lock; solo `index.lock` de
+    git serializa) → baja probabilidad (sesión abriéndose justo durante el cron diario) + sin corrupción (git
+    lo evita), pero puede dejar `.claude/` estageado-sin-commitear. Fix = compartir la primitiva de lock (refactor con riesgo).
+  · **MEDIO** clasificación de dirección del drift por mtime: un `git pull` re-sella mtimes de la fuente → una
+    edición viva se re-clasifica como "desactualizado, re-corre install-brain" (guía a DESTRUIRLA). Warn-only. Fix = comparar vs blob git / ledger de hash.
+  · **MEDIO** doble corrida del sync (dry-run L107 + --apply L159) por SessionStart en repo compartido con drift → latencia. Fix = reusar la salida del --apply.
+  · **BAJO** `checkout -B` descarta commits locales ADELANTE (el stash solo salva lo no-commiteado) + stashes se acumulan sin pop.
+  · **BAJO** versión = `git rev-list --count` es relativo a la rama → instalar desde develop da un count no comparable con main.
+  · **BAJO** asimetría brained: el sweeper descubre solo por `.brain-version`; el hook acepta también `dod-verificar.sh` → un repo pre-sello es invisible al barrido (el caso MegaFlux que motivó el sweeper).
+  · **BAJO/policy** el escaneo de secretos del auto-sync es fail-OPEN si falta `detectar-secretos.sh` → en el único camino que commitea fuera del tool Bash, el guard defensivo se apaga en silencio. El Opus sugiere fail-CLOSED (abortar). Requiere decisión de unjordi (cambia la política fail-open del brain).
+
+**VEREDICTO FINAL proceso 01** (tras trabajar los hallazgos del Opus): el CRÍTICO está arreglado (footgun del
+updater, 92fb814); 2 bajos arreglados (e703dac); el MEDIO de mtime MITIGADO con hedge (fc3d91c: el mensaje ya no
+guía a destruir una edición viva). Reevaluando los deferidos con el CÓDIGO real:
+- El "ALTO de concurrencia" resultó un **TRADEOFF CONOCIDO-ACEPTADO** — el comentario del sweeper (barrer-flotilla
+  L92-96) ya lo documenta como aceptado (precheck .claude/-limpio + index.lock → degrada SIN corromper). Un lock
+  compartido naíve sería NET-NEGATIVO (lock stale → repo sin auto-sync → drift silencioso = problema MegaFlux) →
+  su fix real es un slice deliberado (lock + staleness), no un rush. NO es un alto sin atender.
+- El MEDIO de doble-sync (eficiencia, baja frecuencia) y el fix DE FONDO del mtime (git-blob) + bajos → backlog #19.
+
+**ESTADO:** proceso 01 **verificado técnicamente**, convergido a solo-bajos: crítico cerrado, sin altos reales sin
+atender (el nominal es tradeoff aceptado documentado), medios mitigados o de baja-frecuencia trackeados. Listo para
+pasar al **proceso 02** con el tail en backlog #16-#19. (Verde técnico ≠ LISTO: el cierre real es de unjordi / release.)

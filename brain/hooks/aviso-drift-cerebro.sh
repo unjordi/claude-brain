@@ -77,10 +77,11 @@ done
 emit_and_exit() {
   local extra="${1:-}" out="" part sep=""
   # Une (en orden, saltando vacíos): SELF (identidad) · $extra (drift/auto-sync per-repo) · GLOBAL_SK_WARN
-  # (drift de la copia GLOBAL de skills) · MIGRACION_WARN (huella local de clon sin migrar). Los dos
-  # últimos viajan en TODOS los exit paths (incluso el throttle per-repo fresco): son concerns per-MÁQUINA
-  # con su PROPIO throttle, no dependen del drift del repo actual.
-  for part in "$SELF" "$extra" "${GLOBAL_SK_WARN:-}" "${MIGRACION_WARN:-}"; do
+  # (drift de la copia GLOBAL de skills) · GLOBAL_HOOK_WARN (drift de la copia GLOBAL de hooks/libs) ·
+  # MIGRACION_WARN (huella local de clon sin migrar). Los tres últimos viajan en TODOS los exit paths
+  # (incluso el throttle per-repo fresco): son concerns per-MÁQUINA con su PROPIO throttle, no dependen
+  # del drift del repo actual.
+  for part in "$SELF" "$extra" "${GLOBAL_SK_WARN:-}" "${GLOBAL_HOOK_WARN:-}" "${MIGRACION_WARN:-}"; do
     [ -z "$part" ] && continue
     if [ -z "$out" ]; then out="$part"; else
       out="$out
@@ -123,8 +124,31 @@ if [ -f "$sk_stamp" ]; then
   [ $(( now - sk_last )) -lt $(( horas * 3600 )) ] && sk_skip=1
 fi
 if [ "$sk_skip" = 0 ]; then
-  GLOBAL_SK_WARN="$(drift_skills_global 2>/dev/null || true)"
-  [ -z "$GLOBAL_SK_WARN" ] && printf '%s' "$now" > "$sk_stamp" 2>/dev/null || true
+  GLOBAL_SK_WARN="$(drift_skills_global 2>/dev/null)"
+  _rc=$?
+  if [ "$_rc" = 0 ] && [ -z "$GLOBAL_SK_WARN" ]; then
+    printf '%s' "$now" > "$sk_stamp" 2>/dev/null || true
+  fi
+fi
+
+# ── DRIFT DE HOOKS GLOBAL (per-máquina) — con su PROPIO throttle (independiente del per-repo y del de skills).
+# Warn-only. Equivalente de drift_skills_global pero para ~/.claude/hooks vs brain/hooks: cubre TODO archivo
+# de tier {global,both} que install-brain copia ahí (hooks + libs + scripts). Antídoto a "el global está
+# congelado": un guard/lib editado a mano o desactualizado en la copia global no se detectaba. Solo re-chequea
+# cada AVISO_DRIFT_HORAS; un resultado CON drift NO se cachea (insiste hasta que se porte a la fuente).
+GLOBAL_HOOK_WARN=""
+hk_stamp="$stampdir/.hooks-global"
+hk_skip=0
+if [ -f "$hk_stamp" ]; then
+  hk_last=$(cat "$hk_stamp" 2>/dev/null || echo 0); case "$hk_last" in ''|*[!0-9]*) hk_last=0;; esac
+  [ $(( now - hk_last )) -lt $(( horas * 3600 )) ] && hk_skip=1
+fi
+if [ "$hk_skip" = 0 ]; then
+  GLOBAL_HOOK_WARN="$(drift_hooks_global 2>/dev/null)"
+  _rc=$?
+  if [ "$_rc" = 0 ] && [ -z "$GLOBAL_HOOK_WARN" ]; then
+    printf '%s' "$now" > "$hk_stamp" 2>/dev/null || true
+  fi
 fi
 
 # ── HUELLA LOCAL DE MÁQUINA SIN MIGRAR (rename #312 claude-brain→cortex) — SOLO test -d LOCAL, JAMÁS red
