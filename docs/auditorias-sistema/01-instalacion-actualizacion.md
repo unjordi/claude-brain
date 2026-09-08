@@ -163,3 +163,34 @@ CONVERGIÓ a solo-bajos. Triage (cada hallazgo verificado contra código real):
 **Bajos/doc/robustez → backlog #18** (no bloquean convergencia): register_hook dedupe por substring frágil ante un hook custom con path distinto · `pkill -f` mata TODAS las instancias del widget · flowchart GUPD dice "NO git fetch/pull" pero install-brain sí hace `git config --global fetch.prune` (nit de fidelidad) · doc "bootstrap/widget ⬆ son para máquinas de CONSUMO, no para dev del cerebro" · helper de propagación manual del drift en ramas ≠ Develop<user> · check post-copy de `SKILL.md` en el swap de skills.
 
 **VEREDICTO ronda 4:** proceso 01 convergió — sin C/A/M sin atender. Falta solo el **Opus gate** (Claude Opus fresco, solo-tooling, proceso-algoritmo, SIN contexto, como ronda 1): si coincide en 0 observaciones C/A/M → proceso 01 CERRADO (verificado técnicamente), se pasa al proceso 02.
+
+---
+
+## OPUS GATE (2026-09-08, Claude Opus fresco, solo-tooling, SIN contexto — el sello final del user)
+
+El gate **NO dio cero** — cazó **1 CRÍTICO que las 4 rondas de ollama NO vieron** (justo su razón de ser). Triage:
+
+- **CRÍTICO → ARREGLADO (92fb814):** `Updater.swift` `pkill -f 'Cortex Widget…'` corre dentro de un `bash -lc`
+  cuya cmdline CONTIENE ese patrón → `pkill -f` se auto-envía SIGTERM (footgun de la memoria de entorno).
+  **Verificado empíricamente:** NO es breakage determinista (race — el fork de install.sh suele ganar y
+  sobrevive como huérfano), pero la ventana existe. Fix: `pgrep -f … | grep -vx $$ | xargs kill` (excluye el
+  PID propio). Probado: el bash sobrevive + mata el widget. El Opus lo rateó "crítico determinista"; la
+  verificación empírica lo baja a race real (footgun) — arreglado igual.
+- **2 bajos → ARREGLADOS (e703dac):** bootstrap tolera `git fetch` offline (sigue desde el clon local) ·
+  detalle del drift incluye `SIN CABLEAR` (antes salía vacío si el único drift era cableado faltante).
+- **DIFERIDOS a backlog #19 (reales, pero refactor/moderados o policy — no se arreglan bajo presión de contexto):**
+  · **ALTO** race entre el auto-apply del hook interactivo y el sweeper (no comparten lock; solo `index.lock` de
+    git serializa) → baja probabilidad (sesión abriéndose justo durante el cron diario) + sin corrupción (git
+    lo evita), pero puede dejar `.claude/` estageado-sin-commitear. Fix = compartir la primitiva de lock (refactor con riesgo).
+  · **MEDIO** clasificación de dirección del drift por mtime: un `git pull` re-sella mtimes de la fuente → una
+    edición viva se re-clasifica como "desactualizado, re-corre install-brain" (guía a DESTRUIRLA). Warn-only. Fix = comparar vs blob git / ledger de hash.
+  · **MEDIO** doble corrida del sync (dry-run L107 + --apply L159) por SessionStart en repo compartido con drift → latencia. Fix = reusar la salida del --apply.
+  · **BAJO** `checkout -B` descarta commits locales ADELANTE (el stash solo salva lo no-commiteado) + stashes se acumulan sin pop.
+  · **BAJO** versión = `git rev-list --count` es relativo a la rama → instalar desde develop da un count no comparable con main.
+  · **BAJO** asimetría brained: el sweeper descubre solo por `.brain-version`; el hook acepta también `dod-verificar.sh` → un repo pre-sello es invisible al barrido (el caso MegaFlux que motivó el sweeper).
+  · **BAJO/policy** el escaneo de secretos del auto-sync es fail-OPEN si falta `detectar-secretos.sh` → en el único camino que commitea fuera del tool Bash, el guard defensivo se apaga en silencio. El Opus sugiere fail-CLOSED (abortar). Requiere decisión de unjordi (cambia la política fail-open del brain).
+
+**VEREDICTO FINAL proceso 01:** el CRÍTICO del Opus está arreglado; el proceso de instalación/actualización quedó
+**verificado técnicamente** con el footgun del updater cerrado. Quedan reales: 1 alto de concurrencia + 2 medios +
+bajos, TODOS deferidos a backlog #19 con su severidad (refactor/moderados/policy). **DECISIÓN PENDIENTE de unjordi:**
+¿otra pasada de fixes sobre el alto+medios antes de pasar al proceso 02, o se aceptan como backlog y se avanza?
