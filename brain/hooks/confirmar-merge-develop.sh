@@ -220,12 +220,27 @@ _recent_intercalado() {  # $1=ruta del transcript .jsonl → imprime la conversa
   tail -n 6000 "$1" 2>/dev/null | jq -rs '
     [ .[]
       | select((.isMeta // false) != true)                # descarta META/inyectados (no son del usuario)
-      | { role: (.message.role // .type),
+      # MENSAJE MID-TURN del usuario (fix del FP 2026-09-08, clase "PR19"): lo que el usuario escribe MIENTRAS
+      # el turno corre NO queda como turno {"type":"user"} — el CLI lo ABSORBE dentro del turno en curso
+      # (queue-operation con reason=absorbed_mid_turn, visto en los transcripts desde el 2026-08-25) y lo
+      # persiste como {"type":"attachment","attachment":{"type":"queued_command","prompt":"<texto>",
+      # "origin":{"kind":"human"}}}. Sin esta rama la ventana del juez NO CONTENÍA la autorización y el guard
+      # frenaba con el OK en la mano ("mejor mergea el PR19…", rechazado 3 veces). Se toma `.attachment.prompt`
+      # (el texto CRUDO tecleado), NUNCA `.rendered` (que viene envuelto en <system-reminder>).
+      # AUTORIDAD INTACTA: se exige `origin.kind == "human"` ESTRICTO (campo ausente u otro valor → NO se
+      # surfacea, fail-closed) → solo input tecleado por la persona autoriza, y el veto de CITA sigue
+      # re-verificando el ALLOW contra estas mismas líneas USUARIO:.
+      | ( if (.type == "attachment")
+             and ((.attachment.type? // "") == "queued_command")
+             and ((.attachment.origin.kind? // "") == "human")
+          then (.attachment.prompt? // "") else "" end ) as $qc
+      | { role: (if $qc != "" then "user" else (.message.role // .type) end),
           # AskUserQuestion: la respuesta llega como tool_result (texto vacío arriba → se perdía). La opción
           # ELEGIDA por el usuario + sus notas viven en .toolUseResult.answers/.annotations (input GENUINO del
           # usuario al hacer clic) → se surfacea como turno USUARIO. SOLO ese campo (AskUserQuestion-específico);
           # el output arbitrario de OTRAS tools NO tiene .answers → sigue cayendo a texto vacío y se filtra.
-          text: ( (try ([ .toolUseResult.answers[]
+          text: ( if $qc != "" then $qc else
+                  ( (try ([ .toolUseResult.answers[]
                           | select(type=="string" and . != "" and . != "(no option selected)" and . != "(notes only)") ]
                        + [ .toolUseResult.annotations[]?.notes | select(type=="string" and . != "") ]
                        | join(" · ")) catch "") as $aq
@@ -234,7 +249,7 @@ _recent_intercalado() {  # $1=ruta del transcript .jsonl → imprime la conversa
                         | if type=="array"
                           then (map(if type=="string" then . elif (.type? == "text") then .text else "" end) | join(" "))
                           else (. // "") end)
-                  end ) }
+                  end ) end ) }
       | select(.role=="user" or .role=="assistant")       # solo turnos de conversación (no tool-result puro)
       | select(.text != "")
       | select(.text | test("<system-reminder>") | not)   # descarta bloques con marca de inyección (CLAUDE.md/recordatorios)
