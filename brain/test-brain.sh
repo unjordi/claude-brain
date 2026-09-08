@@ -2580,8 +2580,12 @@ printf '%s' "$(ad2)" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null
 # (2) en la MINI-DEVELOP con .claude/ limpio: auto-aplica + commit (push sin remoto → tolerado)
 git -C "$AD2REPO" checkout -q -b DevelopTester >/dev/null 2>&1
 ad2out="$(ad2)"
-printf '%s' "$ad2out" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'AUTO-SINCRONIZADO' \
+printf '%s' "$ad2out" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -qiE 'auto-sincroniz' \
   && ok "aviso-drift v2: en mini-develop limpia → AUTO-SINCRONIZA y lo anuncia" || bad "aviso-drift v2: no auto-sincronizó en la mini; got: $ad2out"
+# lock-in del fix 4d2adc3: SIN remoto real el push FALLA → NO se finge sync completo, se anuncia HONESTO
+# 'PUSH FALLÓ' (STATUS=synced-push-failed, no cacheado) para que el colega no quede stale en silencio.
+printf '%s' "$ad2out" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'PUSH FALLÓ' \
+  && ok "aviso-drift v2: sin remoto → anuncia HONESTO 'PUSH FALLÓ' (no finge sync completo; antídoto al remoto stale silencioso)" || bad "aviso-drift v2: no reportó el push fallido sin remoto (¿fingió sync completo con el remoto stale?)"
 { [ -f "$AD2REPO/.claude/hooks/hook-nuevo.sh" ] && git -C "$AD2REPO" log -1 --format=%s | grep -q 'auto-sync'; } \
   && ok "aviso-drift v2: el apply escribió y el commit de auto-sync existe" || bad "aviso-drift v2: falta el archivo aplicado o el commit"
 [ -z "$(git -C "$AD2REPO" status --porcelain)" ] \
@@ -2687,6 +2691,40 @@ rm -f "$SKGBR/brain/skills/MANIFEST"
 is_silent "$(skg)" && ok "drift-skills-global: sin SKILLS-MANIFEST → fail-open (silencio)" || bad "drift-skills-global: habló sin manifiesto"
 rm -rf "$SKGFIX"
 
+# ── (b5d3b) drift_hooks_global: gemelo de drift_skills_global pero para ~/.claude/hooks vs brain/hooks.
+# Antídoto al síntoma real "un guard/lib GLOBAL editado a mano drifteó y nada lo detecta" (el 'global
+# congelado con FPs vivos'). Vigila TODO {global,both} que install COPIA (hooks + libs + scripts), NO solo
+# kind=hook. Antes NO tenía NI UN test (su gemelo skills sí) → una regresión lo dejaría mudo.
+HKGFIX="$(mktemp -d "${TMPDIR:-/tmp}/brain-hkg.XXXXXX")"
+HKGHOME="$HKGFIX/home"; HKGBR="$HKGFIX/brain"
+mkdir -p "$HKGHOME/.claude/hooks" "$HKGBR/brain/hooks"
+# MANIFEST de hooks (3 cols): un {both,hook} + una {both,lib} + un {repo,hook} (este NO debe vigilarse global)
+printf '%s\n' 'git-branch-guard both hook' 'analizar-comando-git both lib' 'dod-verificar repo hook' > "$HKGBR/brain/hooks/MANIFEST"
+hkg() { ( HOME="$HKGHOME" CLAUDE_BRAIN_DIR="$HKGBR"; . "$HOOKS/drift-cerebro-comun.sh"; drift_hooks_global ); }
+# (1) copia instalada EDITADA EN VIVO (más nueva y distinta) → warn "EDITADOS EN VIVO"
+printf 'FUENTE\n' > "$HKGBR/brain/hooks/git-branch-guard.sh"; touch -t 202401010000 "$HKGBR/brain/hooks/git-branch-guard.sh"
+printf 'EDIT MANO\n' > "$HKGHOME/.claude/hooks/git-branch-guard.sh"; touch -t 202601010000 "$HKGHOME/.claude/hooks/git-branch-guard.sh"
+printf '%s' "$(hkg)" | grep -q 'EDITADOS EN VIVO' \
+  && ok "drift-hooks-global: copia instalada editada en vivo → warn 'EDITADOS EN VIVO' (portar a la fuente)" || bad "drift-hooks-global: no detectó el edit-en-vivo"
+# (2) LIMPIA (idénticas) → silencio
+cp "$HKGBR/brain/hooks/git-branch-guard.sh" "$HKGHOME/.claude/hooks/git-branch-guard.sh"; touch -r "$HKGBR/brain/hooks/git-branch-guard.sh" "$HKGHOME/.claude/hooks/git-branch-guard.sh"
+is_silent "$(hkg)" && ok "drift-hooks-global: copia global == fuente → silencio (sin FP)" || bad "drift-hooks-global: warned con copia limpia"
+# (3) también vigila una LIB {both,lib} copiada al global, NO solo kind=hook (la lógica git compartida driftada
+#     es justo el drift silencioso a cazar): edítala en vivo → warn
+printf 'LIB FUENTE\n' > "$HKGBR/brain/hooks/analizar-comando-git.sh"; touch -t 202401010000 "$HKGBR/brain/hooks/analizar-comando-git.sh"
+printf 'LIB EDIT\n' > "$HKGHOME/.claude/hooks/analizar-comando-git.sh"; touch -t 202601010000 "$HKGHOME/.claude/hooks/analizar-comando-git.sh"
+printf '%s' "$(hkg)" | grep -q 'EDITADOS EN VIVO' \
+  && ok "drift-hooks-global: vigila también las LIBS {both,lib}, no solo kind=hook" || bad "drift-hooks-global: no vigiló una lib driftada"
+cp "$HKGBR/brain/hooks/analizar-comando-git.sh" "$HKGHOME/.claude/hooks/analizar-comando-git.sh"; touch -r "$HKGBR/brain/hooks/analizar-comando-git.sh" "$HKGHOME/.claude/hooks/analizar-comando-git.sh"
+# (4) un hook REPO-TIER (dod-verificar) en el global NO lo vigila esta función (no es {global,both}) → silencio
+printf 'REPO SRC\n' > "$HKGBR/brain/hooks/dod-verificar.sh"
+printf 'REPO INST DISTINTO\n' > "$HKGHOME/.claude/hooks/dod-verificar.sh"
+is_silent "$(hkg)" && ok "drift-hooks-global: un repo-tier distinto en el global NO se marca (correcto: no es {global,both})" || bad "drift-hooks-global: marcó un repo-tier"
+# (5) fail-open: sin HOOKS-MANIFEST → silencio
+rm -f "$HKGBR/brain/hooks/MANIFEST"
+is_silent "$(hkg)" && ok "drift-hooks-global: sin HOOKS-MANIFEST → fail-open (silencio)" || bad "drift-hooks-global: habló sin manifiesto"
+rm -rf "$HKGFIX"
+
 # ── (b5c-V1) FIX V1 (auditoría 2026-08-06): el auto-commit del cerebro por-repo BYPASSEABA secret-scan
 # (ocurre DENTRO del subproceso del hook, NO vía una tool Bash → el guard PreToolUse/Bash no lo veía). Ahora
 # drift-cerebro-comun.sh escanea lo AGREGADO al .claude/ (git diff --cached) con detectar-secretos ANTES de
@@ -2726,7 +2764,7 @@ echo "==> resumen: 1 nuevos · 0 a actualizar · 8 ya al día · 7 hooks cablead
 STUB
 git -C "$V1REPO" checkout -q -- .claude/ >/dev/null 2>&1; git -C "$V1REPO" clean -fdq .claude/ >/dev/null 2>&1
 rm -rf "$V1HOME/.claude/memory/.drift-cerebro" 2>/dev/null   # limpia el throttle stamp para re-chequear
-printf '%s' "$(v1)" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'AUTO-SINCRONIZADO' \
+printf '%s' "$(v1)" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -qiE 'auto-sincroniz' \
   && ok "V1: contra-prueba — .claude/ SIN secreto → auto-sincroniza normal (el scan no rompió la ruta feliz)" \
   || bad "V1: la contra-prueba sin secreto NO auto-sincronizó (el scan bloqueó de más)"
 rm -rf "$V1FIX"
@@ -2756,7 +2794,7 @@ echo "  NUEVO      hook-nuevo.sh (hook)"
 echo "==> resumen: 1 nuevos · 0 a actualizar · 8 ya al día · 0 retirado(s) del cerebro · 8 hooks cableados (kind=hook) · 0 cableado faltante"
 STUB
 ad3out="$(printf '%s' '{"source":"startup"}' | HOME="$AD3HOME" CLAUDE_BRAIN_DIR="$AD3BRAIN" CLAUDE_PROJECT_DIR="$AD3REPO" bash "$HOOKS/aviso-drift-cerebro.sh")"
-printf '%s' "$ad3out" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'AUTO-SINCRONIZADO' \
+printf '%s' "$ad3out" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -qiE 'auto-sincroniz' \
   && ok "aviso-drift FIX#1: auto-sincroniza en la mini (apply+commit)" || bad "aviso-drift FIX#1: no auto-sincronizó; got: $ad3out"
 [ -z "$(git -C "$AD3REPO" status --porcelain)" ] \
   && ok "aviso-drift FIX#1: árbol LIMPIO tras el auto-sync (settings.json commiteado, no sin stagear)" || bad "aviso-drift FIX#1: settings.json quedó SIN commitear (árbol sucio): $(git -C "$AD3REPO" status --porcelain)"
@@ -2850,7 +2888,7 @@ STUB
 # el usuario tiene un cambio AJENO staged FUERA de .claude/ (no debe entrar al commit de auto-sync)
 printf 'trabajo a medias\n' >> "$AD6REPO/src/foo.txt"; git -C "$AD6REPO" add src/foo.txt >/dev/null 2>&1
 ad6out="$(printf '%s' '{"source":"startup"}' | HOME="$AD6HOME" CLAUDE_BRAIN_DIR="$AD6BRAIN" CLAUDE_PROJECT_DIR="$AD6REPO" bash "$HOOKS/aviso-drift-cerebro.sh")"
-printf '%s' "$ad6out" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -q 'AUTO-SINCRONIZADO' \
+printf '%s' "$ad6out" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -qiE 'auto-sincroniz' \
   && ok "sA3: auto-sincroniza aunque haya cambios ajenos staged fuera de .claude/" || bad "sA3: no auto-sincronizó; got: $ad6out"
 git -C "$AD6REPO" show --name-only --format= HEAD 2>/dev/null | grep -q 'src/foo.txt' \
   && bad "sA3: ¡el commit de auto-sync BARRIÓ src/foo.txt (commit sin acotar)!" || ok "sA3: el commit de auto-sync NO incluyó src/foo.txt (acotado a .claude/ con -o)"
@@ -3505,6 +3543,28 @@ else
   bad "~/.claude/.brain-version ausente o formato inválido (L1='$_l1' L2='$_l2'; esperaba '$_pref.<num>' + fecha)"
 fi
 
+# (c2) EL SET de .sh en ~/.claude/hooks == EXACTAMENTE {global,both} del MANIFEST (todos los kinds: hooks +
+# libs + scripts se copian ahí). Sin extras, sin repo-tier filtrado, con TODOS los esperados. Antes NO se
+# verificaba el CONJUNTO (e7 solo mira el CABLEADO, no los .sh físicos) → un repo-tier huérfano INERTE
+# (dod-verificar) o un extra pasaba invisible. Este es el hueco calibrador del audit de tests.
+_want="$(awk '$1!~/^#/ && NF>=3 && ($2=="global"||$2=="both"){print $1".sh"}' "$SCRIPT_DIR/hooks/MANIFEST" | sort)"
+_got="$(ls "$FAKEHOME2/.claude/hooks"/*.sh 2>/dev/null | xargs -n1 basename 2>/dev/null | sort)"
+if [ "$_want" = "$_got" ]; then
+  ok "set exacto: ~/.claude/hooks == {global,both} del MANIFEST ($(printf '%s\n' "$_want" | grep -c .) archivos, sin extras ni repo-tier)"
+else
+  bad "set de ~/.claude/hooks NO casa el MANIFEST (< falta en disco / > sobra en disco):
+$(diff <(printf '%s\n' "$_want") <(printf '%s\n' "$_got") | grep -E '^[<>]')"
+fi
+
+# (c3) PODA (a2): un hook repo-tier filtrado al global se RETIRA; un {global,both} y un hook PROPIO del
+# usuario SOBREVIVEN. Antídoto EXACTO al dod-verificar huérfano-inerte hallado en la Cachy (2026-09-08).
+: > "$FAKEHOME2/.claude/hooks/dod-verificar.sh"     # repo-tier filtrado al global (huérfano inerte)
+: > "$FAKEHOME2/.claude/hooks/mi-hook-local.sh"     # hook PROPIO del usuario (NO del brain, NO en el MANIFEST)
+HOME="$FAKEHOME2" bash "$INSTALLER" >/dev/null 2>&1
+[ ! -f "$FAKEHOME2/.claude/hooks/dod-verificar.sh" ] && ok "poda (a2): retiró el hook repo-tier huérfano dod-verificar.sh del global" || bad "poda (a2): dejó dod-verificar.sh (repo-tier) en el global"
+[ -f "$FAKEHOME2/.claude/hooks/git-branch-guard.sh" ] && ok "poda (a2): conservó el hook {both} git-branch-guard.sh" || bad "poda (a2): borró un hook {global,both}"
+[ -f "$FAKEHOME2/.claude/hooks/mi-hook-local.sh" ] && ok "poda (a2): conservó el hook PROPIO del usuario (no lo toca)" || bad "poda (a2): borró un hook propio del usuario"
+
 # C2: persist_env_active captura el VALOR ACTIVO de una env del brain en settings.json .env (no un
 # default). Un HOME fresco con CLAUDE_SESSIONS_DRIVE exportada al correr install-brain queda con ese
 # valor en .env; SIN la var activa, la clave NO se inventa. (Antídoto a setearla ad-hoc por sesión.)
@@ -3523,8 +3583,12 @@ rm -rf "$FAKEHOME3" "$FAKEHOME4" 2>/dev/null
 # Bonus: el desinstalador deja settings.json sin las entradas del cerebro y sin el bloque de normas
 if [ -f "$SCRIPT_DIR/uninstall-brain.sh" ]; then
   HOME="$FAKEHOME2" bash "$SCRIPT_DIR/uninstall-brain.sh" >/dev/null 2>&1
-  left="$(jq '[.hooks[]?[]? | select(([.hooks[]?.command]|join(" "))|test("git-branch-guard|merge-squash-guard|recordar-dashboard|delegacion-gate|delegacion-registrar"))] | length' "$GSET2" 2>/dev/null)"
-  [ "${left:-x}" = "0" ] && ok "uninstall: 0 entradas del cerebro en settings.json" || bad "uninstall: quedan ${left:-?} entradas"
+  # SET COMPLETO {global,both} kind=hook derivado del MANIFEST (NO un subconjunto hardcodeado): así el test
+  # SÍ caza un BRAIN_PAT drifteado (el bug real 2026-09-08: uninstall omitía 5 → 5 cableados ZOMBIE). Antes
+  # este check solo miraba 5 hooks, todos dentro del BRAIN_PAT viejo → nunca detectaba el faltante.
+  _unpat="$(awk '$1!~/^#/ && NF>=3 && ($2=="global"||$2=="both") && $3=="hook"{print $1}' "$SCRIPT_DIR/hooks/MANIFEST" | sed 's/$/\\.sh/' | paste -sd'|' -)"
+  left="$(jq --arg pat "$_unpat" '[.hooks[]?[]? | select(([.hooks[]?.command]|join(" "))|test($pat))] | length' "$GSET2" 2>/dev/null)"
+  [ "${left:-x}" = "0" ] && ok "uninstall: 0 cableados del cerebro en settings.json (set COMPLETO {global,both} kind=hook — cazaría un BRAIN_PAT drifteado)" || bad "uninstall: quedan ${left:-?} cableados ZOMBIE (BRAIN_PAT no cubre todo el set del MANIFEST)"
   grep -q 'BEGIN cortex' "$GCLAUDE2" && bad "uninstall: quedó el bloque de normas" || ok "uninstall: bloque de normas removido"
   [ -f "$FAKEHOME2/.claude/hooks/git-branch-guard.sh" ] && bad "uninstall: quedó git-branch-guard.sh" || ok "uninstall: hooks globales removidos"
   # (e) el @import de aliases + el artefacto GENERADO se limpian (inverso de d3)
