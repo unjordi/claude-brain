@@ -79,3 +79,34 @@ SEV=bajo · install-brain.sh:persist_env_active (línea ~230) · hueco operativo
 ---
 
 **Resumen de operabilidad:** El sistema es MAYORITARIAMENTE operable: el flujo bootstrap→install-brain→widget-update está documentado, idempotente, y tiene fail-open en los puntos de fallo (sin jq → guards no bloquean; sin clon → widget invita a mano). Los hallazgos críticos/altos son edge-cases de concurrencia (doble-update) y de atomicidad (skills), no del camino feliz. La ruta de recuperación principal (re-correr bootstrap.sh) existe y está documentada. Lo que FALTA como rutina operativa: un comando "diagnosticar/verificar integridad del brain instalado" (test-brain existe pero no está documentado como herramienta de recuperación del operador; solo se menciona como CI check). Sugerencia: documentar en docs/autoupdate.md una sección "Si algo se rompió" con: (1) `bash ~/.cortex/brain/test-brain.sh` (diagnóstico), (2) `bash ~/.cortex/brain/install-brain.sh` (self-heal), (3) `curl … bootstrap.sh | bash` (rebuild completo), en ese orden de invasividad.
+
+---
+
+## RESOLUCIÓN — RONDA 1 (2026-09-08, cada fix verificado contra el código en el merge)
+
+Los 7 hallazgos C/A/M reales de la ronda 1 se aplicaron+commitearon+pushearon en `docs/pulido-flowcharts`.
+Cada uno se verificó contra el código antes de aplicar (el 27B da CANDIDATOS, yo garantizo la corrección):
+
+| # | sev | hallazgo | fix | commit |
+|---|-----|----------|-----|--------|
+| 1 | **crítico** | `runUpdate` sin lock → doble-⬆ = 2 checkout-B+install concurrentes = corrupción irreparable | lock atómico `mkdir ~/.cortex/.updating` + `trap rmdir EXIT` al inicio del script detached | a36fdbd |
+| 2 | **alto** | `checkout -B` descarta trabajo no-commiteado en el clon sin stash | `git status --porcelain` → `git stash push -u` antes del checkout | a36fdbd |
+| 3 | **alto** | copia de skills NO atómica (a diferencia de hooks) → skill a medio copiar | `mktemp -d` en el mismo FS + `cp` + `rm` viejo + `mv` (rename atómico) | a36fdbd |
+| 4 | **alto** | hook nuevo del MANIFEST copiado pero SIN cablear (ev_de manual) → solo warn, guard inerte | acumulador `unwired_names` + `exit 1` si queda alguno sin cablear | 1bdf638 |
+| 5 | **alto (coherencia)** | NO había drift-check de HOOKS globales (solo skills) → "global congelado con FPs vivos" | `drift_hooks_global` nueva + wiring con throttle propio; **alcance corregido**: TODO {global,both} que install-brain copia (hooks+libs+scripts), no solo kind=hook | **1625f99** |
+| 6 | medio | settings.json corrupto → guards fail-open pero install imprime "listo" | `jq empty` en la rama `else` de register_hook → error explícito + `exit 1` | a36fdbd |
+| 7 | medio | `drift_skills_global` que falla (exit≠0) cachea el ERROR como "limpio" 6h | chequeo de `_rc` antes de sellar el stamp (solo cachea exit 0 + stdout vacío) | 1625f99 |
+
+**DIFERIDO a su propio slice (NO es del proceso 01 — es tuning de un guard):**
+- **medio · `no-bypass-deploy` FP residual** (lo flaggearon las 3 lentes vía el zapato de install-01, pero el
+  FIX vive en el GUARD, no en el proceso de instalación). El corpus ya tiene ~5 casos → califica para una
+  pasada de TUNING DE PRECISIÓN dedicada (con OK de unjordi + cada fix con su test, por Integridad de
+  guardarraíles). Se anota en el backlog vivo (`estado-proyecto.md`) para su slice propio; NO se resuelve aquí.
+
+**Bajos (piso aceptable "solo-bajos", no bloquean convergencia):** awk GLOBAL_HOOKS apende `.sh` a no-hooks
+(agentes-costo.json) · `resolveClonePath` exige `macos/install.sh` en vez de solo `.git` · bootstrap sin flock ·
+`.bak` único de CLAUDE.md sin rotación · conocimiento-propio sin watchdog · log en /tmp se pierde en reboot ·
+skills retiradas no se podan · fetch.prune global sin doc · persist_env sin validar path. Quedan como backlog.
+
+> **Ronda 2 (re-audit con el código YA arreglado):** en curso — 3 lentes ollama qwen3.8:27b sobre `material-02.txt`.
+> Objetivo: confirmar convergencia a solo-bajos. Luego el Opus gate (fresco, solo-tooling).
