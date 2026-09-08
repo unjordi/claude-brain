@@ -201,9 +201,23 @@ if [ -d "$SRC_SKILLS" ]; then
     mkdir -p "$SKILLS_DIR"
     t="$(mktemp -d "$SKILLS_DIR/.tmp.$name.XXXX")" || { echo "warn: no pude crear tmp para skill $name"; continue; }
     cp -Rf "$sk"/. "$t"/ || { rm -rf "$t"; echo "warn: no pude copiar skill $name"; continue; }
-    rm -rf "$SKILLS_DIR/$name"
-    mv "$t" "$SKILLS_DIR/$name"    # rename ATÓMICO (tmp en el mismo filesystem) → sin ventana de skill a-medio-copiar
-    echo "ok: skill $name instalada (árbol completo, atómico) en $SKILLS_DIR/$name"
+    # Swap con rollback (NO `rm -rf` antes del `mv`): aparta la vieja, entra la nueva, restaura si falla.
+    # Un `rm -rf` previo dejaría una VENTANA sin skill (una sesión viva leería "not found") y, peor, BORRARÍA
+    # sin reemplazo si el `mv` falla (disk full/permisos). Con el swap, la skill vieja sobrevive hasta que la
+    # nueva entra; ambos `mv` son renames atómicos en el mismo filesystem (ventana ~0).
+    old=""
+    if [ -e "$SKILLS_DIR/$name" ]; then
+      old="$SKILLS_DIR/.old.$name.$$"
+      mv "$SKILLS_DIR/$name" "$old" || { rm -rf "$t"; echo "warn: no pude apartar la skill vieja $name"; continue; }
+    fi
+    if mv "$t" "$SKILLS_DIR/$name"; then
+      [ -n "$old" ] && rm -rf "$old"
+      echo "ok: skill $name instalada (árbol completo, swap atómico con rollback) en $SKILLS_DIR/$name"
+    else
+      [ -n "$old" ] && mv "$old" "$SKILLS_DIR/$name"    # rollback: la vieja vuelve a su sitio
+      rm -rf "$t"
+      echo "warn: no pude instalar skill $name (rollback aplicado; la versión previa sigue en su sitio)"
+    fi
   done
 fi
 

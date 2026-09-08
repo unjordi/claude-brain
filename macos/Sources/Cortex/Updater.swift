@@ -156,6 +156,12 @@ final class Updater: ObservableObject {
         // botón ⬆ "sin completar" sin diagnóstico. Si el fetch/checkout fallan (p. ej. sin red), NO mata
         // nada y la app sigue viva → sin riesgo de quedarte sin widget. El `pkill` va justo antes de
         // reinstalar, no a ciegas.
+        // LOCK PID-AWARE: `mkdir $LK` es el mutex anti-doble-⬆; si ya existe, lee `$LK/pid` y solo aborta
+        // si ESE proceso sigue vivo (`kill -0`). Un lock huérfano de un crash/kill-9 anterior (cuyo trap no
+        // corrió) se detecta stale y se recicla → el botón ⬆ NO queda muerto para siempre. El trap borra el
+        // dir COMPLETO (`rm -rf`, no `rmdir`: ahora contiene el pid).
+        // STASH ANTES DEL checkout -B (mismo patrón que bootstrap.sh): si el dev tenía cambios en el clon,
+        // el `checkout -B` los descartaría — el stash los preserva (GUPD reconoce "desarrollas en el clon").
         // MIGRACIÓN DEL CLON (rename claude-brain→cortex): si el clon vive bajo el nombre VIEJO y ~/.cortex
         // aún no existe, lo renombra ANTES de actualizar → el nombre canónico queda y el próximo update lo
         // halla directo (sin depender del fallback).
@@ -166,11 +172,16 @@ final class Updater: ObservableObject {
         // botón ⬆ nunca converge. Con \$ las expande el bash INTERNO, que es donde se asignan.
         let canonical = FileManager.default.homeDirectoryForCurrentUser.path + "/.cortex"
         let inner = "sleep 1; mkdir -p \\$HOME/.cortex 2>/dev/null; LK=\\$HOME/.cortex/.updating; "
-            + "mkdir \\$LK 2>/dev/null || { echo 'update ya en curso — abortando el 2o'; exit 0; }; trap 'rmdir \\$LK 2>/dev/null' EXIT; "
+            + "if ! mkdir \\$LK 2>/dev/null; then P=\\$(cat \\$LK/pid 2>/dev/null); "
+            + "if kill -0 \\$P 2>/dev/null; then echo 'update ya en curso — abortando el 2o'; exit 0; "
+            + "else rm -rf \\$LK 2>/dev/null; mkdir \\$LK 2>/dev/null || { echo 'no pude tomar el lock'; exit 0; }; fi; fi; "
+            + "echo \\$\\$ > \\$LK/pid; trap 'rm -rf \\$LK 2>/dev/null' EXIT; "
             + "SRC='\(repoPath)'; DST='\(canonical)'; "
             + "[ \\$SRC != \\$DST ] && [ -d \\$SRC ] && [ ! -e \\$DST ] && mv \\$SRC \\$DST; "
             + "DIR=\\$DST; [ -d \\$DIR/.git ] || DIR=\\$SRC; "
-            + "cd \\$DIR && git fetch origin --quiet && git checkout -B main origin/main "
+            + "cd \\$DIR && git fetch origin --quiet "
+            + "&& { git stash push -u -m pre-widget-update >/dev/null 2>&1 || true; } "
+            + "&& git checkout -B main origin/main "
             + "&& { pkill -f 'Cortex Widget.app/Contents/MacOS/Cortex'; bash \\$DIR/macos/install.sh; }"
         let cmd = "nohup bash -lc \"\(inner)\" >/tmp/cortex-update.log 2>&1 &"
         let p = Process()
