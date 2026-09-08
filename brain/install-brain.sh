@@ -98,6 +98,20 @@ for h in $GLOBAL_HOOKS; do
     echo "warn: falta el hook fuente $h"
   fi
 done
+# ── (a2) PODA de hooks REPO-TIER filtrados al global ────────────────────────────────────────────────
+# Un hook tier=repo (dod-verificar, sesion-inicio, …) NUNCA debe vivir en ~/.claude/hooks/: se cablea SOLO
+# per-repo (en <repo>/.claude/settings.json → ${CLAUDE_PROJECT_DIR}/.claude/hooks/), jamás global. Si uno se
+# FILTRÓ al global (era vieja, o un sincronizar-cerebro mal-apuntado a ~), queda de HUÉRFANO INERTE (nadie
+# lo cablea global) y CONFUNDE ("el script está pero no dispara"). install-brain no lo instala, pero antes
+# tampoco lo PODABA → ahora sí. SEGURO/ACOTADO: solo borra los que el MANIFEST declara tier=repo (esos por
+# definición no pueden ser propios del usuario ni {global,both}). Caso real 2026-09-08: dod-verificar.sh
+# huérfano en el global de la Cachy, presente pero sin cablear.
+if [ -f "$SRC_HOOKS/MANIFEST" ]; then
+  REPO_HOOKS="$(awk '$1!~/^#/ && NF>=3 && $2=="repo" && $3=="hook"{print $1".sh"}' "$SRC_HOOKS/MANIFEST")"
+  for rh in $REPO_HOOKS; do
+    [ -f "$HOOKS_DIR/$rh" ] && rm -f "$HOOKS_DIR/$rh" && echo "poda: retiré el hook repo-tier huérfano '$rh' del global $HOOKS_DIR (se cablea per-repo, nunca global)"
+  done
+fi
 # Config de clasificación de costo (la lee delegacion-comun.sh en $HOME/.claude/agentes-costo.json)
 if [ -f "$SRC_HOOKS/agentes-costo.json" ]; then
   atomic_install "$SRC_HOOKS/agentes-costo.json" "$CLAUDE_DIR/agentes-costo.json" || echo "warn: no pude instalar agentes-costo.json"
