@@ -183,10 +183,25 @@ DETERMINISTA el de **mtime más reciente** (desempate alfabético por slug, `ses
 duplicado elige el más nuevo, que con duplicados suele ser el vivo. Aun así el gate NO desaparece: ahora es
 una **CONFIRMACIÓN** — el humano confirma que el `<id>` auto-seleccionado por mtime es el que quiere mover,
 lo CITA textual y puebla `ID=`.
+⚠️ **Y el id VIVO puede NO estar en `masters.json` — no lo elijas de ahí a ciegas.** El registro lo
+alimenta el hook de auto-export, que solo AÑADE ids; una sesión forkeada o reciente puede no haberse
+registrado nunca. Si eliges el id desde `masters.json` sin cruzarlo contra los `.jsonl` reales, mueves una
+sesión MUERTA y dejas la viva anclada en el origen. **Cruza siempre las dos fuentes:**
 ```bash
-grep -n '"id"\|"name"' "$MJ"                     # listar candidatos para que el humano elija
+grep -n '"id"\|"name"' "$MJ"                     # candidatos REGISTRADOS
+# candidatos REALES en disco, por frescura (el vivo es el de mtime más reciente):
+find "$HOME/.claude/projects/$OLD_SLUG" -maxdepth 1 -name '*.jsonl' -printf '%T@ %p\n' \
+  | sort -rn | head -5 | while read -r t f; do
+      printf '%s  %s  %s líneas\n' "$(date -d "@${t%.*}" '+%m-%d %H:%M')" "$(basename "$f" .jsonl)" "$(wc -l < "$f")"
+    done
 [ -n "$ID" ] || { echo "G-ID: falta el <id> vigente (Decisión #1)"; exit 1; }
+[ -f "$JSONL" ] || [ -f "$NEW_JSONL" ] || { echo "G-ID: el <id> elegido no tiene .jsonl — ¿registro huérfano?"; exit 1; }
+jq -e --arg id "$ID" '.masters[]|select(.id==$id)' "$MJ" >/dev/null \
+  || echo "AVISO: el id vivo NO está en masters.json ⇒ S4 hará UPSERT (lo añade), no update"
 ```
+**Caso real (2026-09-08, Cachy):** `masters.json` traía `claude-brain-cachy-master` con dos ids —
+`7a6960de` (ya **sin `.jsonl`**: el fork original) y `9cbc2856` (frío del día anterior) — mientras la sesión
+**viva** era `4e7b786c`, **ausente del registro**. Elegir por `masters.json` habría movido una sesión muerta.
 
 ### G-LIVENESS · la sesión objetivo está CERRADA — por **mtime que BLOQUEA** (NO `fuser`/`lsof`)
 Gatea el move DESTRUCTIVO (S3+); el prep NO-destructivo S1/S2 corre antes que él (ver nota de §3).
@@ -335,8 +350,11 @@ uniqcwd=$(grep -o '"cwd":"[^"]*"' "$NEW_JSONL" | sort -u)
 # 3) INMEDIATAMENTE corregir masters.json target POR-ID — y el NAME si hay renombre (mktemp, sin sponge):
 NOMBRE_FINAL="${MASTER_NAME_NUEVO:-$MASTER_NAME}"
 tmpm=$(mktemp)
-jq --arg id "$ID" --arg t "${DST_REPO#$HOME/}" --arg n "$NOMBRE_FINAL" \
-   '(.masters[] | select(.id==$id)) |= (.target = $t | .name = $n)' "$MJ" > "$tmpm" && /bin/mv -f "$tmpm" "$MJ"
+# UPSERT (no update): si el id vivo no estaba registrado, se AÑADE — ver el caso real de G-ID.
+jq --arg id "$ID" --arg t "${DST_REPO#$HOME/}" --arg n "$NOMBRE_FINAL" '
+  if ([.masters[] | select(.id==$id)] | length) > 0
+  then (.masters[] | select(.id==$id)) |= (.target = $t | .name = $n)
+  else .masters += [{id:$id, name:$n, target:$t}] end' "$MJ" > "$tmpm" && /bin/mv -f "$tmpm" "$MJ"
 # 4) alias legible REAL con el nombre FINAL (usa la lib, no editar a mano):
 node -e 'require(process.argv[1]).writeAlias(process.argv[2],process.argv[3])' \
   "$BIN/session-lib.js" "$ID" "$NOMBRE_FINAL"
@@ -558,6 +576,7 @@ por-id serializada, nunca en ambas máquinas dentro de la ventana de sync.
 | Move NO atómico (a medias) | `session-move.js` hace copy-a-slug-nuevo + unlink-viejo (no es un rename atómico) | respaldado (backup `session-move.js:62-66`) + aborta-si-colisiona (`:60`) + máquina de estados re-entrante: la postcondición S4 detecta un estado a medias y reanuda |
 | Backups sin poda | `session-move.js` respalda sin límite | anotar poda de `~/.claude/session-move-backups/` |
 | **Identidad a medias** (target movido, `name` viejo) | el renombre del master no iba en el bloque atómico | S4 fija `target` **y** `name` en el mismo `jq`, reescribe el alias con el nombre final y lista el alias viejo para retirarlo |
+| **Mueve la sesión EQUIVOCADA** | elegir el `<id>` desde `masters.json` sin cruzarlo con los `.jsonl` reales; el registro solo AÑADE ids y puede no tener el vivo | G-ID cruza registro ∩ disco por frescura y avisa si el id vivo no está registrado; S4 hace **UPSERT** |
 | **Destino asumido** (`cortex` por default) | la skill traía el destino hardcodeado en las variables base | `DST_REPO` es Decisión #0 sin default; se aborta si viene vacío o no es un repo git |
 | **"Es privado, me llevo T3"** | leer el candado NO-FUGA como si la fuga fuera el único motivo | §1.0: el motivo dominante es el **duplicado divergente**, que no depende de la visibilidad |
 | **Handoff inservible** | el guion a disco era un stub con "(ver SKILL §4)" | §6.1 exige script completo + `bash -n` verde como postcondición |
