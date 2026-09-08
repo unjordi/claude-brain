@@ -46,6 +46,11 @@ Lo que necesitas saber para trabajar aquí:
 📁 brain/ ─ el PRODUCTO que viaja a los clones (hooks · skills · scripts · test-brain.sh) — 🛑 NO mutar desde una pasada de cerebro
 📁 docs/ ─ flowcharts + checks (verificar-arbol-sync.sh · gen-leyenda-arbol.sh) · investigaciones · …
 📁 src/ · macos/ · windows/ ─ los 3 widgets de cuota (los brainTiers espejan el árbol del README)
+📁 src/term-broker/ ─ broker de terminal (OPT-IN, Linux): 5 `.ts` VENDORIZADOS de axon + sus 2 probes
+   └─ 🛑 copia byte-a-byte: NO se editan aquí — se cambian en axon y se re-vendorizan → `PROCEDENCIA.md`
+   └─ 🛑 `SHA256SUMS` es el anti-drift que SÍ corre (lo verifica `probe-instalador.sh`)
+   └─ ⚠️ PRIMER servicio long-running de cortex (`Type=simple`, padre de shells) → `docs/term-broker.md`
+   └─ 🔁 cambiarse desde la unidad legacy de axon = `bin/migrar-term-broker.sh`, NUNCA a mano
 ```
 
 ## 🛡️ Reglas duras

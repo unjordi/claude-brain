@@ -129,5 +129,9 @@ if ($env:USERPROFILE) { $env:HOME = $env:USERPROFILE }
 # instala el cerebro por defecto. -NoBrain lo saltaria.)
 Set-Location $dir
 Say 'instalando el cerebro (hooks + normas) + el widget de bandeja...'
+# SIN pass-through de banderas, y no es un olvido: este script se corre con `irm ... | iex`, que no
+# admite argumentos. A diferencia de bootstrap.sh (que si pasa "$@" a install.sh), aqui no hay nada
+# que reenviar. Para opciones (-NoBrain, -Build...) se invoca windows\install.ps1 directo desde el
+# clon. El broker de terminal es Linux-only, asi que por esta via no se puede pedir ni por error.
 & "$dir\windows\install.ps1"
 Say 'listo - cerebro + widget puestos.'
