@@ -7,14 +7,18 @@
 #
 # Métrica = TOKENS REALES de contexto. El transcript trae el conteo exacto en el ÚLTIMO `usage`:
 #   ctx = input_tokens + cache_creation_input_tokens + cache_read_input_tokens   (NO output_tokens).
+#   ANCLADO al último /compact: un `isCompactSummary:true` RESETEA el acumulado, así el usage PRE-compact
+#   (que la llamada interna de resumen deja en disco con el tamaño VIEJO completo) NO se reporta como si
+#   fuera el contexto vivo (FP de staleness post-compact, 2026-09-01).
 #
 # Datos que surface:
-#   - ctx actual (tokens del último usage — ese cálculo ya es correcto, consérvalo).
+#   - ctx actual (tokens del último usage DESPUÉS del último boundary de compact).
 #   - autoCompactWindow LEÍDO de settings.json (user < proyecto < local; jq '.autoCompactWindow');
 #     si no está, reporta "no seteado".
 #   - ventana detectada (marcador [1m] / modelos 1M-nativos / default 200K) CON auto-corrección
 #     por invariante físico (si ctx > ventana → 1M). Repórtala.
-#   - CLAUDE_AUTOCOMPACT_PCT_OVERRIDE si está en la env (o "no seteado" — NO inventes 92).
+#   - % de esa ventana + % libre (reservando 5% para el checkpoint).
+#   NO reporta CLAUDE_AUTOCOMPACT_PCT_OVERRIDE — es un valor FANTASMA que miente (ver NOTA abajo).
 #
 # Debounce: solo avisa al SUBIR de contexto (no en cada tool-call). Marca .contexto-aviso guarda
 # el último ctx visto; si el ctx baja (hubo compact / sesión nueva) se re-arma sola.
@@ -34,12 +38,21 @@ MEM="$ROOT/.claude/memory"
 [ -d "$MEM" ] || exit 0                          # repo sin el sistema de memoria → no incumbe
 AVISO_F="$MEM/.contexto-aviso"
 
-# Tokens de contexto ACTUALES = último `usage` del transcript (excluye subagentes/sidechain).
-ctx=$(tail -n 400 "$tp" 2>/dev/null | jq -rR '
-    fromjson? | select(.isSidechain != true) | (.message.usage // empty)
-    | (.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.cache_read_input_tokens // 0)
-  ' 2>/dev/null | tail -1 | tr -cd '0-9')
-[ -n "$ctx" ] || exit 0                          # sin usage aún → nada que medir (fail-open)
+# Tokens de contexto ACTUALES = último `usage`, ANCLADO al último /compact. Un `isCompactSummary:true`
+# RESETEA el acumulado (reduce): descarta todo usage previo al boundary. Así, justo tras compactar, el
+# usage grande PRE-compact (la llamada interna de resumen manda el contexto completo → su input_tokens es
+# el tamaño VIEJO) NO se cuela como "contexto vivo". Si aún no hay ningún usage DESPUÉS del boundary, el
+# reduce termina en null → ctx vacío → fail-open (silencio), en vez de gritar el tamaño viejo en falso.
+ctx=$(tail -n 400 "$tp" 2>/dev/null | jq -rRn '
+    reduce (inputs | fromjson?) as $o (null;
+        if   ($o.isCompactSummary == true) then null      # boundary de /compact → descarta lo previo
+        elif ($o.isSidechain == true)      then .         # subagente → no cuenta al hilo principal
+        elif ($o.message.usage)            then ($o.message.usage
+              | (.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.cache_read_input_tokens // 0))
+        else . end)
+    // empty
+  ' 2>/dev/null | tr -cd '0-9')
+[ -n "$ctx" ] || exit 0                          # sin usage fresco (post-compact) aún → fail-open
 
 # Ventana: override explícito `AVISO_CONTEXTO_WINDOW_TOKENS`, o derivada del modelo.
 # La ventana de 1M se detecta de DOS formas: (a) marcador "[1m]" en el id, (b) modelos 1M-NATIVOS
@@ -98,7 +111,10 @@ pctw=$(( ctx * 100 / WINDOW ))
 libre=$(( 100 - pctw - 5 )); [ "$libre" -lt 0 ] && libre=0
 
 msg="📊 Contexto: ${ctxk}K tokens (~${pctw}% de tu ventana ${wink}K, ${libre}% libre — reservé 5% para el checkpoint). autoCompactWindow: ${ACW}."
-msg="${msg}"$'\n'"Recordatorio: sin checkpoint el auto-compact te BORRA el cerebro fresco → mejor checkpoint + /compact, y TÚ decides cuándo (/context manda)."
+# Cierre NEUTRO: dato + deferencia, sin veredicto. El hook REPORTA (dónde está el número autoritativo, qué
+# hace el CLI); NO recomienda un curso ("mejor checkpoint+compact"). La decisión es del lector (unjordi:
+# "cada quién decide cómo morirse"; /context manda).
+msg="${msg}"$'\n'"/context tiene el número autoritativo; el auto-compact del CLI dispara al llenarse la ventana. TÚ decides qué hacer (seguir / checkpoint / compact)."
 
 jq -n --arg c "$msg" '{hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:$c}}'
 exit 0

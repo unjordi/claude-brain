@@ -30,6 +30,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # historia completa → el conteo de versión da el nº real, no 1
 
       # Evita RECOMPILAR el .exe si el de ESTE commit ya esta publicado. Lee el 'build-sha:' del
       # release rolling y lo compara con el sha actual -> si coincide, salta build + publish. Paridad

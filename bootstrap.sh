@@ -8,6 +8,9 @@
 # / zypper), (2) clona o actualiza el repo, (3) corre ./install.sh (cerebro + daemon + widget).
 # Idempotente: re-correrlo solo actualiza. Flags para install.sh se pasan tal cual:
 #   curl -fsSL …/bootstrap.sh | bash -s -- --no-gui        # p.ej. solo cerebro + daemon
+# Banderas OPT-IN que NO están en el camino por defecto (léelas antes de usarlas):
+#   … | bash -s -- --con-term-broker   # broker de terminal (Linux): sirve un SHELL de esta máquina
+#                                      # en 127.0.0.1:8799. Ver docs/term-broker.md.
 # Para QA de una RAMA (p. ej. develop) en vez de la rama default, antepón CLAUDE_BRAIN_REF:
 #   curl -fsSL …/develop/bootstrap.sh | CLAUDE_BRAIN_REF=develop bash
 set -euo pipefail

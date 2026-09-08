@@ -46,11 +46,19 @@ printf '%s' "$unquoted" | grep -qE '(^|[[:space:]])(--dry-run|--help|-h|-n)([[:s
 # (2) GENÉRICO: un install/deploy/publish .sh|.ps1 ejecutado, o make/just con target install|deploy.
 # El basename debe aparecer en contexto de EJECUCIÓN: tras bash/sh/zsh/pwsh, tras ./, o con ruta /…/.
 # PREFIJO de EJECUCIÓN (no una mención suelta): inicio de comando, tras un separador (;&|`+espacios),
-# tras un runner (bash/sh/zsh/pwsh -file), o una ruta (./  o  /…/). Un espacio PELÓN NO cuenta → así
-# `grep install-brain.sh` (el nombre como ARGUMENTO, no ejecución) NO dispara.
-_pfx='(^|[;&|`][[:space:]]*|bash[[:space:]]+|sh[[:space:]]+|zsh[[:space:]]+|pwsh[[:space:]]+-file[[:space:]]+|\./|/)'
-brain_re="${_pfx}(install-brain|uninstall-brain)\\.(sh|ps1)([[:space:]]|$|[;&|])"
-gen_re="${_pfx}(install|deploy|publish)\\.(sh|ps1)([[:space:]]|$|[;&|])"
+# o tras un runner (bash/sh/zsh/pwsh -file). Un espacio PELÓN NO cuenta → así `grep install-brain.sh`
+# (el nombre como ARGUMENTO, no ejecución) NO dispara.
+_pfx='(^|[;&|`][[:space:]]*|bash[[:space:]]+|sh[[:space:]]+|zsh[[:space:]]+|pwsh[[:space:]]+-file[[:space:]]+)'
+# RUTA opcional entre el prefijo y el basename: solo cuenta si la ruta COMPLETA arranca justo tras el
+# prefijo de arriba (ejecución real: ./foo.sh, /abs/path/foo.sh, bash brain/foo.sh) — antes bastaba un
+# "/" SUELTO pegado al basename como prefijo, y eso disparaba sobre cualquier MENCIÓN con subcarpeta
+# como ARGUMENTO de otro comando ("git add brain/install-brain.sh", "git log -- scripts/deploy.sh",
+# "git show HEAD~1:brain/x.sh" → ahí el "/" queda pegado al basename pero el TOKEN no arranca en
+# posición de ejecución). Exigir que la ruta entera nazca justo tras el prefijo cierra ese hueco sin
+# tocar la detección real (bash/./ /abs siguen exigiendo el prefijo correcto antes del primer tramo).
+_path='(\./|/)?([A-Za-z0-9_.-]+/)*'
+brain_re="${_pfx}${_path}(install-brain|uninstall-brain)\\.(sh|ps1)([[:space:]]|$|[;&|])"
+gen_re="${_pfx}${_path}(install|deploy|publish)\\.(sh|ps1)([[:space:]]|$|[;&|])"
 mk_re='(^|[;&|`][[:space:]]*)(make|just)[[:space:]]+(install|deploy|publish)([[:space:]]|$|[;&|])'
 
 low=$(printf '%s' "$unquoted" | tr 'A-Z' 'a-z')

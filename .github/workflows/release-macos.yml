@@ -28,6 +28,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # historia completa → `git rev-list --count HEAD` (make-app.sh) da el nº real, no 1
 
       # Evita RECOMPILAR en el runner macOS (el caro) si el .app de ESTE commit ya está publicado.
       # Lee el 'build-sha:' del release rolling y lo compara con el sha actual → si coincide, salta

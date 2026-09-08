@@ -100,7 +100,7 @@ El cerebro se ordena por *dureza*: arriba lo que te **bloquea** sin negociar; ab
 ├─ 📮 delegacion-reporte       al terminar un agente: recuerda registrar avance + limpiar su worktree
 ├─ 🎼 recordar-orquestar       N mutaciones (edits/commits) en serie SIN delegar → sugiere fan-out (advisory, no bloquea; resetea al delegar) (GLOBAL)
 ├─ 🧵 rehidratar-hilo          reinyecta hilo-mental-actual.md al abrir/retomar/compactar (GLOBAL) — con gate de frescura
-├─ 📈 aviso-contexto           watermark: avisa "compacta TÚ ahora" antes del auto-compact-sorpresa (GLOBAL)
+├─ 📈 aviso-contexto           reporta el watermark de contexto CRUDO (tokens · ventana · %); sin bandas ni veredicto — /context manda (GLOBAL)
 ├─ 🧬 aviso-drift-cerebro      repo brained atrás de la fuente única (hooks/libs Y skills) → en tu mini-develop se AUTO-SINCRONIZA (apply+commit+push); en otra rama, avisa. ADEMÁS detecta el drift de la copia GLOBAL de skills (~/.claude/skills vs la fuente; warn-only, throttle propio). Al moverse el cerebro, NUDGE a correr la DUPLA (suficiencia+coherencia; contra la firma si hay AGENTS.md, si no sugiere instanciarla) (GLOBAL)
 ├─ 🔀 hud-stale                cambiaste de rama/proyecto → tu lista de TODOs (HUD) puede ser de la tarea anterior: avisa (advisory) que la resetees/re-siembres del estado-proyecto.md de esa rama. Señal OBJETIVA (rama/cwd), stamp per-sesión, first-sight silencioso, solo en repos con backlog (GLOBAL)
 └─ 📁 por-repo · viajan en el .claude de cada repo
@@ -246,6 +246,27 @@ cada 10 s), salvo la pestaña Cerebro, que lee `~/.claude` directo para reflejar
 o sin credenciales, caen a una estimación calibrada desde los transcripts locales vía
 [ccusage](https://github.com/ryoppippi/ccusage) (`basis:"cost"`). Los montos en dólares son costo
 **API-equivalente** (lo que pagarías por token), no tu factura — una señal de "cuánto me ahorra el plan".
+
+## Opcional: el broker de terminal (apagado por defecto)
+
+Además del daemon de cuota, cortex puede servir **un shell de esta máquina** por un socket unix
+(`$XDG_RUNTIME_DIR/axon/term-broker.sock`, `0600`) y por `127.0.0.1:8799`, para que un cliente en
+contenedor (el widget de Terminal de Odysseus, vía axon) dé la computadora real y no el interior del
+contenedor — la capacidad detrás de un contrato acotado, en vez de un agujero en el aislamiento
+(`--pid=host`, `docker.sock`). El socket no es un extra: un contenedor **no alcanza** un bind a
+loopback del host, y abrir el puerto a la red sería exponer ejecución de comandos arbitrarios.
+
+Es **opt-in y solo Linux**, porque el precio es real: un servicio `Type=simple` vivo 24/7 y padre de
+tus shells (cortex deja de ser solo un recolector periódico), y **quien tenga el token puede correr
+cualquier cosa como tú**. Por eso: nada se instala sin la bandera, el token lo **genera** el
+instalador (`0600`, nunca uno por defecto ni horneado en el repo), y nada queda expuesto a la red.
+
+```sh
+./install.sh --con-term-broker
+```
+
+**Lee [`docs/term-broker.md`](docs/term-broker.md) antes** — postura de seguridad, el cambio de
+perfil del repo, cómo se comparte el token y cómo se revierte.
 
 ## Un cerebro, tres caras
 

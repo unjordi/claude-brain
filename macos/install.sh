@@ -12,7 +12,10 @@
 # This is the macOS MASTER installer for cortex: it lays down the shared Claude-Code brain
 # (global hooks, delegation-cost governance, skill, norms) AND the quota daemon + optional app.
 # Idempotent. Por DEFAULT baja el .app PRECOMPILADO del release 'macos-latest' (SIN Xcode/Swift),
-# paridad con el .exe de Windows; si la descarga falla, compila desde fuente como fallback.
+# paridad con el .exe de Windows; si la descarga falla, compila desde fuente como fallback. Si el
+# asset SÍ baja pero su 'build-sha' (del body del release) queda detrás del HEAD del clon (el runner
+# de release-macos.yml aún no reconstruyó), y hay Xcode CLT disponible, también cae a compilar desde
+# fuente en vez de instalar el asset rancio (ver C4, docs/reaudit-ola1-2026-09-01.md).
 
 set -euo pipefail
 
@@ -47,6 +50,12 @@ for arg in "$@"; do
     --no-ccusage)     SKIP_CCUSAGE=1 ;;
     --no-claude-code) SKIP_CLAUDE_CODE=1 ;;
     --build)          BUILD=1 ;;
+    # El broker de terminal es Linux-only (usa `script` de util-linux, el login shell y systemd
+    # --user). El bootstrap pasa las banderas TAL CUAL a este instalador, así que si alguien corre
+    # el one-liner con --con-term-broker en una Mac llegaría aquí: mejor decirle POR QUÉ no aplica
+    # que un "unknown arg" que parece un typo. No aborta: el resto de cortex se instala igual.
+    --con-term-broker)
+      echo "note: --con-term-broker es solo para Linux (systemd --user + script/util-linux); se ignora en macOS." >&2 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
@@ -288,6 +297,27 @@ if [[ "$SKIP_APP" -eq 0 ]]; then
     fi
     rm -f "$TMPZ"
     [[ "$got_app" -eq 0 ]] && echo "    (no pude bajar el precompilado —release aún no existe o sin red—; compilo desde fuente)"
+
+    # --- Guard de staleness (C4): el .app bajado puede ir DETRÁS de HEAD si el runner de
+    # release-macos.yml aún no reconstruyó tras el último push a main (mismo build-sha que ese
+    # workflow escribe en el body de 'macos-latest' — ver .github/workflows/release-macos.yml).
+    # Paridad de INTENCIÓN con windows/install.ps1 (asset==HEAD → asset; si no → build), extendida
+    # aquí a un fallback REAL a --build (Windows solo avisa, ver docs/reaudit-ola1-2026-09-01.md).
+    if [[ "$got_app" -eq 1 ]]; then
+      REL_BODY="$(curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: cortex' \
+        "https://api.github.com/repos/unjordi/cortex/releases/tags/macos-latest" 2>/dev/null | jq -r '.body // empty' 2>/dev/null || true)"
+      ASSET_SHA="$(printf '%s' "$REL_BODY" | grep -oE 'build-sha: [0-9a-f]+' | head -1 | awk '{print $2}')"
+      HEAD_SHA="$(git -C "$ROOT/.." rev-parse HEAD 2>/dev/null || true)"
+      if [[ -n "$ASSET_SHA" && -n "$HEAD_SHA" && "$ASSET_SHA" != "$HEAD_SHA" ]]; then
+        echo "==> OJO: el asset 'macos-latest' va detrás de main (build-sha ${ASSET_SHA:0:7}, HEAD ${HEAD_SHA:0:7})."
+        if command -v swift >/dev/null 2>&1; then
+          echo "    ...compilo desde fuente en su lugar (Xcode CLT disponible)."
+          got_app=0
+        else
+          echo "    ...sin Xcode CLT no puedo compilar; me quedo con el asset (el widget ofrecerá 'Actualizar' cuando el runner alcance)."
+        fi
+      fi
+    fi
   fi
 
   # 2) Fallback / --build: compilar desde fuente (requiere Xcode Command Line Tools).

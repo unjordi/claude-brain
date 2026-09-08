@@ -86,7 +86,7 @@ tiene canal para inyectar ni turno del modelo — por eso se retiró `precompact
 ```mermaid
 flowchart TB
     TRABAJO["💬 Sesión trabajando<br/>(el HILO vive solo en el contexto — frágil)"]
-    AC["📈 aviso-contexto (PostToolUse, GLOBAL)<br/>watermark del contexto: avisa ANTES<br/>del auto-compact-sorpresa, escala por banda<br/>(1 heads-up · 2 checkpoint AHORA · ≥3 inminente)"]
+    AC["📈 aviso-contexto (PostToolUse, GLOBAL)<br/>REPORTERO TONTO: surface el watermark CRUDO<br/>(tokens · ventana · % · autoCompactWindow); sin<br/>bandas ni veredicto — /context manda, tú decides"]
     CP["💾 skill checkpoint (manual, proactivo)<br/>vuelca el HILO a .claude/memory/hilo-mental-actual.md<br/>ligero (pausa) o COMPLETO (antes de compact:<br/>PLAN con el CÓMO · RESUELTO HOY · COSECHA)"]
     COMPACT["🗜️ /compact (o auto-compact)<br/>el resumen comprime — pero el hilo YA está en disco"]
 
@@ -101,7 +101,7 @@ flowchart TB
     SIGUE["🔁 la sesión continúa CON el hilo<br/>(skill rehidratar-hilo = gemelo manual del hook,<br/>respaldo si un update del CLI lo rompe)"]
 
     TRABAJO --> AC
-    AC -->|"ordena volcar"| CP
+    AC -->|"reporta el % → tú decides volcar"| CP
     TRABAJO -->|"pausa natural / cada ~2h"| CP
     CP --> COMPACT
     COMPACT --> retomar
@@ -190,9 +190,9 @@ flowchart LR
     MANIFEST["📜 brain/hooks/MANIFEST<br/>fuente ÚNICA: tier + kind por pieza"]
 
     subgraph tiers["Tiers declarados"]
-        BOTH["tier <b>both</b> — global + por-repo<br/>(con cláusula de dedupe:<br/>la copia del repo cede a la global)<br/><br/>hooks: git-branch-guard ·<br/>merge-squash-guard ·<br/>confirmar-merge-develop ·<br/>recordar-dashboard · secret-scan ·<br/>entorno-maquina-guard<br/>libs: analizar-comando-git ·<br/>detectar-secretos"]
-        GLOBAL["tier <b>global</b> — solo ~/.claude<br/><br/>hooks: proteger-arbol · rama-vieja ·<br/>limite-gasto · rehidratar-hilo ·<br/>aviso-contexto · aviso-drift-cerebro ·<br/>delegacion-gate · delegacion-registrar ·<br/>delegacion-reporte · recordar-orquestar<br/>lib: delegacion-comun · ramas-zombie<br/>script: limpiar-worktrees · limpiar-ramas"]
-        REPO["tier <b>repo</b> — solo &lt;repo&gt;/.claude<br/>(se cargan si la sesión INICIA ahí)<br/><br/>hooks: dod-verificar · sesion-inicio"]
+        BOTH["tier <b>both</b> — global + por-repo<br/>(con cláusula de dedupe:<br/>la copia del repo cede a la global)<br/><br/>hooks: git-branch-guard ·<br/>merge-squash-guard ·<br/>confirmar-merge-develop ·<br/>recordar-dashboard · secret-scan ·<br/>entorno-maquina-guard · no-bypass-deploy ·<br/>hud-stale<br/>libs: analizar-comando-git ·<br/>detectar-secretos · juez-comun"]
+        GLOBAL["tier <b>global</b> — solo ~/.claude<br/><br/>hooks: proteger-arbol · proteger-fuente-cerebro ·<br/>rama-vieja · limite-gasto · rehidratar-hilo ·<br/>aviso-contexto · aviso-drift-cerebro ·<br/>exportar-sesion-master · barrer-ramas ·<br/>delegacion-gate · delegacion-registrar ·<br/>delegacion-reporte · recordar-orquestar<br/>libs: delegacion-comun · ramas-zombie · drift-cerebro-comun<br/>scripts: limpiar-worktrees · limpiar-ramas ·<br/>verificar-cerebro · barrer-flotilla-cerebro · cementerio"]
+        REPO["tier <b>repo</b> — solo &lt;repo&gt;/.claude<br/>(se cargan si la sesión INICIA ahí)<br/><br/>hooks: dod-verificar · sesion-inicio ·<br/>recordar-cosechar · recordar-unificar-cerebro"]
     end
 
     subgraph destinos["Destinos"]

@@ -117,6 +117,7 @@ EJE 1 — CIERRE: ¿el ASISTENTE declara que un ENTREGABLE (un módulo, feature,
   · PREGUNTA: '¿ya quedó terminado?', '¿lo cierro y abro el MR?', 'Terminé el fix. ¿Lo cierro?'.
   · CELEBRACIÓN sin entregable: '🎉 ¡qué bonito quedó el día!', '¡genial! ¡vamos! ✨🚀'.
   · SOLO VERDE TÉCNICO: 'verificado técnicamente', 'build verde', '488 PASS', 'CI en verde' — eso es verificado técnicamente, NO un cierre de LISTO.
+  · AJUSTE PUNTUAL DE UN ELEMENTO (no el entregable completo): 'aquí/ahí quedó <lista de elementos concretos de UI — botones, columnas, campos>', 'ya quedó todo en una fila/a la izquierda/a la derecha/alineado', describiendo el resultado de UN ajuste de POSICIÓN/CSS/layout de elementos puntuales dentro de una sesión de iteración activa — SIN que el mensaje declare que el ENTREGABLE (el módulo/la feature/el proyecto/el MR/el widget/la página/la migración/el endpoint) está listo/terminado/funciona. Es estado descriptivo de UN elemento, no cierre del entregable. OJO (para NO aflojar el eje): este caso SOLO aplica cuando el mensaje se limita a describir la posición/layout de elementos puntuales. Si el mensaje ADEMÁS declara que el entregable completo 'quedó listo/terminado/funciona' (p. ej. 'el módulo de configuración quedó listo, con EXCEL y COPIAR alineados a la izquierda'), sigue siendo CIERRE=si — este matiz nunca salva un cierre real disfrazado de 'ajuste'.
 - REGLA DE CO-UBICACIÓN (importante): si el mensaje AFIRMA un cierre y ADEMÁS cuelga una pregunta o un 'dime si reviso algo más', sigue siendo CIERRE=si (la pregunta tacked-on NO lo salva). PERO si el mensaje DEGRADA explícitamente a preview/revisión ('quedó terminado, PERO lo dejo en preview, a tu revisión') → CIERRE=no: está declarando que NO está listo, aunque diga 'terminado'.
 - REGLA DE NEGACIÓN EXPLÍCITA (DOMINA sobre la celebración y el verde técnico): SI el mensaje contiene una NEGACIÓN EXPLÍCITA de cierre ('nada declarado LISTO', 'nada de esto está listo', 'no lo doy por listo', 'no está listo todavía') O CALIFICA el claim con un marcador de estatus ('verificado técnicamente, pendiente tu QA', 'en preview', 'con tu OK', 'esperando tu OK', 'pendiente tu pull/integración', 'en la mini / en tu mini-develop', 'en el roadmap'), ENTONCES → CIERRE=no aunque el mensaje ADEMÁS CELEBRE ('🎉', '🚀', 'hito', 'qué bonito quedó') o afirme que algo 'existe / corre / resolvió end-to-end': la negación o el marcador de estatus que está PRESENTE gana sobre la celebración que lo rodea. IMPORTANTE (para no aflojar el eje): esta regla SOLO aplica cuando esa negación explícita o ese marcador de estatus está PRESENTE en el texto. Si NO lo está, un claim funcional normal SIGUE siendo CIERRE=si como siempre ('el módulo quedó listo', 'ya funciona el widget', 'la feature ya funciona') — NO degradees un claim de cierre real solo porque venga junto a un paso mecánico ('push hecho', 'MR abierto').
 
@@ -125,6 +126,7 @@ EJE 2 — MARCA: ¿el USUARIO, en SUS propios mensajes de abajo, dio (1) confirm
 
 EJE 3 — VISUAL: ¿el ASISTENTE hace una ASERCIÓN DE APARIENCIA sobre una UI renderizada — 'se ve/quedó igual/como el mockup', 'en Chrome se ve', 'la pantalla muestra', 'el render se ve bien', 'hice QA visual'?
 - VISUAL=si si el mensaje AFIRMA cómo SE VE la interfaz (comparación con un mockup/diseño, 'se ve bien', 'quedó igual/idéntico'), AUNQUE hedge o admita que 'no corrió un screenshot' o que 'confía en que se ve bien' — lo que cuenta es que hace la aserción de apariencia; si de verdad miró se verifica APARTE (estructural). VISUAL=no si no habla de apariencia visual (aunque diga 'terminado', 'funciona' o 'verificado técnicamente').
+- REPORTE DE SUBAGENTE ATRIBUIDO (no observación propia): VISUAL=no si el léxico de apariencia está EXPLÍCITAMENTE atribuido a un REPORTE de un subagente/agente delegado ('el agente/subagente reportó que se ve bien', 'según el reporte del agente C, los archivos salen correctos', 'el agente que lancé dice que el render quedó igual') — el asistente está RELATANDO lo que otro agente afirmó, no haciendo una observación propia de pantalla. OJO (para NO aflojar el eje): esto exige que la atribución esté PRESENTE y sea explícita ('el agente/subagente reportó/dice/encontró'). Si el asistente ADOPTA la afirmación como propia sin atribuirla ('se ve bien', 'quedó idéntico al mockup' — sin decir que viene de un reporte ajeno), sigue siendo VISUAL=si: haber delegado a un agente no exime de que Claude esté presentando el hallazgo sin verificar como un hecho propio.
 
 MENSAJE DEL ASISTENTE (a clasificar):
 $1
@@ -235,10 +237,27 @@ printf '%s' "$turn" | grep -qE '"name"[[:space:]]*:[[:space:]]*"(mcp__(claude-in
 # `[^}]*` (no `.*`) limita el match al MISMO objeto tool_use → un Read de un .ts + un .png en OTRA tool del turno NO lo suprime en falso.
 printf '%s' "$turn" | grep -qiE '"name"[[:space:]]*:[[:space:]]*"Read"[^}]*"(file_path|path)"[[:space:]]*:[[:space:]]*"[^"]*\.(png|jpg|jpeg|gif|webp|bmp)"' && browser=si
 
-# ── B2: OBSERVACIÓN VISUAL a ciegas — afirma haber visto la pantalla SIN correr tool de navegador, y el
-# usuario no lo confirmó. Bloquea INDEPENDIENTE de si tocó código (declarar QA visual a ciegas es el daño). ──
+# ── PRECISIÓN (corpus §dod-verificar, 6+ FP repetidos: 08-16/08-24/08-28/08-30×2/09-01): una IMAGEN QUE EL
+# USUARIO ADJUNTÓ en su propio mensaje de ESTE turno (Image #N — un bloque type="image" dentro de un mensaje
+# role=user GENUINO) TAMBIÉN cuenta como "mirar la pantalla": el usuario miró la pantalla y se la mostró, no
+# es a ciegas. Filtra fuera: (a) mensajes tool_result (un screenshot que el propio Claude tomó vía tool ya
+# cuenta arriba por $browser — un tool_result trae "toolUseResult" y/o un bloque type="tool_result", nunca
+# un type="image" suelto como hijo directo del mensaje de usuario), (b) isMeta/inyectados. bash-3.2-safe.
+userimg=$(printf '%s' "$turn" | jq -rs '
+  [ .[] | select((.message.role // .type)=="user")
+        | select((.isMeta // false) != true)
+        | select((.toolUseResult // null) == null)
+        | (.message.content // empty)
+        | select(type=="array")
+        | select( ([ .[] .type ] | index("tool_result")) == null )
+        | .[] | select(.type=="image") ] | length' 2>/dev/null)
+case "${userimg:-0}" in ''|0) ;; *) browser=si ;; esac
+
+# ── B2: OBSERVACIÓN VISUAL a ciegas — afirma haber visto la pantalla SIN correr tool de navegador, SIN una
+# imagen que el usuario adjuntó, y el usuario no lo confirmó. Bloquea INDEPENDIENTE de si tocó código
+# (declarar QA visual a ciegas es el daño). ──
 if [ "$visual" = "si" ] && [ "$marca" != "si" ] && [ "$browser" != "si" ]; then
-  vreason="DETENTE — afirmaste una OBSERVACIÓN VISUAL ('se ve/quedó como el mockup / en Chrome / la pantalla muestra…') pero en ESTE turno NO corriste NINGUNA tool de navegador/screenshot: lo estás declarando A CIEGAS. No uses léxico de QA visual sin haber mirado la pantalla. Estatus honesto: 'verificado técnicamente, SIN QA visual (a ciegas)' — el QA visual lo hace el usuario o una captura real. (Lección real (2026-07): se insinuó QA de Chrome sin verla y reaparecieron bugs ya resueltos.)"
+  vreason="DETENTE — afirmaste una OBSERVACIÓN VISUAL ('se ve/quedó como el mockup / en Chrome / la pantalla muestra…') pero en ESTE turno NO corriste NINGUNA tool de navegador/screenshot NI el usuario te adjuntó una captura: lo estás declarando A CIEGAS. No uses léxico de QA visual sin haber mirado la pantalla. Estatus honesto: 'verificado técnicamente, SIN QA visual (a ciegas)' — el QA visual lo hace el usuario o una captura real. (Lección real (2026-07): se insinuó QA de Chrome sin verla y reaparecieron bugs ya resueltos.)"
   jq -n --arg r "$vreason" '{decision:"block", reason:$r}'
   exit 0
 fi

@@ -4,6 +4,30 @@
 # jq/git si los necesita. Vive junto a los hooks (como delegacion-comun.sh) → viaja en el mismo copy.
 # shellcheck shell=bash
 
+# ── PATH-AUGMENT para gh/glab (ROOT CAUSE del #78, corpus 2026-08-25→09-01) ──────────────────────────────
+# En un launch GUI de Claude Code el subproceso-hook hereda el PATH MÍNIMO de launchd (/usr/bin:/bin:…),
+# donde jq SÍ está (el guard corre) pero gh/glab NO (viven en /opt/homebrew/bin —Apple Silicon— o
+# /usr/local/bin —Intel/Linux—) → TODA consulta de destino/lista de MR por API salía VACÍA y el fail-safe
+# frenaba merges/releases LEGÍTIMOS ya autorizados ("la consulta de la base falló en el entorno del hook").
+# Se AÑADEN (al FINAL, JAMÁS al frente: un gh/glab ya alcanzable —o un MOCK de test en el PATH— SIEMPRE
+# gana; solo rescatamos el caso en que NO estaba) los dirs canónicos donde viven estos CLIs. PRECISIÓN
+# PURA — NO afloja ningún gate: solo hace RESOLUBLE un destino que antes fallaba por ENTORNO; un destino
+# 'main' resuelto sigue disparando el gate estricto de release, y un merge sin OK sigue frenando.
+#   · ACG_EXTRA_BIN (colon-sep, opcional) se antepone a la lista canónica → escape hatch de config Y gancho
+#     de test (inyectar un dir con un mock sin tocar el sistema).
+#   · ACG_PATH_AUGMENT=0 lo DESACTIVA → un test puede simular fielmente "gh/glab genuinamente ausente".
+# Idempotente (no re-agrega un dir ya en PATH) · bash-3.2-safe · corre 1× al sourcear la lib.
+acg__augmenta_path() {
+  [ "${ACG_PATH_AUGMENT:-1}" = 0 ] && return 0
+  local d IFS=:
+  for d in ${ACG_EXTRA_BIN:-} /opt/homebrew/bin /usr/local/bin "$HOME/.linuxbrew/bin" "$HOME/.local/bin" "$HOME/bin"; do
+    [ -n "$d" ] && [ -d "$d" ] || continue
+    case ":$PATH:" in *":$d:"*) : ;; *) PATH="$PATH:$d" ;; esac
+  done
+  export PATH
+}
+acg__augmenta_path
+
 # Quita literales entre comillas simples o dobles → un "git push a develop" dentro de un mensaje de
 # commit / dato de un grep / doc NO dispara los guards. (Fix #2 · H13.)
 acg_despoja_comillas() { printf '%s' "$1" | sed "s/'[^']*'//g; s/\"[^\"]*\"//g"; }
@@ -326,14 +350,21 @@ acg_msg_clasificar() {   # $1=cmd(RAW) → LITERAL | UNVERIFICABLE | AUTO
 # Opera sobre el RAW (comillas INTACTAS) para leer un valor entrecomillado con espacios. glab: --squash-message
 # · gh: --subject/-t. Devuelve vacío si no hay flag.
 acg_msg_valor() {   # $1=cmd(RAW) → valor literal | vacío
-  local raw="$1" tool v
+  local raw tool v
+  # SLURP MULTILÍNEA (fix #42/#46, corpus 2026-08-19/24): un `--squash-message "resumen\ncurado\ninline"`
+  # con SALTOS DE LÍNEA reales rompía el sed line-based — al ver solo la 1ª línea, el `"[^\"]*"` no hallaba la
+  # comilla de cierre y caía al bareword → truncaba el valor al 1er token → FP "superficial"/"pobre" que
+  # exigía la forma `$(cat archivo)`. Se colapsan los newlines a \001 (SOH, jamás en un mensaje real) para que
+  # sed vea UNA línea y case el valor entrecomillado COMPLETO; los \n se restauran al final. Un inline
+  # multilínea con SUSTANCIA pasa igual que uno de una línea.
+  raw=$(printf '%s' "$1" | tr '\n' '\001')
   if printf '%s' "$(acg_despoja_comillas "$raw")" | grep -qE 'glab(\.exe)?[[:space:]]+mr'; then tool=glab; else tool=gh; fi
   if [ "$tool" = glab ]; then
     v=$(printf '%s' "$raw" | sed -nE "s/.*(^|[[:space:]])--squash-message([[:space:]]+|=)(\"[^\"]*\"|'[^']*'|([^[:space:]\"'])+).*/\3/p" | head -1)
   else
     v=$(printf '%s' "$raw" | sed -nE "s/.*(^|[[:space:]])(--subject|-t)([[:space:]]+|=)(\"[^\"]*\"|'[^']*'|([^[:space:]\"'])+).*/\4/p" | head -1)
   fi
-  printf '%s' "$v" | sed -E "s/^[\"']//; s/[\"']\$//"
+  printf '%s' "$v" | sed -E "s/^[\"']//; s/[\"']\$//" | tr '\001' '\n'
 }
 
 # ¿el mensaje/subject de un squash es POBRE (sin sustancia) → hay que BLOQUEAR? Mide el SUBJECT (1ª línea).

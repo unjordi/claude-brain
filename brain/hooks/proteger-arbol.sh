@@ -13,8 +13,24 @@ cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
 # contiene 'git' → sin 'git' en el comando, no hay nada que vigilar → early-exit ANTES de sed/grep en el
 # camino COMÚN. Conservador: un git destructivo SIEMPRE contiene 'git' → jamás se salta un caso real.
 case "$cmd" in *git*) : ;; *) exit 0 ;; esac
+# Quita CUERPOS de heredoc (`<<EOF … EOF`) antes de escanear: son el STDIN de un comando (dato que
+# se APPENDEA a un .md, un mensaje, prosa), NUNCA shell EJECUTABLE. Mismo criterio que ignorar los
+# literales entrecomillados → quitarlos NO abre hueco: un git destructivo REAL va FUERA del heredoc
+# (en la línea del `<<` o después del cierre) y SOBREVIVE al filtro. Fail-safe: si no se detecta el
+# cierre, el cuerpo se ESCANEA (comportamiento previo), nunca se pierde un caso real por sobre-quitar.
+noheredoc=$(printf '%s' "$cmd" | awk -v sq="'" -v dq='"' '
+  BEGIN{ inhd=0 }
+  inhd==1 { s=$0; sub(/^[ \t]*/,"",s); if (s==delim) inhd=0; next }
+  {
+    re="<<-?[ \t]*[" sq dq "]?[A-Za-z_][A-Za-z0-9_]*[" sq dq "]?"
+    if (match($0, re)) {
+      d=substr($0, RSTART, RLENGTH); sub(/^<<-?[ \t]*/,"",d); gsub("[" sq dq "]","",d)
+      delim=d; inhd=1
+    }
+    print
+  }')
 # Quita literales entrecomillados para no matchear 'git reset' como dato.
-unquoted=$(printf '%s' "$cmd" | sed "s/'[^']*'//g; s/\"[^\"]*\"//g")
+unquoted=$(printf '%s' "$noheredoc" | sed "s/'[^']*'//g; s/\"[^\"]*\"//g")
 # ¿git DESTRUCTIVO que mueve HEAD / descarta commits?
 printf '%s' "$unquoted" | grep -qE 'git[[:space:]]+(reset[[:space:]]+(--hard|--merge|--keep)|checkout[[:space:]]+(-f|--force)|rebase([[:space:]]|$)|branch[[:space:]]+-D)' || exit 0
 

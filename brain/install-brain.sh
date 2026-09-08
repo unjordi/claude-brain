@@ -240,15 +240,38 @@ for _bv in CLAUDE_SESSIONS_DRIVE CLAUDE_SESSIONS_DEBOUNCE_MIN; do persist_env_ac
 # qué versión del brain quedó instalada en ESTA máquina. Contrato de DOS LÍNEAS:
 #   línea 1 = versión = "<PREFIJO>.<commit-count>"  (PREFIJO = brain/VERSION, ej. 0.1 · count = git rev-list)
 #   línea 2 = fecha de instalación "YYYY-MM-DD"
-# La versión AUTO-INCREMENTA con cada commit (el count crece); fallback COUNT=0 si no es repo git.
-# Idempotente: re-correr re-estampa la versión y fecha actuales.
-if [ -f "$SCRIPT_DIR/VERSION" ]; then
+# La versión AUTO-INCREMENTA con cada commit (el count crece). C3 (auditoría 2026-08-29): cuando este
+# script corre EMPAQUETADO (p.ej. dentro del .app de un widget, vía el botón "Curar cerebro global"),
+# $SCRIPT_DIR NO es un repo git → `git rev-list` fallaba silenciosamente a COUNT=0 y REGRESABA el sello
+# real a una versión falsa (p.ej. "0.2.0"), haciendo que el widget MINTIERA sobre qué cerebro hay
+# instalado. Fix: si SCRIPT_DIR no es git, intenta resolver el CLON REAL de instalación (misma lógica
+# resolve_brain_dir() que usan los 3 widgets — $CLAUDE_BRAIN_DIR → ~/.cortex → ~/.claude-brain) y estampa
+# desde AHÍ; si tampoco ese es un repo git, NO TOCA el .brain-version existente (mejor un sello viejo que
+# uno falso). Idempotente: re-correr re-estampa la versión y fecha actuales cuando sí puede resolver el count.
+GIT_SRC=""
+if git -C "$SCRIPT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  GIT_SRC="$SCRIPT_DIR"
+else
+  DCC="$SCRIPT_DIR/hooks/drift-cerebro-comun.sh"
+  if [ -f "$DCC" ]; then
+    # shellcheck disable=SC1090
+    . "$DCC"
+    CAND="$(resolve_brain_dir 2>/dev/null)"
+    if [ -n "$CAND" ] && git -C "$CAND" rev-parse --git-dir >/dev/null 2>&1; then
+      GIT_SRC="$CAND"
+    fi
+  fi
+fi
+
+if [ -n "$GIT_SRC" ] && [ -f "$SCRIPT_DIR/VERSION" ]; then
   PREFIJO="$(head -1 "$SCRIPT_DIR/VERSION" | tr -d '[:space:]')"
-  COUNT="$(git -C "$SCRIPT_DIR" rev-list --count HEAD 2>/dev/null || echo 0)"
+  COUNT="$(git -C "$GIT_SRC" rev-list --count HEAD 2>/dev/null || echo 0)"
   { echo "$PREFIJO.$COUNT"; date +%Y-%m-%d; } > "$CLAUDE_DIR/.brain-version"
   echo "ok: versión del cerebro estampada en $CLAUDE_DIR/.brain-version (v$PREFIJO.$COUNT · $(date +%Y-%m-%d))"
-else
+elif [ ! -f "$SCRIPT_DIR/VERSION" ]; then
   echo "warn: falta $SCRIPT_DIR/VERSION; no estampé .brain-version"
+else
+  echo "warn: $SCRIPT_DIR no es un repo git (ni pude resolver el clon real) — conservo .brain-version existente sin regresarlo a un count falso"
 fi
 
 # ── (d) Dashboard del cerebro en la memoria GLOBAL (slug del HOME) si falta ──

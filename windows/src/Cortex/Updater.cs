@@ -17,17 +17,21 @@ namespace Cortex;
 ///     Cortex.exe con un build-sha distinto al embebido, BAJA el exe y hace swap (SIN .NET SDK),
 ///     refresca brain/ (si hay clon) y RE-CABLEA los hooks con el install-brain.ps1 empaquetado.
 ///  2) GIT (fallback pre-release): si no hay release aún, compara `commits/main` y —solo con clon—
-///     hace `git fetch` + `merge --ff-only` + `install.ps1` (que ya instala cerebro + widget).
+///     hace `git fetch` + `checkout -B main origin/main` (fuerza-alinea, mismo patrón que
+///     bootstrap.ps1) + `install.ps1` (que ya instala cerebro + widget).
 /// FAIL-OPEN: sin red / sin version.json / sin release ni clon → no molesta.
 ///
 /// Enfoque de AUTO-REEMPLAZO en Windows: el exe es self-contained single-file y, si estuviera
 /// corriendo, `install.ps1` no podría sobreescribirlo (lock). Por eso NO nos auto-cerramos a
 /// ciegas: escribimos un pequeño .ps1 temporal, lo lanzamos DETACHADO (UseShellExecute, ventana
-/// oculta) y ese script hace el ff-merge y — solo si tuvo éxito — corre `install.ps1`, que ES
+/// oculta) y ese script hace el fetch+align y — solo si tuvo éxito — corre `install.ps1`, que ES
 /// quien detiene la instancia vieja (soltando el lock), reconstruye, recopia el exe y relanza.
-/// Si el ff aborta (árbol sucio / no-ff) el script no toca nada: la app sigue viva → nunca te
-/// quedas sin widget. El script vive en un proceso aparte (pwsh/powershell), así que sobrevive a
-/// que `install.ps1` mate al widget.
+/// `checkout -B main origin/main` FUERZA-ALINEA el clon a origin/main (descarta cualquier rama
+/// leftover o commit local — este clon es infraestructura, no un checkout de dev); antes,
+/// `merge --ff-only` fallaba PARA SIEMPRE si el clon quedaba en una rama leftover o con commits
+/// locales. Si el fetch/checkout fallan (p. ej. sin red) el script no toca nada: la app sigue viva
+/// → nunca te quedas sin widget. El script vive en un proceso aparte (pwsh/powershell), así que
+/// sobrevive a que `install.ps1` mate al widget.
 /// </summary>
 internal sealed class Updater
 {
@@ -278,11 +282,14 @@ internal sealed class Updater
             return false;
         }
 
-        // Script temporal: MIGRA el clon (rename claude-brain-repo→cortex-repo) si aplica, luego ff-merge
-        // y, SOLO si tuvo éxito, corre install.ps1 (detiene la instancia vieja soltando el lock del exe,
-        // reconstruye y relanza). Si el ff aborta, sale sin tocar nada. Corre en su propio proceso
-        // pwsh/powershell → sobrevive a que install.ps1 mate al widget. install.ps1 se resuelve del $repo
-        // YA migrado (no del _repoPath viejo), para que apunte al nombre canónico tras el rename.
+        // Script temporal: MIGRA el clon (rename claude-brain-repo→cortex-repo) si aplica, luego
+        // fuerza-alinea a origin/main (mismo patrón que bootstrap.ps1: `checkout -B main origin/main`,
+        // en vez de `merge --ff-only`, que fallaba PARA SIEMPRE si el clon quedaba en una rama leftover
+        // o con commits locales) y, SOLO si tuvo éxito, corre install.ps1 (detiene la instancia vieja
+        // soltando el lock del exe, reconstruye y relanza). Si el fetch/checkout fallan, sale sin tocar
+        // nada. Corre en su propio proceso pwsh/powershell → sobrevive a que install.ps1 mate al widget.
+        // install.ps1 se resuelve del $repo YA migrado (no del _repoPath viejo), para que apunte al
+        // nombre canónico tras el rename.
         string script =
             "$ErrorActionPreference = 'SilentlyContinue'\n" +
             $"$repo = '{_repoPath.Replace("'", "''")}'\n" +
@@ -291,8 +298,8 @@ internal sealed class Updater
             "Start-Sleep -Seconds 1\n" +
             "git -C $repo fetch origin\n" +
             "if ($LASTEXITCODE -ne 0) { exit 1 }\n" +
-            "git -C $repo merge --ff-only origin/main\n" +
-            "if ($LASTEXITCODE -ne 0) { exit 1 }   # árbol sucio / no-ff → NO relanzar, app intacta\n" +
+            "git -C $repo checkout -B main origin/main\n" +
+            "if ($LASTEXITCODE -ne 0) { exit 1 }   # falló el align (p. ej. conflicto con cambios locales) → NO relanzar, app intacta\n" +
             "& (Join-Path $repo 'windows\\install.ps1')\n";
 
         return LaunchDetached(script, "cortex-update.ps1");
@@ -333,7 +340,11 @@ internal sealed class Updater
         sb.Append("$vj = @{ sha=$sha; date=''; repo=$repo; branch='main' } | ConvertTo-Json -Compress\n");
         sb.Append("Set-Content -Path (Join-Path $dir 'version.json') -Value $vj -Encoding utf8\n");
         sb.Append("if ($repo -and (Test-Path (Join-Path $repo '.git'))) {\n");
-        sb.Append("  git -C $repo fetch origin; git -C $repo merge --ff-only origin/main\n");
+        // Best-effort: fuerza-alinea el clon a origin/main (mismo patrón que bootstrap.ps1) en vez de
+        // `merge --ff-only`, que se quedaba fallando para siempre si el clon tenía una rama leftover o
+        // commits locales — este refresco es no-gating (SilentlyContinue), pero un align que sí converge
+        // deja el clon útil para el próximo ciclo en vez de repetir el mismo fallo indefinidamente.
+        sb.Append("  git -C $repo fetch origin; git -C $repo checkout -B main origin/main\n");
         sb.Append("  $bsrc = Join-Path $repo 'brain'\n");
         sb.Append("  if (Test-Path $bsrc) { Copy-Item $bsrc (Join-Path $dir 'brain') -Recurse -Force }\n");
         sb.Append("}\n");

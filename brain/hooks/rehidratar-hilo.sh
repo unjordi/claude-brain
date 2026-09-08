@@ -47,8 +47,9 @@ input=$(cat 2>/dev/null || true)
 source=$(printf '%s' "$input" | { jq -r '.source // "startup"' 2>/dev/null || echo startup; })
 
 # Nota: este hook YA NO fija un "baseline de contexto". aviso-contexto.sh mide el llenado con los
-# TOKENS REALES del último `usage` del transcript (bandas absolutas), que bajan solos tras un /compact
-# → no necesita un watermark externo. Se retiró el `.contexto-baseline` (antes se escribía aquí).
+# TOKENS REALES del último `usage` del transcript, ANCLADOS al último /compact (un `isCompactSummary`
+# resetea el acumulado, sin bandas ni veredictos — es un reportero tonto) → no necesita un watermark
+# externo. Se retiró el `.contexto-baseline` (antes se escribía aquí).
 
 [ -f "$HILO" ] || exit 0          # sin hilo → nada que rehidratar (silencioso, no estorba)
 

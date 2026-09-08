@@ -33,6 +33,35 @@ fi
 echo "==> Stopping and disabling timer"
 systemctl --user disable --now cortex.timer 2>/dev/null || true
 
+# Broker de terminal (si estaba instalado con --con-term-broker). Idempotente/fail-safe: si nunca se
+# instaló, todo esto es no-op. Se retira SIEMPRE, sin bandera aparte: desinstalar es desinstalar.
+# NO se toca la unidad legacy `axon-term-broker.service`: no es de cortex (la instaló axon a mano) y
+# apagarla mataría sesiones que no pusimos nosotros. Ver docs/term-broker.md.
+# Se DICE lo que se quita, pieza por pieza: quitar en silencio un servicio que era padre de las
+# terminales del usuario (y que al pararse las MATA) deja a quien desinstala sin saber qué se llevó
+# ni qué le quedó en disco. Solo se menciona lo que de verdad existía.
+_quitar() {  # _quitar <ruta> <descripción>
+  if [[ -e "$1" ]]; then rm -rf "$1"; echo "    quitado: $2 ($1)"; fi
+}
+echo "==> Stopping and removing the terminal broker (if installed)"
+if systemctl --user is-active --quiet cortex-term-broker.service 2>/dev/null; then
+  echo "    estaba CORRIENDO: al pararlo se cierran las terminales abiertas del widget (son sus hijas)."
+fi
+systemctl --user disable --now cortex-term-broker.service 2>/dev/null || true
+_quitar "$HOME/.config/systemd/user/cortex-term-broker.service" "la unidad"
+_quitar "$HOME/.local/bin/cortex-term-broker" "el lanzador"
+_quitar "$HOME/.local/bin/migrar-term-broker.sh" "el migrador"
+_quitar "$HOME/.local/lib/cortex/term-broker" "los módulos vendorizados"
+rmdir "$HOME/.local/lib/cortex" 2>/dev/null || true   # solo si quedó vacío
+# Lo que NO se toca, dicho en voz alta para que nadie lo busque después:
+if [[ -f "$HOME/.config/systemd/user/axon-term-broker.service" ]]; then
+  echo "    NO tocado: axon-term-broker.service (la unidad legacy no es de cortex; apagarla mataría"
+  echo "               sesiones que no pusimos nosotros). Quítala tú si ya no la quieres."
+fi
+if [[ -f "$HOME/.config/cortex/term-broker.env" ]]; then
+  echo "    el token sigue en ~/.config/cortex/term-broker.env (se va abajo salvo --keep-cfg)"
+fi
+
 echo "==> Removing systemd user units"
 rm -f "$HOME/.config/systemd/user/cortex.timer"
 rm -f "$HOME/.config/systemd/user/cortex.service"

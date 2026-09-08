@@ -47,15 +47,17 @@ Sólida = flujo/secuencia · Punteada (`style=dashed`) + etiqueta = referencia c
 Título del chart empieza con su nº de archivo (`06 · Declarar LISTO al fin de turno`); cross-refs citan por
 nº de archivo ("ver **05**"), NUNCA circulado ①②③ (iba desfasado −1 sin índice).
 
-## 6. Fan-out compartido de un comando git en Bash = 9 hooks (raíz común de 03 y sus zooms 06/07/08)
-Un comando `Bash` con git lo tocan **9 hooks**: **8 ANTES** (PreToolUse/Bash, en PARALELO, sin despachador,
-precedencia `deny>ask>allow`) + **1 DESPUÉS** (📈 aviso-contexto, PostToolUse). Los 8 pre (confirmado en
-la función `ev_de` de `install-brain.sh`): 🚧 git-branch-guard · 🔗 merge-squash-guard · ✋ confirmar-merge-develop · 🕵️ secret-scan
-· 📊 recordar-dashboard · 🖥️ entorno-maquina-guard · 🕰️ rama-vieja · 🌳 proteger-arbol *(4 pueden DENY: los 3 de
-git + secret-scan)*. El 9º: 📈 aviso-contexto (post, no bloquea). El chart **03** es la VISTA de conjunto
-(los 9 en un fan-out); sus **ZOOMS** —**06** (ruta de merge), **07** (secret-scan + proteger-arbol),
-**08** (nudges del push)— abren con esta MISMA raíz y hacen zoom sobre su subconjunto NOMBRANDO los 9.
-Prohibido "cascada secuencial" o "los 2 hooks".
+## 6. Fan-out compartido de un comando git en Bash = 9 hooks PreToolUse/Bash (raíz común de 03 y sus zooms 06/07/08)
+Un comando `Bash` con git dispara **9 hooks PreToolUse/Bash** EN PARALELO (sin despachador, precedencia
+`deny>ask>allow`) + hooks PostToolUse. Los 9 pre (confirmado en la función `ev_de` de `install-brain.sh`,
+que mapea todos ellos a `PreToolUse|Bash`): 🚧 git-branch-guard · 🔗 merge-squash-guard · ✋ confirmar-merge-develop · 🕵️ secret-scan
+· 📊 recordar-dashboard · 🖥️ entorno-maquina-guard · 🕰️ rama-vieja · 🌳 proteger-arbol · 🚧 no-bypass-deploy *(4 pueden DENY: los 3 de
+git + secret-scan)*. De esos 9, **8 INSPECCIONAN git**; el 9º —**no-bypass-deploy**— corre en el mismo fan-out pero
+**NO-OPEA sobre un comando git** (solo actúa ante un instalador/deploy corrido a mano). En PostToolUse sobre ese Bash
+corren 📈 aviso-contexto y 🎼 recordar-orquestar (toda tool) + 🔀 hud-stale y 🧹 barrer-ramas (Bash) — ninguno bloquea; los
+charts hacen foco en 📈 aviso-contexto (el watermark). El chart **03** es la VISTA de conjunto; sus **ZOOMS**
+—**06** (ruta de merge), **07** (secret-scan + proteger-arbol), **08** (nudges del push)— abren con esta MISMA raíz de 9
+y hacen zoom sobre su subconjunto de git-guards. Prohibido "cascada secuencial" o "los 2 hooks".
 
 ## 7. Leyenda a incrustar en cada `.dot` = el ÁRBOL COMPLETO del README (generado, NO tecleado)
 Cada flowchart incrusta DOS cosas dentro de un `subgraph cluster_leyenda`:
