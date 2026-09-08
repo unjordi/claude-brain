@@ -78,7 +78,7 @@ fi
 # clonar/actualizar se hace checkout de esa rama igualando el remoto; sin ella, la rama default.
 REF="${CLAUDE_BRAIN_REF:-}"
 if [[ -d "$DIR/.git" ]]; then
-  say "actualizando el clon en $DIR"; git -C "$DIR" fetch -q --prune origin
+  say "actualizando el clon en $DIR"; git -C "$DIR" fetch -q --prune origin || say "sin red / fetch falló — sigo con el clon local ya presente (no bloqueo la instalación por estar offline)"
   # Guardar trabajo no commiteado antes del checkout -B (que lo DESCARTA): stash si hay cambios.
   if [ -n "$(git -C "$DIR" status --porcelain 2>/dev/null)" ]; then
     git -C "$DIR" stash push -u -m "pre-bootstrap-$(date +%s)" 2>/dev/null || true

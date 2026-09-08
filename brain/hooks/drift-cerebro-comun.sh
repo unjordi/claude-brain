@@ -123,7 +123,7 @@ Cómo: borra esos .sh de .claude/hooks/ + sus entradas en .claude/settings.json.
   if [ "$total" -eq 0 ]; then printf 'STATUS=%s\n' "clean"; return 0; fi
 
   local detalle
-  detalle=$(printf '%s\n' "$out" | grep -E '(NUEVO|NUEVA|ACTUALIZA|RETIRAR|HUÉRFAN)' | sed 's/^[[:space:]]*/    /' | head -14)
+  detalle=$(printf '%s\n' "$out" | grep -E '(NUEVO|NUEVA|ACTUALIZA|RETIRAR|HUÉRFAN|SIN CABLEAR)' | sed 's/^[[:space:]]*/    /' | head -14)
 
   # ── Nudge de la DUPLA (suficiencia + coherencia): BIFURCA según AGENTS.md esté instanciado. ──
   local dupla_nota
