@@ -67,7 +67,7 @@ PlasmoidItem {
     // y chequea si hay versión nueva del widget (throttle 15 min dentro de checkUpdate).
     onCurrentTabChanged: {
         if (currentTab === 5) { scanBrain(); checkUpdate() }
-        if (currentTab === 6) scanBroker()
+        if (currentTab === 6) { scanBroker(); scanKnobs() }
     }
 
     readonly property string cacheDir: {
@@ -267,6 +267,39 @@ PlasmoidItem {
                 } catch (e) { /* deja el estado previo si el parse falla */ }
             }
             disconnectSource(source)
+        }
+    }
+
+    // El spec de knobs + el valor actual de cada uno (`broker-knobs.sh list`).
+    P5Support.DataSource {
+        id: brokerKnobsSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            if (data["exit code"] === 0 && data.stdout) {
+                try { root.brokerKnobs = JSON.parse(data.stdout) } catch (e) { /* deja el previo */ }
+            }
+            disconnectSource(source)
+        }
+    }
+
+    // La ESCRITURA de un knob. El escritor valida contra el spec y sale != 0 si rechaza, con el
+    // motivo por stdout — que es justo lo que hay que mostrarle al usuario, no un "error" genérico.
+    P5Support.DataSource {
+        id: brokerKnobsSetSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            disconnectSource(source)
+            root.brokerKnobsGuardando = false
+            if (data["exit code"] === 0) {
+                root.brokerReinicioPendiente = true
+                root.brokerKnobsMsg = ""
+            } else {
+                root.brokerKnobsMsg = ("" + (data.stdout || data.stderr || "no se pudo escribir")).trim()
+            }
+            // Se RE-LEE siempre: lo que se pinta sale del archivo, no de haber pedido el cambio.
+            root.scanKnobs()
         }
     }
 
@@ -1188,6 +1221,52 @@ PlasmoidItem {
     readonly property bool brokerLegacyActiva: brokerState && brokerState.legacy ? brokerState.legacy.activa === true : false
     // `null` = no se pudo medir; se pinta distinto de un false ("no escucha"). Ver broker-scan.sh.
     readonly property var brokerEscucha: brokerState && brokerState.endpoint ? brokerState.endpoint.escuchando_tcp : null
+
+    // Los KNOBS: se dibujan GENÉRICOS desde el spec (`broker-knobs.tsv`), no de una lista escrita
+    // aquí. Es el punto: si mañana entra una env var nueva al broker, aparece en la pestaña sola —
+    // y si alguien la agrega SIN meterla al spec, `probe-knobs-spec.sh` pone rojo el repo.
+    property var brokerKnobs: null
+    property string brokerKnobsMsg: ""       // error de la última escritura, o ""
+    property bool brokerKnobsGuardando: false
+    // Se enciende con la primera escritura de la sesión: el cambio vive en el .env pero el broker
+    // que CORRE sigue con los valores viejos hasta reiniciar. Se DICE, no se insinúa.
+    property bool brokerReinicioPendiente: false
+
+    readonly property bool brokerKnobsCargados: brokerKnobs !== null
+    readonly property string brokerKnobsArchivo: (brokerKnobs && brokerKnobs.archivo) ? brokerKnobs.archivo : ""
+    // Los grupos, en el orden en que se leen de arriba abajo en la pestaña.
+    readonly property var brokerGrupos: ["endpoint", "topes", "websocket", "http", "proceso"]
+    readonly property var brokerGrupoTitulo: ({
+        "endpoint": "Endpoint y contrato con el cliente",
+        "topes": "Topes de concurrencia",
+        "websocket": "WebSocket: contrapresión y keepalive",
+        "http": "Topes del HTTP",
+        "proceso": "Proceso"
+    })
+    function brokerKnobsDe(grupo) {
+        if (!brokerKnobs || !brokerKnobs.knobs) return []
+        var r = []
+        for (var i = 0; i < brokerKnobs.knobs.length; i++)
+            if (brokerKnobs.knobs[i].grupo === grupo) r.push(brokerKnobs.knobs[i])
+        return r
+    }
+
+    readonly property string brokerKnobsScript: {
+        var u = "" + Qt.resolvedUrl("../broker-knobs.sh")
+        if (u.startsWith("file://")) u = u.substring("file://".length)
+        return u
+    }
+    function scanKnobs() { brokerKnobsSource.connectSource("bash " + shq(root.brokerKnobsScript) + " list") }
+
+    // `valor` vacío ⇒ `unset` (vuelve al default del código). El valor va SIEMPRE por shq: un knob
+    // es texto que viene de un campo editable, y sin comillar, un espacio lo partiría en dos args.
+    function guardarKnob(envVar, valor) {
+        root.brokerKnobsGuardando = true
+        root.brokerKnobsMsg = ""
+        var sub = (("" + valor).trim() === "") ? "unset " + shq(envVar)
+                                               : "set " + shq(envVar) + " " + shq("" + valor)
+        brokerKnobsSetSource.connectSource("bash " + shq(root.brokerKnobsScript) + " " + sub + " 2>&1")
+    }
 
     readonly property string brokerScript: {
         var u = "" + Qt.resolvedUrl("../broker-scan.sh")
@@ -2416,7 +2495,7 @@ PlasmoidItem {
                 id: brokerScroll
                 contentWidth: availableWidth
                 clip: true
-                Component.onCompleted: root.scanBroker()
+                Component.onCompleted: { root.scanBroker(); root.scanKnobs() }
 
                 ColumnLayout {
                     width: brokerScroll.availableWidth
@@ -2566,6 +2645,102 @@ PlasmoidItem {
                         }
                     }
 
+                    // ── Ajustes (los knobs) ──
+                    // Se dibujan del SPEC, no de una lista escrita aquí: `broker-knobs.sh list`
+                    // devuelve cada knob con su tipo, rango, default real y advertencia, y el
+                    // Repeater los pinta. Un knob nuevo en el broker aparece solo.
+                    ColumnLayout {
+                        Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                            PC3.Label { text: "Ajustes"; opacity: 0.6; font.pointSize: Kirigami.Theme.smallFont.pointSize }
+                            Item { Layout.fillWidth: true }
+                            PC3.Label {
+                                visible: root.brokerKnobsArchivo !== ""
+                                text: root.brokerKnobsArchivo
+                                opacity: 0.35; font.family: "monospace"
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                elide: Text.ElideMiddle
+                                Layout.maximumWidth: Kirigami.Units.gridUnit * 16
+                            }
+                        }
+
+                        PC3.Label {
+                            visible: !root.brokerKnobsCargados
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap; opacity: 0.6
+                            text: "Leyendo los ajustes…"
+                        }
+
+                        // El aviso que NO se puede omitir: el .env ya cambió, el broker que corre no.
+                        Rectangle {
+                            visible: root.brokerReinicioPendiente
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: avisoReinicio.implicitHeight + Kirigami.Units.largeSpacing
+                            radius: Kirigami.Units.smallSpacing
+                            color: Qt.rgba(0.91, 0.53, 0.29, 0.18)
+                            RowLayout {
+                                id: avisoReinicio
+                                anchors.fill: parent; anchors.margins: Kirigami.Units.smallSpacing
+                                spacing: Kirigami.Units.smallSpacing
+                                PC3.Label {
+                                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                    text: "Los cambios están guardados, pero el broker que CORRE sigue con los valores viejos. Reinícialo para aplicarlos — recuerda que eso cierra las terminales abiertas."
+                                }
+                                PC3.Button {
+                                    text: "Reiniciar"; icon.name: "view-refresh"
+                                    enabled: root.brokerAccion !== "running"
+                                    onClicked: confirmarBroker.pedir("restart")
+                                }
+                            }
+                        }
+
+                        PC3.Label {
+                            visible: root.brokerKnobsMsg !== ""
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            color: "#dc3545"; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            text: root.brokerKnobsMsg
+                        }
+
+                        // Un bloque por grupo, y el grupo se OMITE si no tiene knobs (así el spec
+                        // puede crecer con grupos nuevos sin dejar encabezados huérfanos).
+                        Repeater {
+                            model: root.brokerKnobsCargados ? root.brokerGrupos : []
+                            delegate: ColumnLayout {
+                                required property string modelData
+                                readonly property var knobsDelGrupo: root.brokerKnobsDe(modelData)
+                                visible: knobsDelGrupo.length > 0
+                                Layout.fillWidth: true
+                                spacing: Kirigami.Units.smallSpacing
+
+                                PC3.Label {
+                                    Layout.fillWidth: true; Layout.topMargin: Kirigami.Units.smallSpacing
+                                    text: root.brokerGrupoTitulo[modelData] !== undefined
+                                          ? root.brokerGrupoTitulo[modelData] : modelData
+                                    font.bold: true; opacity: 0.75
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                }
+                                Repeater {
+                                    model: knobsDelGrupo
+                                    delegate: BrokerKnob {
+                                        required property var modelData
+                                        knob: modelData
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+                        }
+
+                        PC3.Label {
+                            visible: root.brokerKnobsCargados
+                            Layout.fillWidth: true; Layout.topMargin: Kirigami.Units.smallSpacing
+                            wrapMode: Text.WordWrap; opacity: 0.45
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            text: "Dejar un campo vacío devuelve ese ajuste a su default. El token no se edita aquí a propósito, y los cuatro del endpoint tampoco: cambiarlos rompe al cliente en contenedor, o expone el broker a la red."
+                        }
+                    }
+
                     // ── Acciones ──
                     ColumnLayout {
                         Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
@@ -2613,6 +2788,113 @@ PlasmoidItem {
     // botón del riel de pestañas
     // Fila de la pestaña Broker: etiqueta a la izquierda, el valor monoespaciado (son rutas y
     // puertos, que se leen mal en proporcional) y una nota corta de veredicto a la derecha.
+    // Una fila de KNOB. Todo lo que decide su forma sale del spec: el tipo, el rango, si es
+    // editable, si el 0 apaga, y la advertencia. Este componente no sabe nada de ningún knob
+    // concreto — es lo que hace que un knob nuevo aparezca sin tocar QML.
+    component BrokerKnob: ColumnLayout {
+        property var knob: null
+        readonly property bool editable: knob && knob.gui === "edita"
+        // `actual` vacío = nadie lo configuró ⇒ manda el default del código. La distinción importa:
+        // "está en 32 porque lo pusiste" no es lo mismo que "está en 32 porque es el default".
+        readonly property bool enDefault: !knob || !knob.actual || ("" + knob.actual).length === 0
+        readonly property string efectivo: enDefault ? ("" + (knob ? knob.default : "")) : ("" + knob.actual)
+
+        Layout.fillWidth: true
+        spacing: 2
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Kirigami.Units.smallSpacing
+
+            PC3.Label {
+                text: knob ? knob.etiqueta : ""
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 11
+                elide: Text.ElideRight
+                PC3.ToolTip.text: knob ? knob.env : ""      // el nombre EXACTO de la env var, para el .env
+                PC3.ToolTip.visible: hoverEtiqueta.hovered
+                PC3.ToolTip.delay: 400
+                // HoverHandler y NO un MouseArea con `anchors.fill`: dentro de un Layout, anchors
+                // en un Item hijo es undefined behavior y QML lo avisa. Un Handler no es un Item.
+                HoverHandler { id: hoverEtiqueta }
+            }
+
+            // Editable: campo + botón de guardar. Se muestra el valor EFECTIVO como texto inicial,
+            // para que editar sea partir de lo que hay y no de un campo vacío.
+            PC3.TextField {
+                id: campoKnob
+                visible: editable
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 7
+                text: efectivo
+                enabled: !root.brokerKnobsGuardando
+                // Vacío ⇒ vuelve al default (el escritor hace `unset`). Se dice en el placeholder.
+                placeholderText: knob ? ("" + knob.default) : ""
+                onAccepted: root.guardarKnob(knob.env, text)
+                horizontalAlignment: Text.AlignRight
+            }
+            PC3.ToolButton {
+                visible: editable
+                icon.name: "document-save"
+                enabled: !root.brokerKnobsGuardando && campoKnob.text !== efectivo
+                onClicked: root.guardarKnob(knob.env, campoKnob.text)
+                PC3.ToolTip.text: "Guardar en " + root.brokerKnobsArchivo
+                PC3.ToolTip.visible: hovered; PC3.ToolTip.delay: 400
+            }
+            PC3.ToolButton {
+                visible: editable && !enDefault
+                icon.name: "edit-undo"
+                enabled: !root.brokerKnobsGuardando
+                onClicked: { campoKnob.text = ""; root.guardarKnob(knob.env, "") }
+                PC3.ToolTip.text: "Volver al default (" + (knob ? knob.default : "") + ")"
+                PC3.ToolTip.visible: hovered; PC3.ToolTip.delay: 400
+            }
+
+            // Solo-lectura: el valor, y por qué no se toca aquí.
+            PC3.Label {
+                visible: !editable
+                text: efectivo
+                font.family: "monospace"; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                Layout.fillWidth: true; elide: Text.ElideMiddle
+                textFormat: Text.PlainText
+            }
+            PC3.Label {
+                visible: !editable
+                text: "solo a mano"; opacity: 0.5
+                font.pointSize: Kirigami.Theme.smallFont.pointSize
+            }
+
+            Item { Layout.fillWidth: editable }
+            // Se marca cuándo el valor es el DEFAULT y cuándo alguien lo cambió.
+            PC3.Label {
+                text: enDefault ? "default" : "personalizado"
+                opacity: enDefault ? 0.4 : 0.75
+                color: enDefault ? Kirigami.Theme.textColor : "#e8884a"
+                font.pointSize: Kirigami.Theme.smallFont.pointSize
+            }
+        }
+
+        PC3.Label {
+            Layout.fillWidth: true; Layout.leftMargin: Kirigami.Units.smallSpacing
+            wrapMode: Text.WordWrap; opacity: 0.55
+            font.pointSize: Kirigami.Theme.smallFont.pointSize
+            text: {
+                if (!knob) return ""
+                var s = knob.ayuda
+                if (knob.cero_apaga) s += "  ·  0 lo APAGA."
+                if (knob.min !== null && knob.max !== null) s += "  ·  entre " + knob.min + " y " + knob.max + "."
+                return s
+            }
+        }
+        // La advertencia NO se mezcla con la ayuda: es el riesgo concreto de cambiarlo.
+        PC3.Label {
+            visible: knob && knob.advertencia
+            Layout.fillWidth: true; Layout.leftMargin: Kirigami.Units.smallSpacing
+            wrapMode: Text.WordWrap
+            color: "#d6a15b"
+            font.pointSize: Kirigami.Theme.smallFont.pointSize
+            text: knob && knob.advertencia ? ("⚠ " + knob.advertencia) : ""
+        }
+    }
+
     component BrokerFila: RowLayout {
         property string etiqueta: ""
         property string valor: ""
