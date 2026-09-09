@@ -36,7 +36,19 @@ tp=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null)
 ROOT="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 MEM="$ROOT/.claude/memory"
 [ -d "$MEM" ] || exit 0                          # repo sin el sistema de memoria → no incumbe
+# F3 (auditoría 2026-09-09): el escalón de debounce se keyea POR SESIÓN, no por repo. Un stamp único
+# por-repo hacía THRASH entre sesiones concurrentes (unjordi corre muchas a la vez): la de ctx alto
+# re-emitía su escalón cada vez que la de ctx bajo reescribía la marca, y la de ctx bajo quedaba
+# falsamente silenciada. Stamp per-sesión: session_id (sanitizado a nombre de archivo) + poda best-effort
+# >14d, el mismo criterio que los demás nudges del cerebro. Fallback retro-compat: sin session_id o si no
+# se puede crear el dir → el archivo único de antes.
+sid=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null | tr -c 'A-Za-z0-9_-' '_')
 AVISO_F="$MEM/.contexto-aviso"
+AVISO_D="$MEM/.contexto-aviso.d"
+if [ -n "$sid" ] && mkdir -p "$AVISO_D" 2>/dev/null; then
+  find "$AVISO_D" -type f -mtime +14 -delete 2>/dev/null || true
+  AVISO_F="$AVISO_D/$sid"
+fi
 
 # Tokens de contexto ACTUALES = último `usage`, ANCLADO al último /compact. Un `isCompactSummary:true`
 # RESETEA el acumulado (reduce): descarta todo usage previo al boundary. Así, justo tras compactar, el

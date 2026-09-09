@@ -3284,6 +3284,13 @@ gen_ctx 95000; is_silent "$(ac)" && ok "aviso-contexto: sube DENTRO del mismo es
 gen_ctx 150000; has_aviso "$(ac)" && ok "aviso-contexto: cruza el escalón 3 (150K) → vuelve a avisar" || bad "aviso-contexto NO avisó al cruzar el escalón 3"
 gen_ctx 80000; is_silent "$(ac)" && ok "aviso-contexto: ctx bajó (compact) a un escalón menor → silencio (se re-arma)" || bad "aviso-contexto avisó justo tras bajar el ctx"
 gen_ctx 150000; has_aviso "$(ac)" && ok "aviso-contexto: vuelve a subir al escalón 3 tras el compact → avisa de nuevo" || bad "aviso-contexto NO avisó tras re-subir"
+# (F3, auditoría 2026-09-09) el debounce se keyea POR SESIÓN: dos sesiones concurrentes en el MISMO repo
+# NO se pisan el escalón (antes, stamp per-repo → thrash: la de ctx alto re-emitía y la baja se silenciaba).
+ac_sid() { printf '%s' "{\"transcript_path\":\"$ACTX\",\"session_id\":\"$1\"}" | CLAUDE_PROJECT_DIR="$ACROOT" bash "$HOOKS/aviso-contexto.sh"; }
+gen_ctx 250000   # escalón 5, virgen para ambas sesiones
+has_aviso "$(ac_sid sesA)" && ok "aviso-contexto F3: sesión A cruza escalón nuevo → avisa" || bad "aviso-contexto F3: sesión A no avisó"
+is_silent "$(ac_sid sesA)" && ok "aviso-contexto F3: sesión A mismo escalón → debounce (su propio stamp)" || bad "aviso-contexto F3: sesión A re-avisó su propio escalón"
+has_aviso "$(ac_sid sesB)" && ok "aviso-contexto F3: sesión B (mismo repo/escalón) → AVISA, no la silencia A (sin thrash per-repo)" || bad "aviso-contexto F3: sesión B silenciada por el stamp de A (thrash no resuelto)"
 # Robustez: un usage de SIDECHAIN (subagente) al final NO debe contaminar la medición del hilo principal
 # (esta exclusión NO cambió con el rediseño — sigue viva en el hook, línea "select(.isSidechain != true)").
 printf '%s\n%s\n' "{\"message\":{\"usage\":{\"cache_read_input_tokens\":50}}}" '{"isSidechain":true,"message":{"usage":{"cache_read_input_tokens":999999}}}' > "$ACTX"
