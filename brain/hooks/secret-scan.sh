@@ -103,8 +103,18 @@ has_commit=0; printf '%s' "$cmd_uq" | grep -qE 'git[[:space:]]+commit([[:space:]
 # ESE contenido del working tree al escaneo.
 addfiles=""
 if [ "$has_commit" = 1 ] && printf '%s' "$cmd_uq" | grep -qE 'git[[:space:]]+add([[:space:]]|$)'; then
-  add_args=$(printf '%s' "$cmd_uq" | grep -oE 'git[[:space:]]+add[^;&|]*' | head -1 | sed -E 's/^git[[:space:]]+add[[:space:]]*//')
-  addfiles=$(git -C "$dir" add --dry-run $add_args 2>/dev/null | grep "^add '" | sed -E "s/^add '(.*)'\$/\1/")
+  # TODOS los segmentos `git add` del comando, NO solo el 1º: `git add safe && git add secret && git commit`
+  # (un solo comando) estagearía AMBOS, pero el `head -1` anterior solo escaneaba `safe` → el secreto de
+  # `secret` entraba (hueco real del audit-07, OK de unjordi). Iteramos cada `git add` y sumamos su dry-run.
+  while IFS= read -r _addseg; do
+    [ -n "$_addseg" ] || continue
+    _aargs=$(printf '%s' "$_addseg" | sed -E 's/^git[[:space:]]+add[[:space:]]*//')
+    _more=$(git -C "$dir" add --dry-run $_aargs 2>/dev/null | grep "^add '" | sed -E "s/^add '(.*)'\$/\1/")
+    addfiles=$(printf '%s\n%s' "$addfiles" "$_more")
+  done <<EOF
+$(printf '%s' "$cmd_uq" | grep -oE 'git[[:space:]]+add[^;&|]*')
+EOF
+  addfiles=$(printf '%s\n' "$addfiles" | grep -vE '^[[:space:]]*$' | sort -u)
 fi
 # A1 (residuo `commit -a`/`-am`/`--all`): la bandera -a AUTO-ESTAGEA los tracked MODIFICADOS al crear el
 # commit; en PreToolUse aún no corrió, así que --cached está VACÍO para ellos → el escaneo de commit sería

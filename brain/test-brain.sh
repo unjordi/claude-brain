@@ -1330,6 +1330,15 @@ o="$(scan 'ls -la')"
 [ -z "$o" ] && ok "secret-scan ignora comandos no-git" || bad "secret-scan reaccionó a no-git; got: $o"
 # ── §D: patrones NUEVOS (JWT, connection string, Password=) vía la lib detectar-secretos ──
 reset_scan() { git -C "$SCANREPO" reset -q >/dev/null 2>&1; rm -f "$SCANREPO"/*.txt 2>/dev/null; }
+# (A1 multi-add) `git add safe && git add secret && git commit` en UN comando: los adds NO corrieron en
+# PreToolUse → el escaneo debe pedir el dry-run de TODOS los `git add`, no solo el 1º. Antes (head -1) el 2º
+# add se colaba y su secreto entraba. Cerrado 2026-09-08 (OK de unjordi).
+reset_scan; printf 'limpio, sin secretos\n' > "$SCANREPO/safe.txt"; printf 'aws = AKIA1234567890ABCDEF\n' > "$SCANREPO/secreto.txt"
+o="$(scan 'git add safe.txt && git add secreto.txt && git commit -m x')"
+printf '%s' "$o" | grep -q '"deny"' && ok "secret-scan A1: multi-add encadenado escanea TODOS los git add (secreto en el 2º → deny)" || bad "secret-scan A1: el 2º git add encadenado se coló (solo escaneó el 1º); got: $o"
+reset_scan; printf 'a\n' > "$SCANREPO/a.txt"; printf 'b\n' > "$SCANREPO/b.txt"
+o="$(scan 'git add a.txt && git add b.txt && git commit -m x')"
+[ -z "$o" ] && ok "secret-scan A1: multi-add encadenado TODO limpio → silencio (sin FP)" || bad "secret-scan A1: FP en multi-add limpio; got: $o"
 # (6) JWT
 reset_scan; printf 'jwt: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c\n' > "$SCANREPO/j.txt"
 git -C "$SCANREPO" add j.txt >/dev/null 2>&1; o="$(scan 'git commit -m x')"
