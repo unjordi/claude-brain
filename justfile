@@ -45,6 +45,19 @@ reload-plasmashell:
     sh -c 'sleep 2; pgrep -x plasmashell >/dev/null && echo "plasmashell arriba ✓" || echo "⚠️  no levantó — a mano: plasmashell & disown"'
 
 # Run the plasmoid standalone for debugging
+#
+# ⚠️ TRAMPA (medida en vivo 2026-09-09): la superficie de plasmoidviewer NO REPINTA cuando su
+# ventana no tiene el foco. Una captura de pantalla te devuelve el PRIMER frame pintado, para
+# siempre — así que un estado que llega 1 s después de abrir (cualquier DataSource "executable")
+# se ve eternamente en su texto de "cargando…" aunque el dato ya esté. Cuesta caro: se puede
+# perseguir un bug de binding que no existe.
+#   · Cómo distinguirlo: mete un contador con un `Timer { interval: 500; repeat: true }` en el
+#     label que estés mirando. Si sigue en t=0 al cabo de unos segundos, el frame está congelado
+#     y la captura NO es un oráculo válido.
+#   · Qué SÍ vale como oráculo: `console.warn` (no `console.log` — Plasma lo filtra) leído con
+#     `journalctl --user`, corriendo el viewer con QT_LOGGING_RULES="*.debug=true;*.info=true".
+# Además la ventana RECORTA el popup si es más grande que ella: el texto de la derecha no aparece,
+# así que un marcador de depuración va al PRINCIPIO de la cadena, no al final.
 preview:
     plasmoidviewer -a {{PLASMOID_ID}}
 
