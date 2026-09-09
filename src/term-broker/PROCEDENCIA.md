@@ -1,50 +1,32 @@
 # Procedencia de `src/term-broker/` — copia vendorizada desde axon, HOY CON UN PARCHE PROPIO
 
-> ## ⚠️ DIVERGENCIA VIVA (2026-09-09) — endurecimiento de auditoría, PENDIENTE de portar a axon
-> Una tupla de auditoría (3 auditores adversariales sobre el broker, el "ancla local" del harness) destapó
-> hallazgos reales; se arreglaron **aquí** por decisión de unjordi ("cortex es frontera compartida, arréglalo;
-> merge sin squash para que axon lo vea completo"). Estos módulos **YA NO son byte-a-byte de axon** — `SHA256SUMS`
-> se regeneró sobre la copia parcheada. **axon debe PORTAR estos fixes a su fuente y re-vendorizar** (igual que
-> se hizo con los topes); hasta entonces, re-vendorizar copiando encima desde axon **BORRARÍA estos parches**.
-> Los commits van **sin squash** justo para que axon los vea uno a uno. Fixes aplicados:
-> - **ws.ts** · `#1` cap AGREGADO de fragmentación → `close(1009)` (los 3 auditores lo marcaron: sin él,
->   una ráfaga de frames CONT hacía OOM y tumbaba TODAS las terminales). `#2` reloj de "tiempo en
->   contrapresión" (`backpressureDeadlineMs`, 60 s) → cierra el half-open que retenía slot+PTY+shell ~15 min
->   (la válvula dura de 8 MiB quedaba dormida al pausar el productor). `L1` `head` del upgrade vía `unshift`
->   (no perder un 1er frame pipelineado). `L3` frame de cliente sin mask → `close(1002)` (RFC §5.1). `L4`
->   control-frames validados `fin=1 && ≤125 B`. `L5` `esperandoPong` se reinicia en el tick saltado.
->   `CONT` sin inicio → `close(1002)`.
-> - **term-host-broker.ts** · `#4` token comparado con `crypto.timingSafeEqual` sobre digests SHA-256
->   (constant-time, sin fuga de longitud). `headersTimeout`/`requestTimeout` explícitos (slowloris). `head`
->   pasado al `acceptWebSocket`.
-> - **term-session.ts** · `#3` `StringDecoder` por stream → no corromper UTF-8 (acentos/ñ) partido en el
->   borde de un chunk en el camino `/run` (el camino PTY no sufría esto).
-> - **pty-session.ts** · `L2` el parser del marcador de pts itera sobre los SOH sucesivos (un `0x01` espurio
->   antes del marcador real ya no lo entierra).
-> - **Verificado en macOS** (bare, sin el `script` de util-linux): parse-check de los 5 módulos, loopback WS
->   (TEXT/BINARY/fragmentado normal reensambla, over-cap→1009 sin OOM), `StringDecoder` sobre ñ partida.
->   Los caminos que exigen el PTY (util-linux `script`) se verifican en el contenedor Linux / con `probe-topes.ts`.
-> - **NO tocado:** `#5` (superficie TCP loopback multi-usuario) — lo mejora unjordi aparte.
+> ## ✅ DIVERGENCIA SALDADA (2026-09-09) — el endurecimiento de auditoría ya vive en axon
+> El endurecimiento tras la tupla de 3 auditores adversariales se arregló **aquí** primero (decisión de
+> unjordi: "cortex es frontera compartida, arréglalo; merge sin squash para que axon lo vea completo"),
+> lo que hizo divergir esta copia de su fuente. **axon ya PORTÓ los 4 fixes a su fuente** (PR #151, en su
+> `develop`) y esta copia se **re-vendorizó** desde ahí: los cinco `.ts` vuelven a ser byte-a-byte de axon
+> y el pin de abajo apunta al commit de axon que los contiene. `#5` (superficie TCP loopback multi-usuario)
+> sigue sin tocarse — lo mejora unjordi aparte.
 
 Los cinco `.ts` de esta carpeta salieron como **copia byte-a-byte** de módulos del repo `axon`, y la
-regla sigue siendo *no se editan aquí* **salvo la divergencia viva de arriba**: lo normal es cambiarlos en
+regla sigue siendo *no se editan aquí*: lo normal es cambiarlos en
 axon y re-vendorizar (abajo está el comando). La divergencia que hubo con los topes **ya está saldada**;
 queda registrada abajo porque explica QUÉ hacer al re-vendorizar: [Divergencia vs axon](#divergencia-vs-axon--saldada-2026-09-08).
 
-| archivo | origen en axon | líneas (al vendorizar) | líneas (hoy) |
-|---|---|---|---|
-| `term-host-broker.ts` | `src/server/term-host-broker.ts` | 394 | 504 |
-| `term-session.ts` | `src/server/term-session.ts` | 263 | 313 |
-| `term-pty-bridge.ts` | `src/server/term-pty-bridge.ts` | 70 | 115 |
-| `ws.ts` | `src/server/ws.ts` | 306 | 528 |
-| `pty-session.ts` | `src/server/pty-session.ts` | 188 | 327 |
-| | **total** | **1221** | **1787** |
+| archivo | origen en axon | líneas (al vendorizar = hoy) |
+|---|---|---|
+| `term-host-broker.ts` | `src/server/term-host-broker.ts` | 516 |
+| `term-session.ts` | `src/server/term-session.ts` | 321 |
+| `term-pty-bridge.ts` | `src/server/term-pty-bridge.ts` | 115 |
+| `ws.ts` | `src/server/ws.ts` | 598 |
+| `pty-session.ts` | `src/server/pty-session.ts` | 331 |
+| | **total** | **1881** |
 
-**Commit de origen:** `3a82d76` (`origin/develop` de axon, 2026-09-09) — el commit en que los topes de
-esta copia ya viven río arriba, **y que está en `develop`**. Ese detalle no es cosmético: el pin anterior
+**Commit de origen:** `1079574` (`origin/develop` de axon, 2026-09-09) — el commit en que el
+endurecimiento de la auditoría adversarial ya vive río arriba, **y que está en `develop`**. Ese detalle no es cosmético: el pin anterior
 apuntaba a un commit que solo existía en la rama de trabajo, y esa rama se borra al integrarse por squash —
 el sha se habría vuelto inalcanzable y con él los tres chequeos anti-drift de abajo. **Un pin siempre a un
-commit de una rama permanente.** Antes fue `44f463d` y `ed482fb` (los dos del 2026-09-09), y antes `341fb53` (2026-09-07), re-vendorizado desde
+commit de una rama permanente.** Antes fue `3a82d76`, `44f463d` y `ed482fb` (los tres del 2026-09-09), y antes `341fb53` (2026-09-07), re-vendorizado desde
 `cf840e6` para traer el **socket unix** (`fix/term-broker-alcanzable`, #75): un cliente en
 contenedor NO alcanza un bind a loopback del host, así que la copia anterior servía un broker que la
 terminal del widget no podía usar. De paso llegan `GET /health` (lo que sondea el badge) y el
@@ -112,7 +94,7 @@ con ese commit, el bloque se SALTA contando el ⚠️, nunca falla en falso.
 La receta equivalente, a mano, contra el **commit fijado** y no contra la punta móvil:
 
 ```bash
-VEND=3a82d76   # el commit anotado arriba — NO 'origin/develop'
+VEND=1079574   # el commit anotado arriba — NO 'origin/develop'
 for f in term-host-broker term-session term-pty-bridge ws pty-session; do
   # OJO a las LLAVES: `${VEND}:`, no `$VEND:`. En zsh —el login shell de muchas máquinas— la segunda
   # forma se lee como el modificador de expansión `:s`, y el `show` falla en los cinco archivos: la
