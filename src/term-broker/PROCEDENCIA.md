@@ -59,7 +59,8 @@ node --disable-warning=ExperimentalWarning --experimental-strip-types src/term-b
 
 Había un problema con el chequeo que vivía aquí: nadie lo corría, y apuntaba a `origin/develop` —una
 ref **móvil**—, así que "idéntico" solo significaba "idéntico a lo que develop tenga hoy", que es
-otra cosa que "idéntico a lo que dice este archivo". Se parte en dos, y la primera es automática:
+otra cosa que "idéntico a lo que dice este archivo". Se parte en tres, y las dos primeras son
+automáticas:
 
 **(1) ¿La copia local sigue siendo la que se vendorizó?** Lo corre `probe-instalador.sh` en cada
 pasada (check *"módulos idénticos a la fuente"*), y no necesita un clon de axon:
@@ -87,6 +88,36 @@ git -C ~/code/axon diff --stat $VEND origin/develop -- src/server/{term-host-bro
 Re-vendorizar = copiar los 5 desde el nuevo commit, regenerar `SHA256SUMS`
 (`sha256sum term-host-broker.ts term-session.ts term-pty-bridge.ts ws.ts pty-session.ts > SHA256SUMS`),
 actualizar el commit y las líneas de la tabla de arriba, y el commit en `NOTICE`.
+
+**(3) ¿Los 5 módulos COMPILAN?** Es la que faltaba, y la razón de que exista: (1) y (2) verifican que
+la copia sea idéntica a algo (a sí misma ayer, o al commit de axon) — **ninguna de las dos ejecuta el
+código ni lo typechequea**, así que un edit *declarado* y con hashes regenerados podía tener un error
+de tipos y las dos seguir en verde. Pasó de verdad: el parche de topes usaba `opts.maxSessions` en
+`term-session.ts` sin declararlo en `ShellSessionPoolOptions` — vivió así hasta que el mismo código se
+typechequeó del lado de axon, porque esta carpeta corre con `node --experimental-strip-types` (nunca
+pasa por `tsc`). Ahora lo corre `probe-instalador.sh` en cada pasada (check *"tsc --noEmit sale limpio
+sobre los 5 módulos"*):
+
+```bash
+tsc --noEmit --target ES2022 --module ES2022 --moduleResolution bundler --lib ES2023 --strict \
+  --esModuleInterop --skipLibCheck --forceConsistentCasingInFileNames --allowImportingTsExtensions \
+  --resolveJsonModule --typeRoots <ruta-a-@types-de-axon> --types node \
+  term-host-broker.ts term-session.ts term-pty-bridge.ts ws.ts pty-session.ts
+```
+
+cortex no trae `tsc` propio a propósito (cero deps de npm es parte del diseño de esta carpeta, ver
+"Por qué COPIA…" punto 4 más abajo), así que el chequeo reutiliza el `tsc` que ya trae axon —el propio
+repo de origen de estos módulos, normalmente clonado como hermano de cortex— con las mismas
+`compilerOptions` de su `tsconfig.json` (no se pueden pasar junto con una lista explícita de archivos:
+TypeScript lo rechaza con `TS5042`, de ahí que se repliquen a mano). **Si no hay un `tsc`+`@types/node`
+verificable a mano** (máquina limpia, sin axon clonado al lado, o axon sin `npm install` corrido), el
+chequeo se **SALTA con un aviso explícito** en la salida del probe — no se instala una dependencia
+nueva ni se falla en falso solo porque falte una herramienta opcional.
+
+**Lo que (3) protege y lo que NO:** atrapa cualquier error de tipos en los 5 módulos, lo haya
+introducido un patch de cortex o una re-vendorización mal aplicada. No sustituye a (1) ni a (2): un
+módulo puede typechecar perfecto y aun así haber divergido de axon en runtime (p. ej. un `any`
+disfrazando un bug de lógica), o haber sido editado aquí sin declararlo — para eso siguen (1) y (2).
 
 Como la copia es byte-a-byte, ese `diff` es el chequeo completo: cualquier cambio en axon aparece
 como un diff legible, no como "a ver quién cambió qué". Por eso **no** se tocan los comentarios
