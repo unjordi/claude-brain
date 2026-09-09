@@ -492,6 +492,15 @@ is_silent "$(gbx 'git push')" && ok "gbg retro-compat: pelón sin .cwd en la ses
 # por CLI ya no se bloquea en falso; solo un destino EXPLÍCITO por flag (--base/-B/--target) cuenta.
 is_silent "$(gbx 'gh pr merge develop --merge')" && ok "gbg G6: 'gh pr merge develop --merge' (posicional=origen) → silencio (no es destino)" || bad "gbg G6: FP — el posicional 'develop' se trató como destino"
 printf '%s' "$(gbx 'gh pr merge 5 --base develop')" | grep -q '"deny"' && ok "gbg G6: 'gh pr merge 5 --base develop' (destino EXPLÍCITO por flag) → deny" || bad "gbg G6: el destino explícito por --base no bloqueó"
+# G7 (FP corpus L109, 2026-09-03 ×2): un compuesto que CAMBIA de rama antes del push pelón se resolvía
+# contra el HEAD ANTERIOR (develop) → FP. Ahora se resuelve contra la rama que el checkout/switch deja activa.
+git -C "$BASE" branch fix/z >/dev/null 2>&1   # rama LOCAL existente en el repo-en-develop
+gbxB() { jq -nc --arg c "$1" --arg w "$2" '{tool_name:"Bash",tool_input:{command:$c},cwd:$w}' | CLAUDE_PROJECT_DIR="$SESS" HOME="$GBXHOME" bash "$HOOKS/git-branch-guard.sh"; }
+is_silent "$(gbxB 'git checkout fix/z && git push' "$BASE")"      && ok "gbg G7: 'git checkout fix/z && git push' (rama existente) → silencio (resuelve contra fix/z, no develop)" || bad "gbg G7: FP — checkout+push pelón se resolvió contra el HEAD anterior (develop)"
+is_silent "$(gbxB 'git checkout -b feat/nueva && git push' "$BASE")" && ok "gbg G7: 'git checkout -b feat/nueva && git push' (rama NUEVA) → silencio" || bad "gbg G7: FP — checkout -b nueva+push bloqueó"
+is_silent "$(gbxB 'git switch -c otra && git push' "$BASE")"      && ok "gbg G7: 'git switch -c otra && git push' → silencio" || bad "gbg G7: FP — switch -c+push bloqueó"
+printf '%s' "$(gbxB 'git checkout develop && git push' "$BASE")"  | grep -q '"deny"' && ok "gbg G7: 'git checkout develop && git push' → deny (el checkout a BASE sigue bloqueando)" || bad "gbg G7: FN — checkout develop+push se coló"
+printf '%s' "$(gbxB 'git checkout no-existe.txt && git push' "$BASE")" | grep -q '"deny"' && ok "gbg G7: checkout de NO-rama (archivo) + push en develop → deny (fallback a HEAD, no FN)" || bad "gbg G7: FN — checkout de no-rama abrió un hueco (no cayó a HEAD)"
 rm -rf "$GBX"
 
 # ── (b1d-lib) acg_target_dir / acg_target_remote: PRECEDENCIA del resolvedor (F0, DETERMINISTA sin repos) ──

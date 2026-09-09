@@ -187,13 +187,38 @@ acg_push_sin_refspec() {
   [ "$posargs" -le 1 ]
 }
 
+# ¿un `git checkout/switch` de un segmento PREVIO cambia a QUÉ rama? Imprime "NUEVA <r>" (creada con
+# -b/-B/-c/--create → es rama por definición, aunque aún no exista como ref) · "POSIC <r>" (checkout/switch
+# a un nombre que PODRÍA ser rama o archivo → el consumidor verifica refs/heads) · vacío (no aplica). Opera
+# sobre un segmento YA despojado/normalizado. bash-3.2-safe. (FP corpus L109, 2026-09-03 ×2: un compuesto
+# `git checkout fix/x && git push` resolvía la rama contra el HEAD ANTERIOR —develop— en vez de fix/x.)
+acg_checkout_rama() {   # $1=segmento(despojado) → "NUEVA <r>" | "POSIC <r>" | vacío
+  local s="$1" rest tok want_new=0 posname=""
+  printf '%s' "$s" | grep -qE 'git[[:space:]]+(checkout|switch)([[:space:]]|$)' || return 0
+  rest=$(printf '%s' "$s" | sed -E 's/.*git[[:space:]]+(checkout|switch)[[:space:]]*//')
+  # Recorre los tokens tras checkout/switch: -b/-B/-c/--create ⇒ el SIGUIENTE token es la rama NUEVA; si no,
+  # el 1er posicional (no-flag) es la rama/archivo destino. Parseo por tokens (sin glob): bash-3.2-safe.
+  while IFS= read -r tok; do
+    [ -n "$tok" ] || continue
+    if [ "$want_new" = 1 ]; then printf 'NUEVA %s' "$tok"; return 0; fi
+    case "$tok" in
+      -b|-B|-c|--create) want_new=1 ;;
+      -*)                : ;;
+      *)                 [ -z "$posname" ] && posname="$tok" ;;
+    esac
+  done <<EOF
+$(printf '%s' "$rest" | tr ' ' '\n')
+EOF
+  [ -n "$posname" ] && printf 'POSIC %s' "$posname"
+}
+
 # ¿el comando EMPUJARÍA a develop/main? — explícito (nombra la rama) O pelón cuando el repo OBJETIVO está
 # en develop/main. Opera sobre el cmd SIN comillas ni --repo para la detección; el dir objetivo se resuelve
 # CON comillas (acg_target_dir). Cierra H1 (+ H11/H13) y el FN cross-repo (pelón a OTRO repo en base).
 # FAIL-SAFE del pelón: si la rama del repo objetivo es IRRESOLUBLE (sin git / dir inexistente / no-git),
 # BLOQUEA (nunca fail-open) — backstop adicional = ramas protegidas server-side.
 acg_push_toca_base() {   # $1=cmd  $2=payload_cwd(opcional)
-  local pcwd="${2:-}" orig sub subu subq cd_prefix="" dir rama
+  local pcwd="${2:-}" orig sub subu subq cd_prefix="" dir rama co_spec="" _cob
   # A-R3-01 (FMEA r3): recorre CADA subcomando (separado por ; && || & |). Un push a base en CUALQUIERA
   # cuenta — un `git push origin feat/x ; git push origin develop` ya no se cuela por el 2º (el head -1
   # anterior solo miraba el 1º). Cada subcomando se evalúa AISLADO: un "git push …develop" DENTRO del
@@ -211,13 +236,25 @@ acg_push_toca_base() {   # $1=cmd  $2=payload_cwd(opcional)
     subu=$(acg_sin_flag_repo "$(acg_despoja_comillas "$sub")")
     # rastrea un `cd/pushd <dir>` para los segmentos POSTERIORES de la cadena (aplica al push que le sigue)
     if printf '%s' "$subu" | grep -qE '^[[:space:]]*(cd|pushd)[[:space:]]'; then cd_prefix="$orig"; fi
+    # rastrea un `git checkout/switch <rama>` PREVIO: un pelón posterior empuja a ESA rama, no a la de HEAD
+    # antes del comando (FP corpus L109). Se guarda el spec; se resuelve contra el repo objetivo en el pelón.
+    _cob=$(acg_checkout_rama "$subu"); [ -n "$_cob" ] && co_spec="$_cob"
     acg_es_push "$subu" || continue
     printf '%s' "$subu" | grep -qE 'git[[:space:]]+push[^;&|]*[[:space:]](--all|--mirror)([[:space:]]|$)' && return 0
     subq=$(acg_sin_flag_repo "$(printf '%s' "$sub" | tr -d "'\"")")
     acg_push_destino_base "$subq" && return 0
     if acg_push_sin_refspec "$subu"; then
       dir=$(acg_target_dir "$cd_prefix $orig" "$pcwd")   # -C del segmento > cd previo > cwd > PROJECT_DIR
-      rama=$(acg_rama_actual "$dir")
+      # Si un checkout/switch PREVIO cambió de rama, el pelón empuja a ESA rama (no a la de HEAD antes del
+      # comando). NUEVA (-b/-c) es rama por definición; POSIC solo se cree si es una rama LOCAL real (si no
+      # —un archivo, un typo— cae a acg_rama_actual: fail-safe, si HEAD es base sigue bloqueando).
+      rama=""
+      case "$co_spec" in
+        "NUEVA "*) rama="${co_spec#NUEVA }" ;;
+        "POSIC "*) _cob="${co_spec#POSIC }"
+                   git -C "$dir" rev-parse --verify --quiet "refs/heads/$_cob" >/dev/null 2>&1 && rama="$_cob" ;;
+      esac
+      [ -n "$rama" ] || rama=$(acg_rama_actual "$dir")
       case "$rama" in
         main|develop) return 0 ;;
         "")           return 0 ;;   # FAIL-SAFE: rama IRRESOLUBLE en un pelón ⇒ BLOQUEA (nunca fail-open)
