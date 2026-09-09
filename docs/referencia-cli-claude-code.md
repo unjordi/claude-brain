@@ -20,6 +20,7 @@
 - [1. CLI reference: comandos y flags](#1-cli-reference-comandos-y-flags)
 - [2. Modo headless / SDK / automatización](#2-modo-headless--sdk--automatización)
 - [3. Subagents (definición completa)](#3-subagents-definición-completa)
+- [3.5 🎯 Herramientas `Task*` (to-do nativo): apagadas por defecto en modelos nuevos](#35--herramientas-task-to-do-nativo-apagadas-por-defecto-en-modelos-nuevos)
 - [4. Hooks (todos los eventos + I/O)](#4-hooks-todos-los-eventos--io)
 - [5. settings.json (esquema + precedencia)](#5-settingsjson-esquema--precedencia)
 - [6. Variables de entorno](#6-variables-de-entorno)
@@ -233,6 +234,53 @@ Fuente: [headless]. `claude -p` = el Agent SDK vía CLI. Todos los flags de la C
 
 ---
 
+## 3.5 🎯 Herramientas `Task*` (to-do nativo): apagadas por defecto en modelos nuevos
+
+> Nos costó horas hoy (2026-09-08) sin que esta referencia dijera nada al respecto — de ahí esta sección.
+> **Ojo con el nombre:** esto NO es el `Task` legacy de §0.2 (la tool de invocar subagents, renombrada
+> `Agent` en v2.1.63; `Task(...)` sigue de alias ahí). Es una familia DISTINTA: trackear un to-do/backlog
+> dentro de la sesión — el reemplazo nativo de `TodoWrite`.
+
+**Accionable primero — cómo encenderlas de forma durable:** en el bloque `env` de `settings.json`
+(global o de proyecto), pon `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` (el parser acepta `1`, `true`, `yes`, `on`).
+**Gotcha verificado en vivo:** el toolset se resuelve **al ARRANCAR la sesión** — agregar la variable al
+settings con la sesión ya viva **NO** las trae; hay que reabrir. (Medido hoy: un proceso arrancó a las
+17:27 sin ninguna `CLAUDE_*` en su entorno, y el `settings.json` se editó a las 17:57 — esa sesión nunca
+las tuvo hasta reabrir.)
+
+**El gate — verificado hoy contra el binario 2.1.265, en vivo:** desde el CLI **v2.1.233**, `TaskCreate` /
+`TaskGet` / `TaskList` / `TaskUpdate` vienen **APAGADAS por defecto** cuando el modelo del **bucle
+principal** es de una familia/versión nueva: **opus ≥ 4.8, sonnet ≥ 5, fable ≥ 5, mythos ≥ 5**. Por
+debajo de ese umbral (o familia desconocida) están **ON sin condiciones**. Motivo declarado por
+Anthropic: esos modelos ya siguen el trabajo multi-paso internamente, y el esquema de las tools les
+costaba contexto sin aportar.
+
+**Las 5 vías que las encienden (basta con una):**
+1. Sesión **background**, o Claude Code **en la web** → siempre las tienen, sin importar el modelo.
+2. Arrancar con `--allowedTools TaskCreate` (o `--tools` incluyéndola) → enciende el opt-in de arranque.
+3. El modelo del bucle principal es anterior al umbral de arriba.
+4. Env var **`CLAUDE_CODE_ENABLE_TODO_TOOLS=1`** (acepta `1`, `true`, `yes`, `on`).
+5. Un feature flag de servidor con nombre en clave — no es un flag público con "task" en el nombre, y no
+   aparece en el cache local de features. `[SIN CONFIRMAR]` el nombre/mecanismo exacto de ese flag.
+
+**Variable hermana — `CLAUDE_CODE_ENABLE_TASKS`:** decide **CUÁL** familia sale, no **SI** sale. Sin
+setear (o en verdadero) → salen las `Task*`. En falso (`0`, `false`, `no`, `off`) → devuelve el
+`TodoWrite` legacy. Son carriles **mutuamente excluyentes**: con las `Task*` activas, `TodoWrite` no
+aparece — y es por diseño, no bug.
+
+**Cómo se aisló el gate (comando reproducible):**
+```bash
+claude -p "Llama a TaskList. Responde EXISTE o NO-EXISTE." --model opus
+CLAUDE_CODE_ENABLE_TODO_TOOLS=1 claude -p "Llama a TaskList. Responde EXISTE o NO-EXISTE." --model opus
+```
+La primera invocación no las tiene; la segunda sí — así se aisló el gate del resto de variables de entorno.
+
+**No es cosa de nuestra máquina:** el mismo síntoma (las task tools dejan de exponerse al modelo) está
+reportado en `anthropics/claude-code` issues **#80015**, **#23816** y **#80566**, sin respuesta de
+mantenedores al momento de escribir esto.
+
+---
+
 ## 4. Hooks (todos los eventos + I/O)
 
 (Contrato general en §0.3.) Fuente: [hooks]. Todos los eventos observados en la doc, con disparador, entrada distintiva y control de salida:
@@ -300,6 +348,7 @@ Fuente: [settings], [env-vars]. Las que más importan aquí:
 - **Config/rutas:** `CLAUDE_CONFIG_DIR` (mueve `~/.claude` → afecta dónde viven `.credentials.json`, `.claude.json`, `projects/`), `XDG_CONFIG_HOME`, `XDG_DATA_HOME`.
 - **Modelo/inferencia:** `ANTHROPIC_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`, `MAX_THINKING_TOKENS`, `ANTHROPIC_API_URL`/`ANTHROPIC_BASE_URL` (proveedor alterno).
 - **Toggles:** `CLAUDE_CODE_DISABLE_AUTO_MEMORY`, `DISABLE_AUTO_COMPACT`, `DISABLE_AUTOUPDATER`, `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`, `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS`, `CLAUDE_CODE_ENABLE_TELEMETRY`, `CLAUDE_CODE_SKIP_PROMPT_HISTORY` (no escribe transcripts), `CLAUDE_CODE_FORWARD_SUBAGENT_TEXT`, `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
+- **Herramientas `Task*` (to-do nativo):** `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` fuerza que existan (apagadas por defecto en modelos nuevos); `CLAUDE_CODE_ENABLE_TASKS=0` devuelve el `TodoWrite` legacy en vez de la familia `Task*`. Requiere reiniciar la sesión (no aplica en caliente). Detalle completo + el gate por modelo: [§3.5](#35--herramientas-task-to-do-nativo-apagadas-por-defecto-en-modelos-nuevos).
 - **Cloud/gateway:** `AWS_PROFILE/REGION/…`, OTEL_*.
 
 ---
