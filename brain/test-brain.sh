@@ -2081,7 +2081,16 @@ CS='CIERRE=si MARCA=no VISUAL=no'    # atajo: claim de cierre, sin marca del usu
 is_block "$(dod 'X' "$EDITR" 'haz el cambio' "$CS")"            && ok "dod flujo: CIERRE=si + código + MARCA=no → bloquea" || bad "dod flujo: no bloqueó un cierre sin marca"
 is_block "$(dod 'X' "$EDITR" 'haz el cambio' 'CIERRE=no MARCA=no VISUAL=no')" && bad "dod flujo: CIERRE=no no debe bloquear" || ok "dod flujo: CIERRE=no → no bloquea (estatus/mecánico/pregunta)"
 is_block "$(dod 'X' "$EDITR" 'sí ciérralo' 'CIERRE=si MARCA=si VISUAL=no')" && bad "dod flujo: MARCA=si no debe bloquear" || ok "dod flujo: MARCA=si (usuario autorizó) → no bloquea"
-is_block "$(dod 'X' '' 'haz el cambio' "$CS")"                  && bad "dod flujo: un claim SIN código tocado no debe bloquear" || ok "dod flujo: claim sin código tocado → no bloquea (turno docs/config)"
+# (5) dod-sin-código: cerrar un ENTREGABLE (doc/reporte) sin tocar código SIGUE exigiendo la marca (1)/(2)
+# — la definición de LISTO es MUTUA e independiente del stack. Antes esto pasaba mudo (exit 0); ahora bloquea.
+o5="$(dod 'El reporte de auditoría quedó listo y entregado.' '' 'haz el análisis' "$CS")"
+is_block "$o5" && ok "dod (5): cierre de ENTREGABLE sin código + MARCA=no → bloquea (LISTO es mutuo, no depende del stack)" || bad "dod (5): un cierre de entregable no-código sin marca se coló"
+# el reason del caso sin-código NO debe traer el nag ACCIONABLE de código ("Corre la verificación…" / "tras tocar código") — solo exige la marca
+printf '%s' "$o5" | jq -r '.reason' | grep -qiE 'Corre la verificación|tras tocar código' && bad "dod (5): el reason sin-código trae el nag de código (no aplica a un doc)" || ok "dod (5): el reason sin-código NO trae el nag de código (solo exige la marca)"
+# con la marca del usuario, el mismo cierre sin código → NO bloquea
+is_block "$(dod 'El reporte quedó listo.' '' 'sí, ciérralo' 'CIERRE=si MARCA=si VISUAL=no')" && bad "dod (5): MARCA=si sin código no debe bloquear" || ok "dod (5): cierre de entregable sin código + MARCA=si (usuario autorizó) → no bloquea"
+# NO-cierre sin código (estatus/mecánico) → sigue sin bloquear (no se aflojó ni se sobre-endureció)
+is_block "$(dod 'X' '' 'haz el cambio' 'CIERRE=no MARCA=no VISUAL=no')" && bad "dod (5): un NO-cierre sin código no debe bloquear" || ok "dod (5): estatus/mecánico sin código (CIERRE=no) → no bloquea"
 is_block "$(dod 'X' "$EDITR" 'haz el cambio' 'UNAVAILABLE')"    && bad "dod flujo: juez UNAVAILABLE debía FAIL-OPEN (dod es nag, no seguridad)" || ok "dod flujo: juez UNAVAILABLE → FAIL-OPEN (no atrapa el turno)"
 # B2 visual: VISUAL=si bloquea INDEPENDIENTE del cierre, salvo browser-tool presente o MARCA del usuario.
 is_block "$(dod 'X' "$EDITR" 'haz el cambio' 'CIERRE=no MARCA=no VISUAL=si')"   && ok "dod B2: VISUAL=si sin browser-tool → bloquea (a ciegas)" || bad "dod B2: no bloqueó un claim visual a ciegas"
@@ -2130,7 +2139,11 @@ rm -f "$DODUI"
 # G2a: código tocado por Bash (sin file_path) — ESTRUCTURAL, con el cierre ya afirmado por el mock.
 is_block "$(dod 'X' "$BASHSED" 'haz el cambio' "$CS")"   && ok "dod G2a: 'sed -i' cuenta como código → bloquea" || bad "dod G2a: 'sed -i' evadió el gate de código tocado"
 is_block "$(dod 'X' "$BASHREDIR" 'haz el cambio' "$CS")" && ok "dod G2a: redirección '> Bar.razor' cuenta como código → bloquea" || bad "dod G2a: la redirección a código evadió el gate"
-is_block "$(dod 'X' "$BASHREAD" 'haz el cambio' "$CS")"  && bad "dod G2a: build+tee a .log NO es tocar código (falso positivo)" || ok "dod G2a: build/tee a .log → NO cuenta como código"
+# build+tee a .log NO cuenta como código → toma la rama SIN-código. Con CIERRE=si+MARCA=no eso ahora bloquea
+# (declarar cierre con solo-verde-técnico sin la marca = "verde técnico ≠ LISTO"), pero por la rama sin-código
+# (reason SIN "tras tocar código") — lo que sigue verificando que `tee .log` NO se miscuenta como edición.
+o_tee="$(dod 'X' "$BASHREAD" 'haz el cambio' "$CS")"
+{ is_block "$o_tee" && ! printf '%s' "$o_tee" | jq -r '.reason' | grep -qi 'tras tocar código'; } && ok "dod G2a: build/tee a .log → NO cuenta como código (bloquea por la rama SIN-código, no por 'código tocado')" || bad "dod G2a: 'tee .log' se miscontó como código (bloqueó por la rama de código tocado)"
 # ALTO-2: un Task (sub-agente) = posible código tocado (su edición vive en otro transcript, invisible aquí).
 is_block "$(dod 'X' "$TASKT" 'haz el cambio' "$CS")"                       && ok "dod ALTO-2: Task (sub-agente) = posible código → bloquea" || bad "dod ALTO-2: un fan-out (Task) evadió el gate"
 is_block "$(dod 'X' "$TASKT" 'sí ya la validé, ciérrala' 'CIERRE=si MARCA=si VISUAL=no')" && bad "dod ALTO-2: Task + MARCA=si no debe bloquear" || ok "dod ALTO-2: Task + MARCA=si → no bloquea"
