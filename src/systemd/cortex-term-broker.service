@@ -58,6 +58,11 @@ OOMPolicy=continue
 # SESIONES REALES del usuario (medido en la unidad de hoy: 3.4 GB en uso, pico de 56 GB). Un
 # MemoryMax aquí mataría el trabajo del usuario, no un leak del broker. Se mide para poder verlo
 # (`systemctl --user show cortex-term-broker -p MemoryCurrent -p MemoryPeak`), no para acotarlo.
+#
+# El acotamiento que SÍ existe vive un piso más arriba, en la aplicación, y por eso no choca con lo de
+# aquí: topes de sesiones y de PTYs concurrentes, y backpressure en el relay del WebSocket (ver
+# docs/term-broker.md § Topes, configurables por `AXON_TERM_BROKER_MAX_*`). Ésos frenan una FUGA sin
+# tocar el trabajo legítimo del usuario, que es justo lo que un `MemoryMax` no sabe distinguir.
 MemoryAccounting=yes
 
 # KillMode se deja en el default (control-group): parar el servicio mata las sesiones, que es lo

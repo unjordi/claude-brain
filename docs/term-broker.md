@@ -78,6 +78,50 @@ cortex pasa de recolector a **host de procesos**. Consecuencias que importan:
   (puerto ocupado, socket de otro broker, `node` ausente). Por eso la unidad fija
   `StartLimitIntervalSec=60` + `StartLimitBurst=5`: agota la ventana en ~15 s y **se rinde diciéndolo**.
 
+## Topes (qué frena una fuga, y con qué número)
+
+El broker es padre de procesos del usuario, así que la pregunta "¿y si algo se desmadra?" no tiene
+respuesta del lado de systemd: `MemoryMax` no sirve aquí (la RAM del cgroup es la de tu trabajo, no
+la de un leak — ver la sección de arriba). Por eso los topes viven **en la aplicación**, donde sí se
+distingue una sesión legítima de una fuga. Son cuatro, todos con default y todos configurables por
+env en `~/.config/cortex/term-broker.env`. **El broker los imprime al arrancar** — para saber con qué
+topes corre lo instalado: `journalctl --user -u cortex-term-broker | grep topes`, no adivinar.
+
+| env | default | qué acota | qué pasa al pasarse |
+|---|---|---|---|
+| `AXON_TERM_BROKER_MAX_SESSIONS` | `32` | sesiones de shell (`/run`) concurrentes | la sesión **nueva** recibe `event: error` con `SESSION_LIMIT: …` y su `[DONE]`; las que ya existían siguen igual |
+| `AXON_TERM_BROKER_MAX_PTYS` | `32` | PTYs (`/pty`) concurrentes | el upgrade a WebSocket se rechaza con **`503`**, *antes* de asignar el PTY |
+| `AXON_TERM_BROKER_WS_HIGH_WATER` | `1 MiB` | buffer pendiente por conexión | se **pausa al productor** (el PTY, o el socket del peer) hasta que el cliente drene |
+| `AXON_TERM_BROKER_WS_MAX_BUFFER` | `8 MiB` | válvula dura del mismo buffer | se cierra **esa** conexión con `1013`; el broker y las demás terminales siguen |
+
+**Por qué 32, y no otro número.** El widget abre una sesión (y un PTY) por pestaña de terminal, y un
+humano trabaja con unas pocas. 32 deja aire de sobra para el uso legítimo —varias pestañas más las
+reconexiones que el reap por idle todavía no barrió— y sigue estando un orden de magnitud por debajo
+de donde duele de verdad (`ulimit -u` en los miles, `/proc/sys/kernel/pty/max` ~4096). Es un número
+que solo estorba cuando algo está **fugando**, que es exactamente cuándo se quiere que frene. Los dos
+techos comparten cifra a propósito: una sola para recordar.
+
+**Un rechazo no es una caída.** Ninguno de los cuatro mata el proceso ni deja algo a medias: el de
+sesiones rechaza *antes* de spawnear el shell, el de PTYs *antes* de asignar el pseudo-terminal, y el
+hueco se libera solo —al cerrar una terminal, o cuando el reap por idle (30 min) se lleva las
+muertas—. Como red final, el entry point registra `uncaughtException`/`unhandledRejection` y **sigue
+vivo**, dejando el stack en el journal: de este proceso cuelgan TODAS tus terminales y `KillMode` las
+mata con él, así que una excepción suelta en un callback de socket no vale ese precio.
+
+**Backpressure: se pausa, no se descarta.** `socket.write()` avisa cuando lo escrito ya no cabe y
+Node lo está guardando en memoria; ignorar ese aviso —que es lo que se hacía— significa que un
+cliente que lee más lento que el PTY hace crecer ese buffer sin techo (medido: `yes` dentro de un PTY
+llenó **24 MiB en menos de 3 s**). La política elegida es **frenar la fuente**, nunca tirar bytes: un
+hueco en el stream corrompería una secuencia ANSI y con ella la pantalla. Al pasar el *high water* se
+deja de leer del PTY —el pipe se llena, `script` se bloquea y el programa de adentro se frena solo:
+contrapresión del kernel, sin perder un byte— y se reanuda al drenar. La válvula dura de 8 MiB es
+para el cliente que ya no va a volver: ahí sí se corta ESA conexión, porque mantenerla sería pagar
+memoria por una terminal que nadie está mirando.
+
+**Qué NO acotan.** No hay tope de comandos encolados por sesión, ni de bytes que un comando puede
+producir (un `cat` de un archivo enorme sigue siendo tu problema, no una fuga), ni cuota de CPU/RAM
+por sesión — para eso está el cgroup de la unidad, y deliberadamente sin `MemoryMax`.
+
 ## Postura de seguridad (léela, no la asumas)
 
 El broker ejecuta **literalmente** lo que le llega, con tu login shell, como tu usuario. Las
@@ -243,11 +287,13 @@ que pases `--keep-cfg`. La unidad legacy de axon, si la hay, **no** se toca — 
 
 ## Probar
 
-Dos pruebas funcionales, ambas sin tocar ningún servicio del sistema:
+Tres pruebas funcionales, ninguna toca un servicio del sistema:
 
 ```bash
 bash src/term-broker/probe-instalador.sh   # instalador en un HOME sandbox: opt-in, token, idempotencia, C-1
 bash src/term-broker/probe-broker-vivo.sh  # levanta el broker en :18799 + socket propio y le habla
+node --disable-warning=ExperimentalWarning --experimental-strip-types \
+     src/term-broker/probe-topes.ts        # los TOPES: techo de sesiones, techo de PTYs, backpressure
 ```
 
 `probe-instalador.sh` corre el `install.sh` REAL con `HOME` en un temporal y `systemctl`/`kpackagetool6`
@@ -261,8 +307,18 @@ token, el `401`, el wire SSE de `/run`, la persistencia de la sesión, `/health`
 completo (health + run + `0600` + pool compartido con el TCP), que **el token no se filtre al `env`
 de la sesión** (con su control positivo), el canal PTY sobre WebSocket y que el bind sea loopback.
 
+`probe-topes.ts` no necesita nada instalado: arma pools y brokers en puertos efímeros (con el socket
+unix **apagado**, para no rozar el del servicio real) y comprueba los cuatro topes de arriba con el
+caso que cada uno vigila — abrir más sesiones que el techo y ver el `SESSION_LIMIT` sin sesión zombi
+y con el broker todavía sirviendo; un segundo `/pty` sobre el tope y su `503`; y un cliente lento de
+verdad (un socket que hace el handshake y nunca vuelve a leer) contra `yes` dentro de un PTY, midiendo
+que el buffer se quede pegado al *high water* en vez de crecer.
+
 ## De dónde sale el código
 
-`src/term-broker/*.ts` es una copia **byte-a-byte** de módulos de axon, con el commit de origen y
+`src/term-broker/*.ts` salió como copia **byte-a-byte** de módulos de axon, con el commit de origen y
 los `sha256` anotados, más el argumento de por qué copia y no artefacto:
-[`../src/term-broker/PROCEDENCIA.md`](../src/term-broker/PROCEDENCIA.md).
+[`../src/term-broker/PROCEDENCIA.md`](../src/term-broker/PROCEDENCIA.md). ⚠️ Los **topes** de esta
+página se implementaron *aquí*, así que hoy esa copia **diverge** de axon y está pendiente de portar
+río arriba — el detalle y las dos salidas están en la sección *Divergencia vs axon* de ese mismo
+archivo. Léela antes de re-vendorizar: una copia ingenua desde axon borraría los topes en silencio.

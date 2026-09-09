@@ -39,7 +39,7 @@ import { accessSync, chmodSync, constants as fsConstants, mkdirSync, statSync, u
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Duplex } from "node:stream";
-import { ShellSessionPool, buildSessionEnv } from "./term-session.ts";
+import { ShellSessionPool, buildSessionEnv, DEFAULT_MAX_SESSIONS } from "./term-session.ts";
 import { acceptWebSocket, rejectWebSocket } from "./ws.ts";
 import { servePtyOverWs } from "./term-pty-bridge.ts";
 
@@ -48,6 +48,28 @@ export const DEFAULT_PORT = 8799;
 
 /** Host default del listener TCP. LOOPBACK — cambiarlo expone ejecución de comandos arbitrarios a la red. */
 export const DEFAULT_BIND = "127.0.0.1";
+
+/**
+ * TECHO de PTYs concurrentes (`/pty`). Es el hermano del techo de sesiones de `term-session.ts`, por el
+ * camino que MÁS duele: cada upgrade a `/pty` asigna un pseudo-terminal del kernel + un `script` + un
+ * login shell INTERACTIVO, y hasta ahora nadie llevaba la cuenta — ni una. Un cliente que reconecta en
+ * bucle (o un token filtrado) agota `/dev/pts` y con eso se queda sin terminales TODA la máquina, no
+ * solo el widget.
+ *
+ * POR QUÉ 32: mismo razonamiento que el techo de sesiones (una pestaña = un PTY) y a propósito el MISMO
+ * número, para que no haya dos cifras que recordar. `/proc/sys/kernel/pty/max` ronda 4096: 32 es ~1% de
+ * eso. Configurable con `AXON_TERM_BROKER_MAX_PTYS`.
+ *
+ * El rechazo ocurre en el HANDSHAKE (`503`, ANTES de asignar el PTY): el cliente ve un fallo de conexión
+ * claro y no queda ni un proceso a medio arrancar.
+ */
+export const DEFAULT_MAX_PTYS = 32;
+
+/** Lee un entero POSITIVO de una env var; cualquier basura (vacío, 0, negativo, NaN) cae al default. */
+function positiveEnv(raw: string | undefined, def: number): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : def;
+}
 
 /**
  * Ruta default del SOCKET UNIX (el transporte que usa el maincar contenerizado).
@@ -73,7 +95,16 @@ export interface BrokerOptions {
   readonly bind?: string;   // default: env AXON_TERM_BROKER_BIND, o DEFAULT_BIND (127.0.0.1). Loopback o RCE.
   /** Socket unix. `null`/"off" lo desactiva. default: env AXON_TERM_BROKER_SOCKET, o defaultBrokerSocketPath(). */
   readonly socketPath?: string | null;
+  /** Techo de sesiones de shell CONCURRENTES. default: env AXON_TERM_BROKER_MAX_SESSIONS, o 32. */
+  readonly maxSessions?: number;
+  /** Techo de PTYs (`/pty`) CONCURRENTES. default: env AXON_TERM_BROKER_MAX_PTYS, o DEFAULT_MAX_PTYS. */
+  readonly maxPtys?: number;
 }
+
+/** Cuenta viva de PTYs de un broker. Es un objeto (no un número) para que el handler de upgrade la
+ *  MUTE — cada `startTermHostBroker` tiene la suya, y los DOS listeners (TCP y unix) la comparten,
+ *  igual que comparten el pool: el techo es del BROKER, no de un transporte. */
+interface PtyGuard { live: number; readonly max: number; }
 
 /** Lo que devuelve `startTermHostBroker`: los DOS listeners (TCP loopback + socket unix) y su cierre. */
 export interface BrokerHandle {
@@ -155,15 +186,24 @@ export function startTermHostBroker(opts: BrokerOptions = {}): BrokerHandle {
 
   // Pool de sesiones de shell PERSISTENTES (una por `session` id del widget) — cwd/env perduran entre
   // comandos, igual que una sesión SSH. Ver term-session.ts. Vive mientras viva el broker.
-  const pool = new ShellSessionPool({ shell, loginArgs: ["-l"], home });
+  // `0` = "nadie lo configuró" → se deja `undefined` para que mande el default del propio pool (32),
+  // en vez de tener el número escrito en dos lugares que puedan driftear.
+  const envMaxSessions = positiveEnv(process.env.AXON_TERM_BROKER_MAX_SESSIONS, 0);
+  const maxSessions = opts.maxSessions ?? (envMaxSessions > 0 ? envMaxSessions : undefined);
+  const pool = new ShellSessionPool({ shell, loginArgs: ["-l"], home, maxSessions });
   const cfg = { token, home, shell, pool };
+  // Techo de PTYs, compartido por los DOS listeners (ver PtyGuard).
+  const ptyGuard: PtyGuard = {
+    live: 0,
+    max: opts.maxPtys && opts.maxPtys > 0 ? Math.floor(opts.maxPtys) : positiveEnv(process.env.AXON_TERM_BROKER_MAX_PTYS, DEFAULT_MAX_PTYS),
+  };
 
   const mkServer = (): Server => {
     const s = createServer((req: IncomingMessage, res: ServerResponse) => { void handleRequest(req, res, cfg); });
     // TERMINAL INTERACTIVA (PTY real): upgrade a WebSocket en `/pty`. Mismo scope de seguridad que `/run` —
     // corre como el usuario del broker (unjordi), con SU shell de login y SU $HOME. Auth por el MISMO Bearer
     // token (axon-en-contenedor es el cliente y SÍ puede setear el header). Ver term-pty-bridge.ts.
-    s.on("upgrade", (req: IncomingMessage, socket: Duplex) => { handlePtyUpgrade(req, socket, { token, home, shell }); });
+    s.on("upgrade", (req: IncomingMessage, socket: Duplex) => { handlePtyUpgrade(req, socket, { token, home, shell, ptyGuard }); });
     return s;
   };
 
@@ -227,7 +267,7 @@ export function startTermHostBroker(opts: BrokerOptions = {}): BrokerHandle {
 function handlePtyUpgrade(
   req: IncomingMessage,
   socket: Duplex,
-  cfg: { token: string; home: string; shell: string },
+  cfg: { token: string; home: string; shell: string; ptyGuard: PtyGuard },
 ): void {
   let parsed: URL;
   try { parsed = new URL(req.url ?? "/", "http://127.0.0.1"); }
@@ -239,8 +279,26 @@ function handlePtyUpgrade(
   const presented = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
   if (!tokenMatches(presented, cfg.token)) { rejectWebSocket(socket, 401, "unauthorized"); return; }
 
+  // TECHO de PTYs (ver DEFAULT_MAX_PTYS): se rechaza en el HANDSHAKE, antes de asignar nada. `503` =
+  // "ahora no puedo", que es exactamente lo que pasa; el cliente lo ve como un fallo de conexión con
+  // su razón, no como un canal que se abre y muere raro.
+  const guard = cfg.ptyGuard;
+  if (guard.live >= guard.max) {
+    rejectWebSocket(socket, 503, `too many pty sessions (${guard.live}/${guard.max}) - AXON_TERM_BROKER_MAX_PTYS`);
+    return;
+  }
+
   const conn = acceptWebSocket(req, socket);
   if (!conn) { rejectWebSocket(socket, 400, "not a websocket upgrade"); return; }
+
+  // La cuenta se lleva sobre el SOCKET, no sobre `conn.onClose`: WsConn guarda UN solo callback de
+  // cierre y `servePtyOverWs` (abajo) se queda con él para matar el PTY. El evento 'close' del socket
+  // admite varios listeners y dispara una sola vez, pase lo que pase con el WebSocket.
+  guard.live++;
+  let counted = true;
+  const release = (): void => { if (counted) { counted = false; guard.live = Math.max(0, guard.live - 1); } };
+  socket.on("close", release);
+  socket.on("error", release);
 
   const cols = Number(parsed.searchParams.get("cols")) || undefined;
   const rows = Number(parsed.searchParams.get("rows")) || undefined;
@@ -364,6 +422,19 @@ function main(): void {
   const bind = process.env.AXON_TERM_BROKER_BIND ?? DEFAULT_BIND;
   const home = process.env.AXON_TERM_BROKER_HOME ?? homedir();
   const shell = process.env.SHELL ?? "/usr/bin/zsh";
+
+  // ÚLTIMA RED: de este proceso cuelgan TODAS las terminales del usuario, y matarlo las mata a todas
+  // de golpe (KillMode=control-group). Una excepción suelta en un callback de socket —un cliente que
+  // se cae en el microsegundo equivocado, un EPIPE que nadie atrapó— no vale eso. Se registra y se
+  // sigue: degradar, no morir. Va SOLO aquí, en el entry point: importar el módulo (probes, tests, el
+  // axon contenerizado) no debe cambiarle a nadie el manejo global de errores de SU proceso.
+  process.on("uncaughtException", (e: Error) => {
+    console.error(`[term-host-broker] excepción no capturada (el broker SIGUE vivo): ${e.stack ?? e.message}`);
+  });
+  process.on("unhandledRejection", (r: unknown) => {
+    console.error(`[term-host-broker] promesa rechazada sin manejar (el broker SIGUE vivo): ${r instanceof Error ? r.stack : String(r)}`);
+  });
+
   let handle: BrokerHandle;
   try {
     handle = startTermHostBroker();
@@ -375,6 +446,16 @@ function main(): void {
   handle.ready.then(
     () => {
       console.log(`[term-host-broker] escuchando en ${bind}:${port} (home=${home}, shell=${shell} -l)`);
+      // Los topes se IMPRIMEN al arrancar: un rechazo por techo se diagnostica mirando el journal, no
+      // adivinando qué default trae la versión instalada.
+      console.log(
+        `[term-host-broker] topes: ${positiveEnv(process.env.AXON_TERM_BROKER_MAX_SESSIONS, DEFAULT_MAX_SESSIONS)} sesiones de shell ` +
+        `(AXON_TERM_BROKER_MAX_SESSIONS) · ${positiveEnv(process.env.AXON_TERM_BROKER_MAX_PTYS, DEFAULT_MAX_PTYS)} PTYs ` +
+        "(AXON_TERM_BROKER_MAX_PTYS) · backpressure del WS a " +
+        `${(positiveEnv(process.env.AXON_TERM_BROKER_WS_HIGH_WATER, 1024 * 1024) / 1024).toFixed(0)} KiB ` +
+        `(AXON_TERM_BROKER_WS_HIGH_WATER), corte duro a ${(positiveEnv(process.env.AXON_TERM_BROKER_WS_MAX_BUFFER, 8 * 1024 * 1024) / (1024 * 1024)).toFixed(0)} MiB ` +
+        "(AXON_TERM_BROKER_WS_MAX_BUFFER)",
+      );
       if (handle.socketPath) console.log(`[term-host-broker] socket unix: ${handle.socketPath} (0600) — el que usa el maincar contenerizado`);
       else console.log("[term-host-broker] socket unix DESACTIVADO (AXON_TERM_BROKER_SOCKET=off) — un maincar en contenedor NO lo alcanzará");
       if (bind !== "127.0.0.1" && bind !== "::1" && bind !== "localhost") {
