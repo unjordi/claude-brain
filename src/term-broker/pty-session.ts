@@ -48,6 +48,14 @@ export interface PtyProcess {
   resize(cols: number, rows: number): void;
   /** Mata el PTY (SIGHUP -> el programa en foreground recibe HUP; SIGKILL de gracia si no cede). */
   kill(): void;
+  /**
+   * Deja de LEER la salida del PTY — la mitad productora del backpressure (ver el bloque de ws.ts).
+   * No descarta NADA: al no vaciar el pipe, éste se llena y `script` se bloquea escribiendo, lo que a
+   * su vez frena al programa de adentro. Es la contrapresión del kernel, gratis y sin perder un byte.
+   */
+  pause(): void;
+  /** Reanuda la lectura tras un `pause()`. Idempotente. */
+  resume(): void;
   /** Datos crudos del PTY (ANSI incluido), YA sin el marcador de pts. */
   onData(cb: (chunk: Buffer) => void): void;
   /** Cierre del PTY con exit code (null si lo mató una señal / nunca arrancó). */
@@ -113,6 +121,8 @@ export function spawnPty(opts: PtyOptions): PtyProcess {
       write() { /* no-op */ },
       resize() { /* no-op */ },
       kill() { /* no-op */ },
+      pause() { /* no-op */ },
+      resume() { /* no-op */ },
       onData(cb) { dataCb = cb; },
       onExit(cb) { exitCb = cb; },
       pid: undefined,
@@ -174,6 +184,14 @@ export function spawnPty(opts: PtyOptions): PtyProcess {
     },
     resize(c: number, r: number) {
       applyResize(clampDim(c, 80), clampDim(r, 24));
+    },
+    // Backpressure: pausar/reanudar la LECTURA de la salida. Never-throws — se llama desde el relay,
+    // y una excepción ahí tumbaría el broker entero.
+    pause() {
+      try { child.stdout.pause(); child.stderr.pause(); } catch { /* pty cerrado */ }
+    },
+    resume() {
+      try { child.stdout.resume(); child.stderr.resume(); } catch { /* pty cerrado */ }
     },
     kill() {
       try { child.kill("SIGHUP"); } catch { /* ya murió */ }

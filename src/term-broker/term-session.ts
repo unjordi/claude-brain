@@ -103,15 +103,42 @@ export interface ShellSessionPoolOptions {
 /** Marca de fin-de-comando: \001 + token aleatorio + exit code + \001. El control-char evita colisiones. */
 const SENTINEL_PREFIX = "AXON_EOC_";
 
+/**
+ * TECHO de sesiones concurrentes. Cada sesión es un login shell VIVO del usuario: memoria, un pid y los
+ * fds de sus pipes. Sin techo, una fuga —un cliente que nunca llama `close`, un widget que reconecta
+ * con una `session` nueva cada vez— hace crecer el pool hasta agotar la memoria o los procesos de la
+ * máquina, y eso se lleva por delante TODAS las terminales, no solo la que fugó.
+ *
+ * POR QUÉ 32: el widget abre UNA sesión por pestaña de terminal, y un humano trabaja con unas pocas.
+ * 32 deja muchísimo aire para el uso legítimo (varias pestañas + reconexiones que el reap por idle aún
+ * no barrió) y sigue estando un orden de magnitud por debajo de donde duele (`ulimit -u` ronda los
+ * miles). O sea: un número que solo estorba cuando algo está FUGANDO — justo cuando se quiere que
+ * frene. Configurable con `AXON_TERM_BROKER_MAX_SESSIONS` (lo cablea term-host-broker.ts).
+ *
+ * Al llegar al techo el rechazo es LIMPIO —`onDone(null, "SESSION_LIMIT: …")`, sin spawnear el shell y
+ * sin dejar nada a medias— y no toca a las sesiones que ya existen: siguen ejecutando normal. El hueco
+ * se libera con el reap por idle o al cerrar una sesión.
+ */
+export const DEFAULT_MAX_SESSIONS = 32;
+
 export class ShellSessionPool {
   private readonly sessions = new Map<string, Session>();
   private readonly opts: ShellSessionPoolOptions;
   private readonly idleMs: number;
+  private readonly maxSessions: number;
 
   constructor(opts: ShellSessionPoolOptions) {
     this.opts = opts;
     this.idleMs = opts.idleMs ?? 30 * 60 * 1000;
+    const m = opts.maxSessions;
+    this.maxSessions = typeof m === "number" && Number.isFinite(m) && m > 0 ? Math.floor(m) : DEFAULT_MAX_SESSIONS;
   }
+
+  /** Sesiones VIVAS ahora mismo. Es lo que se compara contra el techo; también sirve para observarlo. */
+  get size(): number { return this.sessions.size; }
+
+  /** El techo efectivo de esta instancia (el default, o lo que se le configuró). */
+  get limit(): number { return this.maxSessions; }
 
   /**
    * Encola `cmd` en la sesión `sessionId` (la crea si no existe) y streamea su salida. cwd/env PERSISTEN
@@ -125,6 +152,18 @@ export class ShellSessionPool {
     signal?: AbortSignal,
   ): void {
     if (!cmd.trim()) { onDone(null, "MISSING_ARG: 'cmd' vacío"); return; }
+    // TECHO (ver DEFAULT_MAX_SESSIONS): solo aplica a sesiones NUEVAS — una que ya existe nunca se
+    // rechaza. El rechazo va por el MISMO canal que cualquier otro error (`onDone(null, …)`), así que
+    // el cliente recibe su `event: error` + `[DONE]` y no se queda colgado; y como se rechaza ANTES de
+    // `getOrCreate`, no se spawnea ningún shell: no hay sesión zombi que reapear después.
+    if (!this.sessions.has(sessionId) && this.sessions.size >= this.maxSessions) {
+      onDone(
+        null,
+        `SESSION_LIMIT: el broker ya tiene ${this.sessions.size} sesiones de shell abiertas (tope ${this.maxSessions}). ` +
+        "Cierra alguna terminal, o sube AXON_TERM_BROKER_MAX_SESSIONS si de verdad necesitas más.",
+      );
+      return;
+    }
     let sess: Session;
     try {
       sess = this.getOrCreate(sessionId);

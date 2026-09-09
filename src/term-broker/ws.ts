@@ -22,6 +22,42 @@ const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 /** Cap defensivo de payload por mensaje (16 MiB) — un frame más grande cierra la conexión. */
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 
+// ── BACKPRESSURE (el techo del relay) ─────────────────────────────────────────────────────────
+// `socket.write()` devuelve `false` cuando lo escrito ya no cabe y Node lo está guardando EN MEMORIA.
+// Ignorar ese retorno —que es lo que hacía esta clase— significa que un cliente que lee más lento que
+// el PTY hace crecer ese buffer sin ningún techo: el PTY produce a la velocidad del kernel, el socket
+// drena a la del cliente, y la diferencia se acumula en el heap del broker. No es hipotético: `yes`
+// dentro de un PTY llenó 24 MiB en menos de 3 s (medido con `probe-topes.ts` contra el código previo).
+//
+// POLÍTICA ELEGIDA: **pausar la fuente, NO descartar bytes.** Un stream de terminal no tolera huecos
+// (un byte perdido corrompe una secuencia ANSI y con ella la pantalla), así que descartar estaría mal
+// aquí; lo correcto es dejar de bombear hasta que el cliente drene. Quien produce (el PTY, o el socket
+// del peer en el relay WS↔WS) sabe pausarse — esta clase solo AVISA:
+//   • `backpressured` pasa a `true` al superar `highWaterBytes`;
+//   • el callback de `onDrain()` se dispara cuando el socket ya drenó y se puede reanudar.
+// El buffer queda acotado a `highWaterBytes` + el chunk en vuelo (≤ 64 KiB de un pipe).
+//
+// Y una VÁLVULA DURA por si pausar no basta (cliente colgado que jamás vuelve a leer, con datos ya
+// encolados): al pasar `maxBufferBytes` se cierra ESA conexión con 1013. Es degradar, no morir — se
+// pierde una terminal, nunca el broker del que cuelgan todas las demás.
+/** Buffer pendiente a partir del cual se considera que el cliente NO drena (default 1 MiB). */
+const DEFAULT_HIGH_WATER_BYTES = positiveEnv(process.env.AXON_TERM_BROKER_WS_HIGH_WATER, 1024 * 1024);
+/** Válvula dura: buffer pendiente que cierra ESA conexión (default 8 MiB). Nunca tumba el proceso. */
+const DEFAULT_MAX_BUFFER_BYTES = positiveEnv(process.env.AXON_TERM_BROKER_WS_MAX_BUFFER, 8 * 1024 * 1024);
+
+/** Lee un entero POSITIVO de una env var; cualquier basura (vacío, 0, negativo, NaN) cae al default. */
+function positiveEnv(raw: string | undefined, def: number): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : def;
+}
+
+export interface WsConnOptions {
+  /** Buffer pendiente que marca `backpressured` (default: `AXON_TERM_BROKER_WS_HIGH_WATER` o 1 MiB). */
+  readonly highWaterBytes?: number;
+  /** Buffer pendiente que cierra la conexión (default: `AXON_TERM_BROKER_WS_MAX_BUFFER` o 8 MiB). */
+  readonly maxBufferBytes?: number;
+}
+
 const OP_CONT = 0x0;
 const OP_TEXT = 0x1;
 const OP_BIN = 0x2;
@@ -41,6 +77,7 @@ export interface WsMessage {
 type MsgHandler = (msg: WsMessage) => void;
 type CloseHandler = (code: number, reason: string) => void;
 type ErrHandler = (err: Error) => void;
+type DrainHandler = () => void;
 
 /**
  * Conexión WebSocket sobre un socket ya "upgradeado". `isServer` decide el masking: el SERVIDOR nunca
@@ -60,10 +97,17 @@ export class WsConn {
   private msgCb: MsgHandler | null = null;
   private closeCb: CloseHandler | null = null;
   private errCb: ErrHandler | null = null;
+  private drainCb: DrainHandler | null = null;
+  // Backpressure (ver el bloque de arriba): umbrales por conexión + el flag de "ya pedí un drain".
+  private readonly highWaterBytes: number;
+  private readonly maxBufferBytes: number;
+  private waitingDrain = false;
 
-  constructor(socket: Duplex, isServer: boolean) {
+  constructor(socket: Duplex, isServer: boolean, opts: WsConnOptions = {}) {
     this.socket = socket;
     this.isServer = isServer;
+    this.highWaterBytes = opts.highWaterBytes && opts.highWaterBytes > 0 ? opts.highWaterBytes : DEFAULT_HIGH_WATER_BYTES;
+    this.maxBufferBytes = opts.maxBufferBytes && opts.maxBufferBytes > 0 ? opts.maxBufferBytes : DEFAULT_MAX_BUFFER_BYTES;
     socket.on("data", (d: Buffer) => this.onData(d));
     socket.on("close", () => this.fireClose(1006, "socket closed"));
     socket.on("error", (e: Error) => { if (this.errCb) this.errCb(e); this.fireClose(1006, e.message); });
@@ -72,6 +116,28 @@ export class WsConn {
   onMessage(cb: MsgHandler): this { this.msgCb = cb; return this; }
   onClose(cb: CloseHandler): this { this.closeCb = cb; return this; }
   onError(cb: ErrHandler): this { this.errCb = cb; return this; }
+  /** Se dispara cuando el socket ya drenó tras haber estado en backpressure: reanuda al productor. */
+  onDrain(cb: DrainHandler): this { this.drainCb = cb; return this; }
+
+  /** Bytes que Node tiene EN MEMORIA esperando que el cliente los lea. 0 = el cliente va al día. */
+  get bufferedBytes(): number {
+    const n = (this.socket as unknown as { writableLength?: number }).writableLength;
+    return typeof n === "number" ? n : 0;
+  }
+
+  /** ¿El cliente dejó de drenar? Quien produce debe PAUSARSE mientras esto sea `true`. */
+  get backpressured(): boolean { return this.bufferedBytes > this.highWaterBytes; }
+
+  /** ¿Se dejó de LEER de este socket? (lo usa el relay WS↔WS para frenar a la fuente). */
+  get isPaused(): boolean {
+    const f = (this.socket as unknown as { isPaused?: () => boolean }).isPaused;
+    return typeof f === "function" ? f.call(this.socket) : false;
+  }
+
+  /** Deja de leer de este socket — la mitad de ENTRADA del backpressure. Never-throws. */
+  pause(): void { try { this.socket.pause(); } catch { /* socket muerto */ } }
+  /** Reanuda la lectura. Never-throws. */
+  resume(): void { try { this.socket.resume(); } catch { /* socket muerto */ } }
 
   /** Envía un mensaje. `binary=false` -> frame TEXT; `true` -> frame BINARY. */
   send(data: string | Buffer, binary = false): void {
@@ -136,7 +202,35 @@ export class WsConn {
       for (let i = 0; i < len; i++) masked[i] = payload[i] ^ mask[i & 3];
       out = Buffer.concat([header, masked]);
     }
-    try { this.socket.write(out); } catch (e) { if (this.errCb) this.errCb(e as Error); }
+    try { this.socket.write(out); } catch (e) { if (this.errCb) this.errCb(e as Error); return; }
+    this.checkBackpressure(opcode);
+  }
+
+  /**
+   * Mira cuánto quedó pendiente DESPUÉS de escribir y actúa. Never-throws (lo llama `writeFrame`, que
+   * a su vez lo llaman los relays: una excepción aquí tumbaría al broker entero, que es justo lo que
+   * este cambio existe para evitar).
+   *
+   * Se salta los frames de CLOSE: si el techo duro ya disparó, el propio CLOSE que lo anuncia no debe
+   * volver a disparar el cierre (recursión) — ese frame se manda "a como dé lugar" y el socket muere.
+   */
+  private checkBackpressure(opcode: number): void {
+    if (opcode === OP_CLOSE || this.closed) return;
+    try {
+      const pending = this.bufferedBytes;
+      if (pending > this.maxBufferBytes) {
+        // Válvula dura: el cliente no drena ni pausando. Se cierra ESTA conexión, no el proceso.
+        this.close(1013, "cliente no drena (buffer sobre el techo)");
+        return;
+      }
+      if (pending > this.highWaterBytes && !this.waitingDrain) {
+        this.waitingDrain = true;
+        this.socket.once("drain", () => {
+          this.waitingDrain = false;
+          if (this.drainCb) { try { this.drainCb(); } catch { /* el productor decide, nosotros no morimos */ } }
+        });
+      }
+    } catch { /* socket en un estado raro: no es motivo para tumbar el broker */ }
   }
 
   private onData(chunk: Buffer): void {
@@ -229,7 +323,7 @@ export function isWebSocketUpgrade(req: IncomingMessage): boolean {
  * Completa el handshake del lado SERVIDOR sobre `socket` (del evento 'upgrade' de http.Server) y devuelve una
  * WsConn lista. Devuelve `null` si el request no es un upgrade WS válido (el caller debe destruir el socket).
  */
-export function acceptWebSocket(req: IncomingMessage, socket: Duplex): WsConn | null {
+export function acceptWebSocket(req: IncomingMessage, socket: Duplex, opts: WsConnOptions = {}): WsConn | null {
   if (!isWebSocketUpgrade(req)) return null;
   const key = req.headers["sec-websocket-key"] as string;
   const headers = [
@@ -240,7 +334,7 @@ export function acceptWebSocket(req: IncomingMessage, socket: Duplex): WsConn | 
     "\r\n",
   ].join("\r\n");
   socket.write(headers);
-  return new WsConn(socket, true);
+  return new WsConn(socket, true, opts);
 }
 
 /** Rechaza un upgrade con un status HTTP crudo (para auth fallida en el handshake) y cierra el socket. */
@@ -251,7 +345,7 @@ export function rejectWebSocket(socket: Duplex, status = 401, message = "unautho
   try { socket.destroy(); } catch { /* ya */ }
 }
 
-export interface WsConnectOptions {
+export interface WsConnectOptions extends WsConnOptions {
   readonly headers?: Record<string, string>;
   readonly timeoutMs?: number;
   /**
@@ -296,7 +390,7 @@ export function wsConnect(url: string, opts: WsConnectOptions = {}): Promise<WsC
       if (settled) return; settled = true;
       const accept = res.headers["sec-websocket-accept"];
       if (accept !== acceptKey(key)) { try { socket.destroy(); } catch { /* */ } reject(new Error("Sec-WebSocket-Accept inválido")); return; }
-      resolve(new WsConn(socket, false));
+      resolve(new WsConn(socket, false, opts));
     });
     req.on("response", (res) => { if (settled) return; settled = true; reject(new Error(`WS upgrade rechazado: HTTP ${res.statusCode}`)); req.destroy(); });
     req.on("error", (e) => { if (settled) return; settled = true; reject(e); });
