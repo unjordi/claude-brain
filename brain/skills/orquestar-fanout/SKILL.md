@@ -153,21 +153,6 @@ antes de un git destructivo que orfanaría commits sin pushear).
      los DEJA y anota su pendiente en la bitácora para quien lo retome).
    → No monitoreas a los agentes: el reporte y la limpieza son el cierre estándar.
 
-## axon — el peso del loop a $0 de tu ventana (la Cachy)
-`axon` (`~/code/axon`, `ssh cachy`; turf de la gemela — se USA, no se muta) es un **HARNESS AGÉNTICO** (tools +
-loop local→frontera + VLM `VerImagen` para QA visual), **NO un despachador de ollama**. Corre en **OTRA cuenta
-de Claude** → **$0 de tu ventana/tokens** aun escalando a frontera → es la vía por defecto para el PESO del
-fan-out (documentar/auditar/fixear en volumen); tú orquestas + verificas ground-truth. **Dale la TAREA completa,
-no micro-pasos.**
-- **Invocación:** `ssh cachy '~/code/axon/bin/axon run "<tarea>" --dir <path> --max-turns 30'`. Sin `--model` =
-  AUTO local (VRAM); sin `--local-only` = escala a frontera (con él = $0 puro); `--plan` = solo lectura;
-  `axon ingest "<url>"` transcribe YouTube.
-- **Gotchas:** NO `--json` en outputs largos (doble-escape) → salida normal o que ESCRIBA a archivo (el
-  single-shot trona con docs largos). · Job remoto: `nohup <script-en-ARCHIVO> >log 2>&1 </dev/null &`
-  (heredoc-stdin al background NO arranca). · ollama solo por `ssh→axon` (un timeout a `:11434` no significa
-  nada). · `qwen3.8:27b` (VRAM) es el default; el `gpt-oss:120b` (RAM ~65GB) es opt-in EXPLÍCITO con `--model` +
-  `nohup`, **nunca auto**.
-
 ## Hooks/tools que lo sostienen
 - **`delegacion-gate`** (PreToolUse/Task) — consentimiento de costo por ventana de 5h (ver el flujo de gasto).
 - **`delegacion-reporte`** (PostToolUse/Task) — tras cada subagente, recuerda registrar avance + limpiar worktree.
