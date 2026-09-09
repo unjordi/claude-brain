@@ -85,3 +85,6 @@ docs/flowcharts/*
 .claude/memory/hilo-mental-actual.md
 .claude/memory/hilo-mental-overflow.md
 .claude/memory/BACKLOG-UNIFICADO.md
+
+# Worktrees locales de sesiones de trabajo (nunca se versionan: son checkouts, no contenido).
+.git-worktrees/
