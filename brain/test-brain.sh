@@ -1363,6 +1363,22 @@ o="$(printf '%s' '{"tool_input":{"command":"git commit -m x"}}' | HOME="$NONGIT"
 printf '%s' "$o" | grep -q '"deny"' && ok "secret-scan §D: no-repo + STRICT=1 → fail-CLOSED (deny)" || bad "secret-scan §D: STRICT no bloqueó en no-repo; got: $o"
 rm -rf "$NONGIT"
 
+# (2) sin jq: un guard DEFENSIVO NO calla. Antes: `exit 0` mudo (red apagada en silencio + STRICT ignorado).
+# Ahora: STRICT sin jq → fail-CLOSED por exit 2 (bloqueo que no necesita jq); default → aviso ruidoso + pasa;
+# no-git → silencio; escapes (SKIP/--no-verify) respetados. Simula "sin jq" con un PATH mínimo (cat+basename).
+NOJQ="$(mktemp -d "${TMPDIR:-/tmp}/brain-nojq.XXXXXX")"; NOJQBIN="$NOJQ/bin"; NOJQHOME="$NOJQ/home"; mkdir -p "$NOJQBIN" "$NOJQHOME"
+for _b in cat basename; do ln -s "$(command -v "$_b")" "$NOJQBIN/$_b"; done
+BASH_ABS="$(command -v bash)"
+printf '%s' '{"tool_input":{"command":"git commit -m x"}}' | PATH="$NOJQBIN" HOME="$NOJQHOME" CLAUDE_SECRET_SCAN_STRICT=1 "$BASH_ABS" "$HOOKS/secret-scan.sh" >/dev/null 2>&1
+[ "$?" -eq 2 ] && ok "secret-scan (2): sin jq + STRICT=1 → fail-CLOSED (exit 2)" || bad "secret-scan (2): sin jq + STRICT no bloqueó (exit != 2)"
+err="$(printf '%s' '{"tool_input":{"command":"git commit -m x"}}' | PATH="$NOJQBIN" HOME="$NOJQHOME" "$BASH_ABS" "$HOOKS/secret-scan.sh" 2>&1 >/dev/null)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$err" | grep -qi 'no se escane\|red de seguridad'; } && ok "secret-scan (2): sin jq + default → pasa (exit 0) con aviso ruidoso por stderr" || bad "secret-scan (2): sin jq default no avisó/no pasó; rc=$rc err=$err"
+err="$(printf '%s' '{"tool_input":{"command":"ls -la"}}' | PATH="$NOJQBIN" HOME="$NOJQHOME" "$BASH_ABS" "$HOOKS/secret-scan.sh" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ -z "$err" ]; } && ok "secret-scan (2): sin jq + no-git → silencio (sin ruido en cada Bash)" || bad "secret-scan (2): sin jq no-git hizo ruido; rc=$rc err=$err"
+err="$(printf '%s' '{"tool_input":{"command":"git commit -m x"}}' | PATH="$NOJQBIN" HOME="$NOJQHOME" CLAUDE_SECRET_SCAN_STRICT=1 CLAUDE_SKIP_SECRET_SCAN=1 "$BASH_ABS" "$HOOKS/secret-scan.sh" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ -z "$err" ]; } && ok "secret-scan (2): sin jq + SKIP=1 → escape silencioso (aun con STRICT)" || bad "secret-scan (2): sin jq SKIP no respetado; rc=$rc err=$err"
+rm -rf "$NOJQ"
+
 # (5) G5: PRIMER push de una rama NUEVA sin upstream → antes fail-open (no escaneaba); ahora escanea lo
 # que la rama AGREGA vs el merge-base con develop/main.
 G5ROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-g5.XXXXXX")"; G5REPO="$G5ROOT/repo"; mkdir -p "$G5REPO"

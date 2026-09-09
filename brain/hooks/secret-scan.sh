@@ -25,9 +25,25 @@ set -u
 case "$0" in "$HOME/.claude/hooks/"*) : ;; *) [ -f "$HOME/.claude/hooks/$(basename "$0")" ] && exit 0 ;; esac
 
 input=$(cat 2>/dev/null || true)
-# Sin jq NO podemos ni parsear el comando ni EMITIR un deny (el deny es JSON vía jq) → fail-open forzoso
-# (no hay forma de bloquear limpio). Es una limitación real, no una elección; documentada.
-command -v jq >/dev/null 2>&1 || exit 0
+# Sin jq no podemos parsear el comando ni EMITIR un deny ESTRUCTURADO (el deny sale como JSON vía jq).
+# Pero un guard DEFENSIVO NO calla: que la red de seguridad esté APAGADA debe ENTERARSE el operador, no
+# un fail-open silencioso (antes: `exit 0` mudo → un commit/push entraba sin escaneo y STRICT se ignoraba
+# por completo). Sin jq: (a) STRICT hace fail-CLOSED por `exit 2` (bloqueo que NO necesita jq); (b) si no,
+# avisa RUIDOSO por stderr y deja pasar (default fail-open). Honra los escapes explícitos aun sin jq.
+if ! command -v jq >/dev/null 2>&1; then
+  [ "${CLAUDE_SKIP_SECRET_SCAN:-}" = "1" ] && exit 0
+  case "$input" in *--no-verify*) exit 0 ;; esac   # escape crudo (superset; coherente con el fail-open)
+  case "$input" in
+    *git*commit*|*git*push*)
+      if [ "${CLAUDE_SECRET_SCAN_STRICT:-0}" = "1" ]; then
+        printf '%s\n' "FRENO DE SEGURIDAD (secret-scan STRICT): 'jq' no está instalado; no puedo escanear en busca de secretos antes de dejar entrar código y CLAUDE_SECRET_SCAN_STRICT=1 exige poder verificar. Instala jq (brew install jq / winget install jqlang.jq), o salta conscientemente con 'git … --no-verify' o CLAUDE_SKIP_SECRET_SCAN=1." >&2
+        exit 2
+      fi
+      printf '%s\n' "⚠️ secret-scan: 'jq' no está instalado → este git commit/push NO se escaneó en busca de secretos (la red de seguridad está APAGADA). Instala jq para reactivarla; CLAUDE_SECRET_SCAN_STRICT=1 la volvería obligatoria." >&2
+      ;;
+  esac
+  exit 0
+fi
 
 # DECISIÓN fail-open vs fail-closed (§D): por DEFAULT fail-OPEN ante fallo de INFRAESTRUCTURA (sin git, no
 # es repo, no se puede determinar el rango del diff) — bloquear TODO commit por un problema de entorno es
