@@ -166,7 +166,7 @@ acg_mrid() {
 #     y `git push origin develop>log` (redirect `>` pegado). Se amplía a `([[:space:]]|$|[)>&|;])` — cierra
 #     ambos. VERIFICADO: casa `develop)`/`develop>` y NO casa `develop-feature`/`feat/develop-x` (cero FP).
 acg_push_destino_base() {
-  printf '%s' "$1" | grep -qE 'git[[:space:]]+push[^;&|]*[[:space:]:/+](main|develop)([[:space:]]|$|[)>&|;])'
+  printf '%s' "$1" | grep -qE 'git[[:space:]]+push[^;&|]*[[:space:]:/+](main|master|develop)([[:space:]]|$|[)>&|;])'
 }
 
 # ¿el push va SIN un refspec de rama explícito? (pelón, o solo remoto, o `HEAD` → empuja la RAMA
@@ -256,7 +256,7 @@ acg_push_toca_base() {   # $1=cmd  $2=payload_cwd(opcional)
       esac
       [ -n "$rama" ] || rama=$(acg_rama_actual "$dir")
       case "$rama" in
-        main|develop) return 0 ;;
+        main|master|develop) return 0 ;;
         "")           return 0 ;;   # FAIL-SAFE: rama IRRESOLUBLE en un pelón ⇒ BLOQUEA (nunca fail-open)
       esac
     fi
@@ -276,7 +276,7 @@ acg_merge_menciona_base() {
   # bloqueaba el release por CLI. El destino REAL lo resuelve acg_destino_de_mr (target-aware). Aquí solo
   # cuenta un destino EXPLÍCITO por flag (--base/--target[-branch]/-B). Alineado con acg_es_merge_mr
   # ((\.exe)? Windows + merge|accept).
-  printf '%s' "$u" | grep -qE '(glab(\.exe)?[[:space:]]+mr[[:space:]]+(merge|accept)|gh(\.exe)?[[:space:]]+pr[[:space:]]+merge)[^;&|]*[[:space:]](--base|--target|--target-branch|-B)[[:space:]=]+(main|develop)([[:space:]]|$|[)>&|;])'
+  printf '%s' "$u" | grep -qE '(glab(\.exe)?[[:space:]]+mr[[:space:]]+(merge|accept)|gh(\.exe)?[[:space:]]+pr[[:space:]]+merge)[^;&|]*[[:space:]](--base|--target|--target-branch|-B)[[:space:]=]+(main|master|develop)([[:space:]]|$|[)>&|;])'
 }
 
 # ¿el comando EJECUTA una integración REAL de MR/PR (server-side), no ayuda/inspección? Reconoce el
