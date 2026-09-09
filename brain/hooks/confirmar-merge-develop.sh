@@ -75,7 +75,7 @@ La rama DESTINO del MR, según una consulta factual, es: '$1'.
 
 Tu tarea: decidir si el USUARIO autorizó EXPRESAMENTE integrar ESTE trabajo a ese destino ahora, con el GATE SEGÚN EL DESTINO (esto MANDA sobre las demás reglas):
    · destino 'develop' → basta una instrucción CLARA del USUARIO de integrar a develop ('mergea el X a develop', 'súbelo', 'intégralo').
-   · destino 'main' (RELEASE) → EXIGE lenguaje EXPLÍCITO de release ('release' / 'libera' / 'a main') en palabras del USUARIO. Un 'mergea el X' GENÉRICO —aunque sea instrucción clara, aunque diga 'a develop'— NO basta para main y es DENY. main es release-only.
+   · destino 'main' o 'master' (RELEASE — master es alias de main en muchos repos) → EXIGE lenguaje EXPLÍCITO de release ('release' / 'libera' / 'a main'/'a master') en palabras del USUARIO. Un 'mergea el X' GENÉRICO —aunque sea instrucción clara, aunque diga 'a develop'— NO basta para main/master y es DENY. main/master es release-only.
 El NÚMERO de MR ($2) es un artefacto técnico que a menudo NI EXISTÍA cuando el usuario dio el OK — NO exijas que lo nombre.
 
 Abajo va la conversación reciente INTERCALADA, una línea por turno, marcada 'USUARIO:' o 'ASISTENTE:'.
@@ -88,7 +88,7 @@ Reglas:
 - La autorización puede DARSE ANTES de que el MR exista o se numere. Cuántos MR candidatos hay hacia el destino te lo dice el CONTEXTO: si dice 'SOLO #N', una autorización del USUARIO hacia esa base SIN número aplica a #N; si dice que hay VARIOS, exige que el USUARIO nombre cuál.
 - Referencias anafóricas del USUARIO ('sí', 'dale', 'hazlo', 'arranca con eso', 'ese', 'de todo esto', 'el release') SÍ valen, pero SOLO si la línea ASISTENTE inmediatamente anterior propone claramente mergear ESTE MR ($2), o si el CONTEXTO indica que hay un solo candidato hacia ese destino. Si la propuesta era de OTRO MR, o hay varios candidatos y no nombra cuál, es DENY.
 - Una autorización CONDICIONAL o FUTURA del USUARIO ('cuando pasen los tests, mergea', 'si CI está verde, intégralo') cuenta como ALLOW SOLO si una línea ASISTENTE posterior muestra que la condición YA se cumplió. Sin esa evidencia, es DENY.
-- DESTINO 'main' = RELEASE: exige lenguaje EXPLÍCITO de release (release / libera / a main) en palabras del USUARIO. Un 'mergea' normal NO basta para main.
+- DESTINO 'main' o 'master' = RELEASE (master es alias de main): exige lenguaje EXPLÍCITO de release (release / libera / a main / a master) en palabras del USUARIO. Un 'mergea' normal NO basta para main/master.
 - FAIL SEGURO DEL DESTINO (crítico): si NO puedes CONFIRMAR que el destino es 'develop' —p. ej. la consulta vino VACÍA y la conversación es ambigua— Y hay lenguaje de release/main en juego, trata el destino como 'main' y exige autorización de RELEASE. NUNCA asumas 'develop' solo porque la consulta falló. Ante duda del destino, el más ESTRICTO gana.
 - DENY si: no hay autorización del USUARIO, la autorización es para OTRO MR distinto, es una negación ('no mergees eso'), un aplazamiento ('espera', 'todavía no', 'déjame revisar'), una PREGUNTA ('¿ya quedó el release?'), o si tienes CUALQUIER duda.
 - Ignora la frustración, quejas o reclamos del usuario; busca ÚNICAMENTE si autorizó ESTE merge.
@@ -151,13 +151,14 @@ VEREDICTO: DENY"
   # línea USUARIO con release/libera/a main → DENY. NO es regex-soup de autorización (eso lo hace el LLM): es
   # un candado angosto para el gate de MÁXIMA consecuencia. Solo destino main CONFIRMADO (el vacío lo cubre el
   # fail-seguro del LLM). AUTORIDAD: solo líneas 'USUARIO:' (nunca ASISTENTE → anti auto-autorización).
-  if [ "$1" = "main" ] && [ "$out" = "ALLOW" ]; then
+  # master = alias de main en muchos repos (legacy incluidos) → misma base de RELEASE, mismo piso estricto.
+  if { [ "$1" = "main" ] || [ "$1" = "master" ]; } && [ "$out" = "ALLOW" ]; then
     # tokens ANCLADOS a límite de palabra ([^[:alpha:]], portable BSD+GNU): 'liber' NO casa en
     # "deliberada"/"libertad" (liber[aeo] + frontera previa), 'a main' NO casa en "a maintenance"
     # (frontera posterior tras main). Endurecimiento — cierra el falso NEGATIVO del piso (auditoría 2026-08).
     # "promover a main" YA lo cubre '(a|hacia) main'; una rama 'promov.* .*main' aparte metía un .*
     # desacoplado que puenteaba un 'promueve' cualquiera con un 'main' suelto de otra frase (falso negativo) → se quitó.
-    printf '%s\n' "$3" | grep -iE '^[[:space:]]*USUARIO:' | grep -iqE '(^|[^[:alpha:]])(release|(liberar?|liberado|liberaci[oó]n|liber[eé]n?|liber[oó])([^[:alpha:]]|$)|(a|hacia) main([^[:alpha:]]|$))' || out=DENY
+    printf '%s\n' "$3" | grep -iE '^[[:space:]]*USUARIO:' | grep -iqE '(^|[^[:alpha:]])(release|(liberar?|liberado|liberaci[oó]n|liber[eé]n?|liber[oó])([^[:alpha:]]|$)|(a|hacia) (main|master)([^[:alpha:]]|$))' || out=DENY
   fi
   [ -n "$out" ] && printf '%s' "$out" || printf 'UNAVAILABLE'
 }
@@ -347,9 +348,10 @@ destino=$(acg_destino_de_mr "$cmd" "$pcwd")
 
 # Ramas personales de integración (Develop<Usuario>, epic/*, integracion/*, feat/*, fix/*…) reciben
 # merge CONTINUO sin gate: ahí vive el día a día del modelo MINI-DEVELOP-por-dev. SOLO el `develop`
-# COMPARTIDO y `main` piden confirmación. destino vacío/desconocido → NO pasa libre aquí (requiere -n):
-# cae al juez, que aplica el fail SEGURO (duda + release en juego → main estricto), NUNCA "se asume develop".
-if [ -n "$destino" ] && [ "$destino" != "develop" ] && [ "$destino" != "main" ]; then
+# COMPARTIDO, `main` y `master` (alias de main en repos legacy) piden confirmación. destino vacío/desconocido
+# → NO pasa libre aquí (requiere -n): cae al juez, que aplica el fail SEGURO (duda + release en juego → main
+# estricto), NUNCA "se asume develop".
+if [ -n "$destino" ] && [ "$destino" != "develop" ] && [ "$destino" != "main" ] && [ "$destino" != "master" ]; then
   exit 0
 fi
 
@@ -366,8 +368,8 @@ if [ -z "$destino" ] && [ -n "$prlist" ]; then
   d=$(printf '%s' "$prlist" | jq -r --arg id "$cur_mrid" 'map(select((.number|tostring)==$id))[0].baseRefName // empty' 2>/dev/null)
   if [ -n "$d" ]; then
     destino="$d"
-    # si la lista resolvió a una rama personal (ni develop ni main) → libre, como el early-exit de arriba
-    if [ "$destino" != "develop" ] && [ "$destino" != "main" ]; then exit 0; fi
+    # si la lista resolvió a una rama personal (ni develop ni main ni master) → libre, como el early-exit de arriba
+    if [ "$destino" != "develop" ] && [ "$destino" != "main" ] && [ "$destino" != "master" ]; then exit 0; fi
   fi
 fi
 hint=$(acg_hint_candidatos "$prlist" "$destino" "$cur_mrid")
@@ -422,8 +424,8 @@ elif [ "$veredicto" = "UNAVAILABLE_EXPIRED" ]; then
   r="FRENO (token OAuth expirado): tu token de Claude fue RECHAZADO (401) incluso tras un reintento — el CLI lo refresca solo en ~un momento. REINTENTA el merge en unos segundos; si persiste, corre 'claude setup-token' o integra el MR en la web de GitLab. (Fail-safe: no abro el merge sin poder consultar al juez.)"
 elif [ "${veredicto#UNAVAILABLE}" != "$veredicto" ]; then
   r="FRENO (juez no disponible): no pude consultar el juez de autorización de merge (¿sin red, timeout, o respuesta ininteligible?). Fail-safe conservador: reintenta, o integra el MR en la web de GitLab. (Override de modelo/timeout: CLAUDE_MERGE_JUEZ_MODEL / CLAUDE_MERGE_JUEZ_TIMEOUT.)"
-elif [ "$destino" = "main" ]; then
-  r="FRENO (RELEASE a main): el juez no encontró autorización EXPRESA de RELEASE para ESTE release (MR $cur_mrid). main es release-only — pide 'libera/release a main' explícito. Los releases van SIN squash (conservan historia)."
+elif [ "$destino" = "main" ] || [ "$destino" = "master" ]; then
+  r="FRENO (RELEASE a $destino): el juez no encontró autorización EXPRESA de RELEASE para ESTE release (MR $cur_mrid). $destino es release-only — pide 'libera/release a $destino' explícito. Los releases van SIN squash (conservan historia)."
 elif [ "$destino" = "develop" ]; then
   r="FRENO (definición de LISTO): el juez no encontró tu confirmación EXPRESA para integrar ESTE MR ($cur_mrid) a develop.
   (a) Dámela clara para ESTE MR (p. ej. 'mergea el $cur_mrid a develop').

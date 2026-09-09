@@ -492,6 +492,21 @@ is_silent "$(gbx 'git push')" && ok "gbg retro-compat: pelón sin .cwd en la ses
 # por CLI ya no se bloquea en falso; solo un destino EXPLÍCITO por flag (--base/-B/--target) cuenta.
 is_silent "$(gbx 'gh pr merge develop --merge')" && ok "gbg G6: 'gh pr merge develop --merge' (posicional=origen) → silencio (no es destino)" || bad "gbg G6: FP — el posicional 'develop' se trató como destino"
 printf '%s' "$(gbx 'gh pr merge 5 --base develop')" | grep -q '"deny"' && ok "gbg G6: 'gh pr merge 5 --base develop' (destino EXPLÍCITO por flag) → deny" || bad "gbg G6: el destino explícito por --base no bloqueó"
+# G7 (FP corpus L109, 2026-09-03 ×2): un compuesto que CAMBIA de rama antes del push pelón se resolvía
+# contra el HEAD ANTERIOR (develop) → FP. Ahora se resuelve contra la rama que el checkout/switch deja activa.
+git -C "$BASE" branch fix/z >/dev/null 2>&1   # rama LOCAL existente en el repo-en-develop
+gbxB() { jq -nc --arg c "$1" --arg w "$2" '{tool_name:"Bash",tool_input:{command:$c},cwd:$w}' | CLAUDE_PROJECT_DIR="$SESS" HOME="$GBXHOME" bash "$HOOKS/git-branch-guard.sh"; }
+is_silent "$(gbxB 'git checkout fix/z && git push' "$BASE")"      && ok "gbg G7: 'git checkout fix/z && git push' (rama existente) → silencio (resuelve contra fix/z, no develop)" || bad "gbg G7: FP — checkout+push pelón se resolvió contra el HEAD anterior (develop)"
+is_silent "$(gbxB 'git checkout -b feat/nueva && git push' "$BASE")" && ok "gbg G7: 'git checkout -b feat/nueva && git push' (rama NUEVA) → silencio" || bad "gbg G7: FP — checkout -b nueva+push bloqueó"
+is_silent "$(gbxB 'git switch -c otra && git push' "$BASE")"      && ok "gbg G7: 'git switch -c otra && git push' → silencio" || bad "gbg G7: FP — switch -c+push bloqueó"
+printf '%s' "$(gbxB 'git checkout develop && git push' "$BASE")"  | grep -q '"deny"' && ok "gbg G7: 'git checkout develop && git push' → deny (el checkout a BASE sigue bloqueando)" || bad "gbg G7: FN — checkout develop+push se coló"
+printf '%s' "$(gbxB 'git checkout no-existe.txt && git push' "$BASE")" | grep -q '"deny"' && ok "gbg G7: checkout de NO-rama (archivo) + push en develop → deny (fallback a HEAD, no FN)" || bad "gbg G7: FN — checkout de no-rama abrió un hueco (no cayó a HEAD)"
+# G8 (#9 tuning): master = alias de main en repos legacy → base protegida. Explícito y pelón (repo en master).
+git -C "$FEAT2" checkout -q -B master >/dev/null 2>&1   # reusa FEAT2 como repo-en-master
+printf '%s' "$(gbx 'git push origin master')"          | grep -q '"deny"' && ok "gbg G8: 'git push origin master' → deny (master es base protegida)" || bad "gbg G8: push explícito a master se coló"
+is_silent "$(gbx 'git push origin master-hotfix')"      && ok "gbg G8: 'git push origin master-hotfix' (base PREFIJO de rama) → silencio (sin FP)" || bad "gbg G8: FP — 'master-hotfix' disparó"
+printf '%s' "$(gbx 'git push' "$FEAT2")"               | grep -q '"deny"' && ok "gbg G8: pelón con .cwd=<repo-en-master> → deny (target-aware)" || bad "gbg G8: FN — pelón en master se coló"
+printf '%s' "$(gbx 'gh pr merge 5 --base master')"     | grep -q '"deny"' && ok "gbg G8: 'gh pr merge --base master' (release a master) → deny" || bad "gbg G8: merge con destino master no bloqueó"
 rm -rf "$GBX"
 
 # ── (b1d-lib) acg_target_dir / acg_target_remote: PRECEDENCIA del resolvedor (F0, DETERMINISTA sin repos) ──
@@ -845,6 +860,13 @@ USUARIO: ok gracias')" = DENY ] \
     && ok "piso-main: 'promueve…'+'main' suelto (sin promoción real) → DENY" || bad "piso-main: puenteó promov con un main de otra frase (falso negativo)"
   [ "$(pmain main 'USUARIO: promover el 999 a main')" = ALLOW ] \
     && ok "piso-main: 'promover … a main' (real, vía rama a-main) → ALLOW" || bad "piso-main: bloqueó una promoción legítima a main"
+  # master = alias de main → mismo piso de release estricto (repos legacy). #9 tuning.
+  [ "$(pmain master 'USUARIO: mergea el 999')" = DENY ] \
+    && ok "piso-main: destino master + 'mergea' pelón → piso DENY (master es release-only como main)" || bad "piso-main: dejó pasar un release a master SIN lenguaje de release"
+  [ "$(pmain master 'USUARIO: libera a master el 999, es el release')" = ALLOW ] \
+    && ok "piso-main: destino master + 'libera a master' → ALLOW" || bad "piso-main: bloqueó un release LEGÍTIMO a master"
+  [ "$(pmain master 'USUARIO: haz el release a master')" = ALLOW ] \
+    && ok "piso-main: destino master + 'release a master' → ALLOW" || bad "piso-main: bloqueó 'release a master'"
 )
 
 # ── VETO DE CITA VERIFICADA + PARSEO POR CENTINELA (capa 1+2, DETERMINISTA sin red) · juez EMPODERADO 2026-08 ──
