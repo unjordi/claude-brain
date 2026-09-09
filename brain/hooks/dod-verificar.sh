@@ -265,8 +265,9 @@ fi
 # ── Candado principal: solo aplica si el asistente AFIRMA un CIERRE. ──
 [ "$cierre" = "si" ] || exit 0
 
-# ¿El TURNO tocó CÓDIGO (algún archivo que NO sea documentación ni memoria)? Si no, un "listo" de docs/config
-# no exige verificación técnica. (ESTRUCTURAL — se conserva íntegro del diseño previo.)
+# ¿El TURNO tocó CÓDIGO (algún archivo que NO sea documentación ni memoria)? La distinción decide la
+# EVIDENCIA que se exige: con código, verificación técnica (build/tests) + marca; SIN código, solo la marca
+# (ver (5) más abajo — un doc/reporte no corre build, pero cerrarlo SIGUE necesitando (1)/(2)). ESTRUCTURAL.
 codigo=$(printf '%s' "$turn" | grep -oE '"file_path":"[^"]+"' | grep -vE '\.(md|txt)"|/\.claude/memory/' | head -1)
 # G2(a): editar por Bash (sed -i / patch / redirección `>`/`tee`) NO genera "file_path" → inspecciona los Bash.
 if [ -z "$codigo" ]; then
@@ -286,7 +287,18 @@ fi
 if [ -z "$codigo" ]; then
   printf '%s' "$turn" | grep -qE '"name"[[:space:]]*:[[:space:]]*"Task"' && codigo="(task-subagente)"
 fi
-[ -z "$codigo" ] && exit 0
+
+# (5) SIN código tocado: build/tests NO aplican a un doc/reporte, así que NO se nag con verificación técnica.
+# PERO la definición de LISTO es MUTUA e independiente del stack: cerrar un ENTREGABLE (una doc, un reporte,
+# un análisis) SIGUE exigiendo la marca (1)/(2). El juez YA descartó estatus/mecánico/celebración/mini-develop
+# → un CIERRE=si sin código es una declaración genuina de "este entregable quedó" y sin marca del usuario NO
+# es LISTO. (Antes: `exit 0` mudo dejaba pasar el cierre de un entregable no-código sin ninguna confirmación.)
+if [ -z "$codigo" ]; then
+  [ "$marca" = "si" ] && exit 0
+  ereason="DETENTE — declaraste un ENTREGABLE (una doc, un reporte, un análisis) LISTO/terminado/entregado sin la confirmación que la definición mutua de LISTO exige. En ESTE turno NO tocaste código → la verificación técnica de compilación/pruebas NO aplica, pero el candado de (1)/(2) SÍ: un entregable es LISTO solo si (1) el usuario confirmó su contenido/funcionalidad o (2) autorizó EXPRESAMENTE su cierre. Sin eso, el estatus honesto es 'verificado técnicamente / en preview / a tu revisión'. Si estás dando estatus o esperando su OK, dilo con lenguaje de estatus ('te aviso', 'con tu OK', 'pendiente tu revisión') y podrás cerrar el turno."
+  jq -n --arg r "$ereason" '{decision:"block", reason:$r}'
+  exit 0
+fi
 
 # Candado DURO: sin (1)/(2) del USUARIO no se puede declarar LISTO tras tocar código.
 [ "$marca" = "si" ] && exit 0

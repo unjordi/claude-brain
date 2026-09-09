@@ -1440,6 +1440,15 @@ o="$(scan 'ls -la')"
 [ -z "$o" ] && ok "secret-scan ignora comandos no-git" || bad "secret-scan reaccionó a no-git; got: $o"
 # ── §D: patrones NUEVOS (JWT, connection string, Password=) vía la lib detectar-secretos ──
 reset_scan() { git -C "$SCANREPO" reset -q >/dev/null 2>&1; rm -f "$SCANREPO"/*.txt 2>/dev/null; }
+# (A1 multi-add) `git add safe && git add secret && git commit` en UN comando: los adds NO corrieron en
+# PreToolUse → el escaneo debe pedir el dry-run de TODOS los `git add`, no solo el 1º. Antes (head -1) el 2º
+# add se colaba y su secreto entraba. Cerrado 2026-09-08 (OK de unjordi).
+reset_scan; printf 'limpio, sin secretos\n' > "$SCANREPO/safe.txt"; printf 'aws = AKIA1234567890ABCDEF\n' > "$SCANREPO/secreto.txt"
+o="$(scan 'git add safe.txt && git add secreto.txt && git commit -m x')"
+printf '%s' "$o" | grep -q '"deny"' && ok "secret-scan A1: multi-add encadenado escanea TODOS los git add (secreto en el 2º → deny)" || bad "secret-scan A1: el 2º git add encadenado se coló (solo escaneó el 1º); got: $o"
+reset_scan; printf 'a\n' > "$SCANREPO/a.txt"; printf 'b\n' > "$SCANREPO/b.txt"
+o="$(scan 'git add a.txt && git add b.txt && git commit -m x')"
+[ -z "$o" ] && ok "secret-scan A1: multi-add encadenado TODO limpio → silencio (sin FP)" || bad "secret-scan A1: FP en multi-add limpio; got: $o"
 # (6) JWT
 reset_scan; printf 'jwt: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c\n' > "$SCANREPO/j.txt"
 git -C "$SCANREPO" add j.txt >/dev/null 2>&1; o="$(scan 'git commit -m x')"
@@ -1463,6 +1472,22 @@ o="$(printf '%s' '{"tool_input":{"command":"git commit -m x"}}' | HOME="$NONGIT"
 o="$(printf '%s' '{"tool_input":{"command":"git commit -m x"}}' | HOME="$NONGIT" CLAUDE_PROJECT_DIR="$NONGIT" CLAUDE_SECRET_SCAN_STRICT=1 bash "$HOOKS/secret-scan.sh")"
 printf '%s' "$o" | grep -q '"deny"' && ok "secret-scan §D: no-repo + STRICT=1 → fail-CLOSED (deny)" || bad "secret-scan §D: STRICT no bloqueó en no-repo; got: $o"
 rm -rf "$NONGIT"
+
+# (2) sin jq: un guard DEFENSIVO NO calla. Antes: `exit 0` mudo (red apagada en silencio + STRICT ignorado).
+# Ahora: STRICT sin jq → fail-CLOSED por exit 2 (bloqueo que no necesita jq); default → aviso ruidoso + pasa;
+# no-git → silencio; escapes (SKIP/--no-verify) respetados. Simula "sin jq" con un PATH mínimo (cat+basename).
+NOJQ="$(mktemp -d "${TMPDIR:-/tmp}/brain-nojq.XXXXXX")"; NOJQBIN="$NOJQ/bin"; NOJQHOME="$NOJQ/home"; mkdir -p "$NOJQBIN" "$NOJQHOME"
+for _b in cat basename; do ln -s "$(command -v "$_b")" "$NOJQBIN/$_b"; done
+BASH_ABS="$(command -v bash)"
+printf '%s' '{"tool_input":{"command":"git commit -m x"}}' | PATH="$NOJQBIN" HOME="$NOJQHOME" CLAUDE_SECRET_SCAN_STRICT=1 "$BASH_ABS" "$HOOKS/secret-scan.sh" >/dev/null 2>&1
+[ "$?" -eq 2 ] && ok "secret-scan (2): sin jq + STRICT=1 → fail-CLOSED (exit 2)" || bad "secret-scan (2): sin jq + STRICT no bloqueó (exit != 2)"
+err="$(printf '%s' '{"tool_input":{"command":"git commit -m x"}}' | PATH="$NOJQBIN" HOME="$NOJQHOME" "$BASH_ABS" "$HOOKS/secret-scan.sh" 2>&1 >/dev/null)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$err" | grep -qi 'no se escane\|red de seguridad'; } && ok "secret-scan (2): sin jq + default → pasa (exit 0) con aviso ruidoso por stderr" || bad "secret-scan (2): sin jq default no avisó/no pasó; rc=$rc err=$err"
+err="$(printf '%s' '{"tool_input":{"command":"ls -la"}}' | PATH="$NOJQBIN" HOME="$NOJQHOME" "$BASH_ABS" "$HOOKS/secret-scan.sh" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ -z "$err" ]; } && ok "secret-scan (2): sin jq + no-git → silencio (sin ruido en cada Bash)" || bad "secret-scan (2): sin jq no-git hizo ruido; rc=$rc err=$err"
+err="$(printf '%s' '{"tool_input":{"command":"git commit -m x"}}' | PATH="$NOJQBIN" HOME="$NOJQHOME" CLAUDE_SECRET_SCAN_STRICT=1 CLAUDE_SKIP_SECRET_SCAN=1 "$BASH_ABS" "$HOOKS/secret-scan.sh" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ -z "$err" ]; } && ok "secret-scan (2): sin jq + SKIP=1 → escape silencioso (aun con STRICT)" || bad "secret-scan (2): sin jq SKIP no respetado; rc=$rc err=$err"
+rm -rf "$NOJQ"
 
 # (5) G5: PRIMER push de una rama NUEVA sin upstream → antes fail-open (no escaneaba); ahora escanea lo
 # que la rama AGREGA vs el merge-base con develop/main.
@@ -2166,7 +2191,16 @@ CS='CIERRE=si MARCA=no VISUAL=no'    # atajo: claim de cierre, sin marca del usu
 is_block "$(dod 'X' "$EDITR" 'haz el cambio' "$CS")"            && ok "dod flujo: CIERRE=si + código + MARCA=no → bloquea" || bad "dod flujo: no bloqueó un cierre sin marca"
 is_block "$(dod 'X' "$EDITR" 'haz el cambio' 'CIERRE=no MARCA=no VISUAL=no')" && bad "dod flujo: CIERRE=no no debe bloquear" || ok "dod flujo: CIERRE=no → no bloquea (estatus/mecánico/pregunta)"
 is_block "$(dod 'X' "$EDITR" 'sí ciérralo' 'CIERRE=si MARCA=si VISUAL=no')" && bad "dod flujo: MARCA=si no debe bloquear" || ok "dod flujo: MARCA=si (usuario autorizó) → no bloquea"
-is_block "$(dod 'X' '' 'haz el cambio' "$CS")"                  && bad "dod flujo: un claim SIN código tocado no debe bloquear" || ok "dod flujo: claim sin código tocado → no bloquea (turno docs/config)"
+# (5) dod-sin-código: cerrar un ENTREGABLE (doc/reporte) sin tocar código SIGUE exigiendo la marca (1)/(2)
+# — la definición de LISTO es MUTUA e independiente del stack. Antes esto pasaba mudo (exit 0); ahora bloquea.
+o5="$(dod 'El reporte de auditoría quedó listo y entregado.' '' 'haz el análisis' "$CS")"
+is_block "$o5" && ok "dod (5): cierre de ENTREGABLE sin código + MARCA=no → bloquea (LISTO es mutuo, no depende del stack)" || bad "dod (5): un cierre de entregable no-código sin marca se coló"
+# el reason del caso sin-código NO debe traer el nag ACCIONABLE de código ("Corre la verificación…" / "tras tocar código") — solo exige la marca
+printf '%s' "$o5" | jq -r '.reason' | grep -qiE 'Corre la verificación|tras tocar código' && bad "dod (5): el reason sin-código trae el nag de código (no aplica a un doc)" || ok "dod (5): el reason sin-código NO trae el nag de código (solo exige la marca)"
+# con la marca del usuario, el mismo cierre sin código → NO bloquea
+is_block "$(dod 'El reporte quedó listo.' '' 'sí, ciérralo' 'CIERRE=si MARCA=si VISUAL=no')" && bad "dod (5): MARCA=si sin código no debe bloquear" || ok "dod (5): cierre de entregable sin código + MARCA=si (usuario autorizó) → no bloquea"
+# NO-cierre sin código (estatus/mecánico) → sigue sin bloquear (no se aflojó ni se sobre-endureció)
+is_block "$(dod 'X' '' 'haz el cambio' 'CIERRE=no MARCA=no VISUAL=no')" && bad "dod (5): un NO-cierre sin código no debe bloquear" || ok "dod (5): estatus/mecánico sin código (CIERRE=no) → no bloquea"
 is_block "$(dod 'X' "$EDITR" 'haz el cambio' 'UNAVAILABLE')"    && bad "dod flujo: juez UNAVAILABLE debía FAIL-OPEN (dod es nag, no seguridad)" || ok "dod flujo: juez UNAVAILABLE → FAIL-OPEN (no atrapa el turno)"
 # B2 visual: VISUAL=si bloquea INDEPENDIENTE del cierre, salvo browser-tool presente o MARCA del usuario.
 is_block "$(dod 'X' "$EDITR" 'haz el cambio' 'CIERRE=no MARCA=no VISUAL=si')"   && ok "dod B2: VISUAL=si sin browser-tool → bloquea (a ciegas)" || bad "dod B2: no bloqueó un claim visual a ciegas"
@@ -2215,7 +2249,11 @@ rm -f "$DODUI"
 # G2a: código tocado por Bash (sin file_path) — ESTRUCTURAL, con el cierre ya afirmado por el mock.
 is_block "$(dod 'X' "$BASHSED" 'haz el cambio' "$CS")"   && ok "dod G2a: 'sed -i' cuenta como código → bloquea" || bad "dod G2a: 'sed -i' evadió el gate de código tocado"
 is_block "$(dod 'X' "$BASHREDIR" 'haz el cambio' "$CS")" && ok "dod G2a: redirección '> Bar.razor' cuenta como código → bloquea" || bad "dod G2a: la redirección a código evadió el gate"
-is_block "$(dod 'X' "$BASHREAD" 'haz el cambio' "$CS")"  && bad "dod G2a: build+tee a .log NO es tocar código (falso positivo)" || ok "dod G2a: build/tee a .log → NO cuenta como código"
+# build+tee a .log NO cuenta como código → toma la rama SIN-código. Con CIERRE=si+MARCA=no eso ahora bloquea
+# (declarar cierre con solo-verde-técnico sin la marca = "verde técnico ≠ LISTO"), pero por la rama sin-código
+# (reason SIN "tras tocar código") — lo que sigue verificando que `tee .log` NO se miscuenta como edición.
+o_tee="$(dod 'X' "$BASHREAD" 'haz el cambio' "$CS")"
+{ is_block "$o_tee" && ! printf '%s' "$o_tee" | jq -r '.reason' | grep -qi 'tras tocar código'; } && ok "dod G2a: build/tee a .log → NO cuenta como código (bloquea por la rama SIN-código, no por 'código tocado')" || bad "dod G2a: 'tee .log' se miscontó como código (bloqueó por la rama de código tocado)"
 # ALTO-2: un Task (sub-agente) = posible código tocado (su edición vive en otro transcript, invisible aquí).
 is_block "$(dod 'X' "$TASKT" 'haz el cambio' "$CS")"                       && ok "dod ALTO-2: Task (sub-agente) = posible código → bloquea" || bad "dod ALTO-2: un fan-out (Task) evadió el gate"
 is_block "$(dod 'X' "$TASKT" 'sí ya la validé, ciérrala' 'CIERRE=si MARCA=si VISUAL=no')" && bad "dod ALTO-2: Task + MARCA=si no debe bloquear" || ok "dod ALTO-2: Task + MARCA=si → no bloquea"
