@@ -443,6 +443,29 @@ function main(): void {
     process.exit(1);
     return;
   }
+  // Cierre ordenado ante SIGTERM/SIGINT. Bajo systemd esto rara vez cambia el resultado
+  // —KillMode=control-group ya se lleva a los hijos—, pero hace DOS cosas que el kill del cgroup no
+  // hace: desliga el socket unix del filesystem (si no, el siguiente arranque encuentra un archivo
+  // huérfano y tiene que sondearlo para saber si está vivo) y cierra los PTYs por la vía normal, para
+  // que cada shell reciba su SIGHUP en vez de morir de golpe. Fuera de systemd —un broker lanzado a
+  // mano para depurar, que es como se prueba— es lo ÚNICO que evita dejar PTYs colgando tras un Ctrl-C.
+  let cerrando = false;
+  const cierreOrdenado = (senal: string): void => {
+    if (cerrando) return; // una segunda señal no reentra: `close()` no es idempotente sobre el pool
+    cerrando = true;
+    console.log(`[term-host-broker] ${senal} — cerrando sesiones y liberando el socket`);
+    try {
+      handle.close();
+    } catch (e) {
+      console.error(`[term-host-broker] error al cerrar: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    // Código convencional de "terminado por señal", para que systemd no lo lea como una caída y
+    // dispare Restart=on-failure sobre una parada que se pidió a propósito.
+    process.exit(senal === "SIGINT" ? 130 : 143);
+  };
+  process.on("SIGTERM", () => cierreOrdenado("SIGTERM"));
+  process.on("SIGINT", () => cierreOrdenado("SIGINT"));
+
   handle.ready.then(
     () => {
       console.log(`[term-host-broker] escuchando en ${bind}:${port} (home=${home}, shell=${shell} -l)`);

@@ -29,6 +29,13 @@
 
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from "node:child_process";
 
+/**
+ * Ejecutor de UN ajuste de winsize sobre el pts. Resuelve `true` si se aplicó, `false` si falló o venció.
+ * CONTRATO: nunca rechaza y SIEMPRE resuelve (el default trae timeout + watchdog) — de eso depende que la
+ * cola de resizes no se quede trabada. Inyectable solo para pruebas; en producción se usa el default `stty`.
+ */
+export type ResizeRunner = (pts: string, cols: number, rows: number) => Promise<boolean>;
+
 export interface PtyOptions {
   /** Comando a `exec`utar dentro del PTY. Default: shell de login INTERACTIVO (`exec <shell> -il`), que es lo
    *  que el widget abre — el usuario teclea `claude`/`vim`/lo que sea adentro. */
@@ -39,6 +46,8 @@ export interface PtyOptions {
   readonly env: NodeJS.ProcessEnv;
   readonly cols?: number;
   readonly rows?: number;
+  /** Costura de PRUEBA: sustituye el ejecutor de winsize. Sin esto se usa `stty -F <pts>`. */
+  readonly execResize?: ResizeRunner;
 }
 
 export interface PtyProcess {
@@ -72,6 +81,44 @@ const PTS_TAG = Buffer.from("AXON_PTS", "utf8");
  *  un `cmd` custom que no use nuestro wrapper no debe colgar el stream para siempre). */
 const PTS_MARK_MAX_BUFFER = 4096;
 
+/** Tope del `stty` de resize: si tarda más, se le manda SIGTERM y se da por fallido. */
+const RESIZE_TIMEOUT_MS = 2000;
+/** Red de seguridad por si el callback de `execFile` nunca llegara: la cola JAMÁS se queda trabada. */
+const RESIZE_WATCHDOG_MS = RESIZE_TIMEOUT_MS + 1000;
+
+// ── Reintentos del resize (FMEA 2026-09-08) ────────────────────────────────────────────────────────────
+// Un `stty` puede fallar por causas TRANSITORIAS: el timeout de 2 s bajo carga, un `/dev/pts/N` ocupado un
+// instante. Antes, el pedido se CONSUMÍA antes de saber si había funcionado: `applied` se quedaba en el
+// PENÚLTIMO tamaño, `desired` ya era null y no había reintento. El comentario decía "un pedido idéntico
+// posterior SÍ se reintenta", pero el frontend NUNCA lo repite: `createPtySizeReconciler` (odysseus
+// static/js/term-geometry.js) marca `sent = next` en cuanto el `ws.send()` no lanza, SIN ACK. Los dos
+// extremos quedaban convencidos de tamaños distintos y ninguno podía descubrirlo.
+// El arreglo es acotado y local: reintentar aquí con backoff, y si aun así falla, NO tirar el pedido —
+// `desired` vuelve a su ranura para que el próximo drenaje lo retome.
+/** Intentos TOTALES por tamaño (1 + 2 reintentos). Acotado: un pts muerto no debe girar para siempre.
+ *  Exportado para que el probe afirme contra la constante REAL y no contra un 3 copiado. */
+export const RESIZE_INTENTOS = 3;
+/** Espera ENTRE intentos (ms). `RESIZE_INTENTOS - 1` entradas: el último intento no espera después. */
+const RESIZE_BACKOFF_MS = [40, 160];
+
+const dormir = (ms: number): Promise<void> => new Promise((r) => { const t = setTimeout(r, ms); if (typeof t.unref === "function") t.unref(); });
+
+/** Ejecutor real: `stty -F <pts> rows R cols C` -> TIOCSWINSZ sobre el slave + SIGWINCH al foreground. */
+const sttyResizeRunner: ResizeRunner = (pts, cols, rows) =>
+  new Promise<boolean>((resolve) => {
+    let settled = false;
+    const done = (ok: boolean): void => { if (!settled) { settled = true; resolve(ok); } };
+    const wd = setTimeout(() => done(false), RESIZE_WATCHDOG_MS);
+    if (typeof wd.unref === "function") wd.unref();
+    try {
+      execFile(
+        "stty", ["-F", pts, "rows", String(rows), "cols", String(cols)],
+        { timeout: RESIZE_TIMEOUT_MS },
+        (err) => { clearTimeout(wd); done(!err); }, // err = pts cerrado, stty ausente, o timeout
+      );
+    } catch { clearTimeout(wd); done(false); } // spawn imposible: se reporta como fallo, no se lanza
+  });
+
 function clampDim(v: number | undefined, def: number): number {
   if (typeof v !== "number" || !Number.isFinite(v)) return def;
   const n = Math.floor(v);
@@ -104,7 +151,21 @@ export function spawnPty(opts: PtyOptions): PtyProcess {
   let ptsPath: string | null = null;
   let ptsResolved = false;
   let preBuf = Buffer.alloc(0);
-  let pendingResize: { cols: number; rows: number } | null = null;
+
+  // ── Serialización de resizes (#26d) ────────────────────────────────────────────────────────────────────
+  // Un resize es ESTADO IDEMPOTENTE, no un evento: lo único que importa es el tamaño FINAL. Por eso la
+  // semántica es COALESCE "gana el último" y no una cola FIFO de todos los frames:
+  //   · a lo más UN `stty` en vuelo por sesión  -> imposible que dos procesos se pisen el TIOCSWINSZ;
+  //   · a lo más UN tamaño pendiente (el más reciente) -> una ráfaga de N frames cuesta 2 `stty`, no N,
+  //     y no bombardea al programa en foreground con N SIGWINCH de tamaños que ya caducaron.
+  // Antes esto era `execFile` fire-and-forget: N procesos concurrentes cuyo orden de ioctl no está
+  // garantizado, así que podía GANAR UNO INTERMEDIO y dejar al shell con un tamaño que ya no era el de la
+  // rejilla (medido: shell 115x24 vs xterm 121x24). La cola es POR SESIÓN (este closure), que es lo que
+  // #29(a) necesita: N terminales simultáneas son N colas independientes sobre su propio pts.
+  const runResize: ResizeRunner = opts.execResize ?? sttyResizeRunner;
+  let desired: { cols: number; rows: number } | null = null;  // último tamaño PEDIDO y no confirmado
+  let applied: { cols: number; rows: number } | null = null;  // último tamaño APLICADO con éxito
+  let draining = false;
 
   let child: ChildProcessWithoutNullStreams;
   try {
@@ -129,10 +190,49 @@ export function spawnPty(opts: PtyOptions): PtyProcess {
     };
   }
 
+  // Vacía la ranura `desired` de a un `stty` a la vez. NUNCA lanza ni deja `draining` colgado: un runner que
+  // reviente o venza no puede tumbar la sesión del PTY (a lo sumo el winsize se queda como estaba).
+  const drainResizes = async (): Promise<void> => {
+    if (draining) return;
+    draining = true;
+    try {
+      while (desired && ptsPath && !exited) {
+        const target = desired;
+        // No-op: el tamaño pedido ya es el vigente -> ni se forkea.
+        if (applied && applied.cols === target.cols && applied.rows === target.rows) { desired = null; break; }
+
+        // Un solo `stty` en vuelo, con reintentos ACOTADOS ante un fallo transitorio (ver arriba).
+        let ok = false;
+        for (let intento = 0; intento < RESIZE_INTENTOS; intento++) {
+          // La ranura queda LIBRE durante el await: si llega un tamaño más nuevo, ese manda y no se
+          // insiste con el caducado (la semántica coalesce "gana el último" no se toca).
+          desired = null;
+          try { ok = await runResize(ptsPath, target.cols, target.rows); }
+          catch { ok = false; } // runner defectuoso: cuenta como fallo, no tumba la sesión
+          if (ok || exited || desired) break;
+          const espera = RESIZE_BACKOFF_MS[intento];
+          if (espera === undefined) break; // se agotaron los intentos
+          await dormir(espera);
+          if (exited || desired) break;
+        }
+
+        if (ok) { applied = target; continue; }
+        if (exited || desired) continue; // murió, o hay algo más nuevo: la vuelta siguiente decide
+        // Agotados los intentos y NADIE pidió otra cosa: el tamaño sigue PENDIENTE, no se tira. `applied`
+        // NO se actualiza (no mentimos sobre lo aplicado) y `desired` vuelve a su ranura, así que el
+        // próximo drenaje —o un pedido idéntico del frontend— lo retoma. Se sale del bucle para no girar
+        // indefinidamente sobre un pts que ya no responde.
+        desired = target;
+        break;
+      }
+    } catch { /* defensa final: la sesión sigue viva pase lo que pase */ }
+    finally { draining = false; }
+  };
+
   const applyResize = (c: number, r: number): void => {
-    if (!ptsPath) { pendingResize = { cols: c, rows: r }; return; }
-    // stty -F <pts> rows R cols C -> TIOCSWINSZ sobre el slave + SIGWINCH al foreground. Best-effort.
-    execFile("stty", ["-F", ptsPath, "rows", String(r), "cols", String(c)], () => { /* ignora errores (pts se cerró) */ });
+    desired = { cols: c, rows: r };
+    if (!ptsPath) return; // aún sin marcador de pts: queda pedido y se drena al resolverlo
+    void drainResizes();
   };
 
   const emit = (buf: Buffer): void => { if (buf.length && dataCb) dataCb(buf); };
@@ -152,7 +252,7 @@ export function spawnPty(opts: PtyOptions): PtyProcess {
           const after = preBuf.subarray(end + 1);
           preBuf = Buffer.alloc(0);
           emit(Buffer.concat([before, after]));
-          if (pendingResize) { const pr = pendingResize; pendingResize = null; applyResize(pr.cols, pr.rows); }
+          if (desired) void drainResizes(); // ya hay pts: se drena lo que se pidió durante el arranque
           return;
         }
         // Marcador aún incompleto (falta el SOH de cierre) -> espera más data.
@@ -194,6 +294,7 @@ export function spawnPty(opts: PtyOptions): PtyProcess {
       try { child.stdout.resume(); child.stderr.resume(); } catch { /* pty cerrado */ }
     },
     kill() {
+      desired = null; // nada que redimensionar en un PTY que se está muriendo
       try { child.kill("SIGHUP"); } catch { /* ya murió */ }
       // Gracia: si no cede en 2s, SIGKILL. unref para no mantener vivo el proceso solo por el timer.
       const t = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* ya murió */ } }, 2000);
