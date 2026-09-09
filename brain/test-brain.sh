@@ -4926,8 +4926,12 @@ mkdir -p "$SRCREPO/.claude/memory" "$SRCREPO/.claude/skills/instanciar-proyecto"
          "$DSTREPO/.claude/memory" "$DSTREPO/.claude/skills/agregar-hook-cerebro" "$DSTREPO/brain" \
          "$DRIVE" "$PROJ"
 ID="deadbeef-0000-0000-0000-000000000001"
-OLD_SLUG="$(printf '%s' "$SRCREPO" | sed 's/[^a-zA-Z0-9]/-/g')"
-NEW_SLUG="$(printf '%s' "$DSTREPO" | sed 's/[^a-zA-Z0-9]/-/g')"
+# El slug sale de la ruta FÍSICA (`pwd -P`), que es la que devuelve el `process.cwd()` del harness:
+# con un $TMPDIR bajo un symlink (macOS /var→/private/var) la ruta cruda daría otro slug. Igual que s2/s4.
+SRCREAL="$(cd "$SRCREPO" && pwd -P)"
+DSTREAL="$(cd "$DSTREPO" && pwd -P)"
+OLD_SLUG="$(printf '%s' "$SRCREAL" | sed 's/[^a-zA-Z0-9]/-/g')"
+NEW_SLUG="$(printf '%s' "$DSTREAL" | sed 's/[^a-zA-Z0-9]/-/g')"
 mkdir -p "$PROJ/$OLD_SLUG" "$PROJ/$NEW_SLUG"
 
 # transcript falso en el slug viejo, con cwd = origen en cada línea
@@ -4968,7 +4972,7 @@ grep -qF 'fs.unlinkSync(found.file)' "$BINRM/session-move.js" \
 RUNMOVE "$ID" --to-cwd "$DSTREPO" >/dev/null 2>&1
 [ -f "$NEWJSONL" ] && ok "g2 re-anclaje: el .jsonl aparece en el slug NUEVO" || bad "g2 re-anclaje: no se creó el jsonl nuevo"
 uniqcwd="$(grep -o '"cwd":"[^"]*"' "$NEWJSONL" | sort -u)"
-[ "$uniqcwd" = "\"cwd\":\"$DSTREPO\"" ] \
+[ "$uniqcwd" = "\"cwd\":\"$DSTREAL\"" ] \
   && ok "g2 re-anclaje: cwd reescrito UNIFORME a destino ($uniqcwd)" \
   || bad "g2 re-anclaje: cwd no uniforme/incorrecto: $uniqcwd"
 
@@ -5173,6 +5177,96 @@ CSO="$SCRIPT_DIR/skills/orquestar-fanout/SKILL.md"
   || bad "s5 mecanismo: falta el paso anti-§9 en cerrar-slice/orquestar-fanout (el hueco del §9 quedaría abierto)"
 
 rm -rf "$SIFIX"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (sm) session-maquinaria: atomicidad, modo, slug normalizado, techo de tamaño, alias =="
+SMFIX="$(mktemp -d "${TMPDIR:-/tmp}/brain-sessmaq.XXXXXX")"
+SMHOME="$SMFIX/home"
+SMPROJ="$SMHOME/.claude/projects"
+mkdir -p "$SMPROJ"
+SMLIB="$BINRM/session-lib.js"
+SMSLUG() { HOME="$SMHOME" node -e 'process.stdout.write(require(process.argv[1]).slugForRepo(process.argv[2]))' "$SMLIB" "$1"; }
+
+# ── sm1: NORMALIZACIÓN del slug — barra final, ruta relativa y prefijo symlink dan UN SOLO slug,
+#         y es el MISMO que derivaría el harness de su process.cwd(). Antes cada forma daba otro slug
+#         y el transcript aterrizaba en un dir fantasma que `--resume` nunca mira.
+SMD="$SMFIX/destino con espacio"; mkdir -p "$SMD"
+sm_a="$(SMSLUG "$SMD")"; sm_b="$(SMSLUG "$SMD/")"; sm_c="$(cd "$SMFIX" && SMSLUG "./destino con espacio")"
+sm_h="$(cd "$SMD" && node -e 'process.stdout.write(process.cwd().replace(/[^a-zA-Z0-9]/g,"-"))')"
+{ [ "$sm_a" = "$sm_b" ] && [ "$sm_a" = "$sm_c" ] && [ "$sm_a" = "$sm_h" ]; } \
+  && ok "sm1 slug: barra final / relativa / física convergen al slug que usa el harness" \
+  || bad "sm1 slug: divergen (sin barra=$sm_a conBarra=$sm_b relativa=$sm_c harness=$sm_h)"
+# una ruta estilo Windows en una máquina POSIX no puede resolverse → debe FALLAR, no inventar un slug
+# (en Windows sí es resoluble, así que ahí la exigencia no aplica)
+smw="$(HOME="$SMHOME" node -e 'try{require(process.argv[1]).slugForRepo("C:\\Users\\u\\x");console.log("no-fallo")}catch(e){console.log("fallo")}' "$SMLIB")"
+{ [ "$smw" = "fallo" ] || [ "$(node -e 'console.log(process.platform)')" = "win32" ]; } \
+  && ok "sm1 slug: una ruta que no se puede resolver falla explícito (sin slug fantasma)" \
+  || bad "sm1 slug: aceptó una ruta irresoluble y fabricó un slug"
+
+# ── sm2: ATOMICIDAD + MODO — el destino se publica con rename (nunca truncado) y hereda el modo del
+#         origen (600), no el del umask (644). Y la última línea TRUNCADA de una sesión viva sobrevive.
+SMS="$SMFIX/src"; SMT="$SMFIX/dst"; mkdir -p "$SMS" "$SMT"
+sms="$(SMSLUG "$SMS")"; smt="$(SMSLUG "$SMT")"; mkdir -p "$SMPROJ/$sms" "$SMPROJ/$smt"
+SMID="ee550000-0000-0000-0000-000000000001"
+{ printf '{"type":"user","cwd":"%s","gitBranch":"vieja"}\n' "$(cd "$SMS" && pwd -P)"
+  printf '{"type":"assistant","uuid":"z","cwd":"%s","message":{"role":"assist' "$(cd "$SMS" && pwd -P)"; } \
+  > "$SMPROJ/$sms/$SMID.jsonl"
+chmod 600 "$SMPROJ/$sms/$SMID.jsonl"
+HOME="$SMHOME" node "$BINRM/session-move.js" "$SMID" --to-cwd "$SMT" >/dev/null 2>&1
+smmode="$(node -e 'console.log((require("fs").statSync(process.argv[1]).mode & 0o777).toString(8))' "$SMPROJ/$smt/$SMID.jsonl" 2>/dev/null || echo none)"
+[ "$smmode" = "600" ] \
+  && ok "sm2 modo: el .jsonl movido conserva el 600 del origen (no el 644 del umask)" \
+  || bad "sm2 modo: quedó en $smmode (el resto del slug está en 600)"
+[ "$(grep -c 'role":"assist$' "$SMPROJ/$smt/$SMID.jsonl" 2>/dev/null || echo 0)" -eq 1 ] \
+  && ok "sm2 tolerancia: la última línea TRUNCADA viajó verbatim (no aborta ni se corrompe)" \
+  || bad "sm2 tolerancia: se perdió/alteró la última línea truncada"
+[ -z "$(ls "$SMPROJ/$smt" | grep '\.part\.' || true)" ] \
+  && ok "sm2 atomicidad: no queda ningún .part (se publica con rename)" \
+  || bad "sm2 atomicidad: quedó un temporal .part en el destino"
+grep -qF 'renameSync(partFile, toFile)' "$BINRM/session-move.js" \
+  && ok "sm2 atomicidad: el destino se publica con rename de un temporal del MISMO dir" \
+  || bad "sm2 atomicidad: session-move dejó de escribir a temporal+rename (regresión de C-4)"
+
+# ── sm3: destino INEXISTENTE — el slug saldría de una ruta que el harness nunca tendrá como cwd, así
+#         que se ABORTA sin tocar el origen (con --allow-missing-cwd se permite a propósito).
+SMID3="ee550000-0000-0000-0000-000000000003"
+printf '{"type":"user","cwd":"x"}\n' > "$SMPROJ/$sms/$SMID3.jsonl"
+smo="$(HOME="$SMHOME" node "$BINRM/session-move.js" "$SMID3" --to-cwd "$SMFIX/no-existe" 2>&1)"
+{ printf '%s' "$smo" | grep -q '"ok":false' && [ -f "$SMPROJ/$sms/$SMID3.jsonl" ]; } \
+  && ok "sm3 slug fantasma: aborta si el destino no existe y deja el origen intacto" \
+  || bad "sm3 slug fantasma: no abortó ante un destino inexistente"
+
+# ── sm4: TECHO de ~512 MiB — el camino de TEXTO explica el motivo en vez de reventar en V8, y el
+#         camino de streaming sí puede con un archivo por encima del techo (transcript real de 457 MB).
+[ "$(node -e 'console.log(require(process.argv[1]).MAX_TEXT_BYTES===require("buffer").constants.MAX_STRING_LENGTH)' "$SMLIB")" = "true" ] \
+  && ok "sm4 techo: MAX_TEXT_BYTES es la constante real de V8 (no un número a mano)" \
+  || bad "sm4 techo: MAX_TEXT_BYTES no coincide con buffer.constants.MAX_STRING_LENGTH"
+SMBIG="$SMFIX/big.jsonl"
+node -e 'const fs=require("fs");const fd=fs.openSync(process.argv[1],"w");fs.ftruncateSync(fd,600*1024*1024);fs.closeSync(fd);' "$SMBIG"
+[ "$(node -e 'try{require(process.argv[1]).readTranscriptText(process.argv[2]);console.log("no")}catch(e){console.log(/techo de un string/.test(e.message)?"si":"no")}' "$SMLIB" "$SMBIG")" = "si" ] \
+  && ok "sm4 techo: readTranscriptText falla temprano DICIENDO que el archivo no cabe en un string" \
+  || bad "sm4 techo: un transcript sobre el techo no produce un mensaje explicativo"
+[ "$(node -e 'console.log(require(process.argv[1]).scanTranscriptFile(process.argv[2]).bytes)' "$SMLIB" "$SMBIG")" = "$((600*1024*1024))" ] \
+  && ok "sm4 techo: el barrido en streaming SÍ puede con un archivo sobre el techo" \
+  || bad "sm4 techo: el barrido en streaming también topa con el techo"
+rm -f "$SMBIG"
+
+# ── sm5: writeAlias — un JSON de alias ILEGIBLE no se degrada a {} (eso borraba TODOS los alias):
+#         se respalda, se avisa, y la escritura es atómica.
+mkdir -p "$SMHOME/.claude"
+printf '{"a":"uno","b":"dos"}\n' > "$SMHOME/.claude/sesiones-alias.json"
+HOME="$SMHOME" node -e 'require(process.argv[1]).writeAlias("c","tres")' "$SMLIB" 2>/dev/null
+[ "$(HOME="$SMHOME" node -e 'console.log(Object.keys(require(process.argv[1]).sessionAliases()).sort().join(","))' "$SMLIB")" = "a,b,c" ] \
+  && ok "sm5 alias: el merge normal conserva los alias previos" || bad "sm5 alias: el merge perdió alias"
+printf '{"a":"uno","b":"do' > "$SMHOME/.claude/sesiones-alias.json"
+HOME="$SMHOME" node -e 'require(process.argv[1]).writeAlias("zzz","nuevo")' "$SMLIB" 2>/dev/null
+{ [ -n "$(ls "$SMHOME/.claude"/sesiones-alias.json.ilegible.* 2>/dev/null)" ] \
+    && [ "$(HOME="$SMHOME" node -e 'console.log(require(process.argv[1]).sessionAliases().zzz||"")' "$SMLIB")" = "nuevo" ]; } \
+  && ok "sm5 alias: un JSON ilegible se RESPALDA antes de pisarlo (no se pierde en silencio)" \
+  || bad "sm5 alias: un JSON ilegible se pisó sin respaldo"
+
+rm -rf "$SMFIX"
 
 # ── #83 anti-drift: TRATO personal del usuario → archivo GLOBAL como-trabajar-con-<user> ──
 # La regla de ruteo del conocimiento de TRATO/preferencia personal debe vivir como PASO explícito en
