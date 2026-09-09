@@ -14,6 +14,11 @@
 #   AXON_TERM_BROKER_BIND    (default 127.0.0.1 — cualquier otra cosa es exponer RCE a la red)
 #   AXON_TERM_BROKER_HOME    (default $HOME — cwd inicial de las sesiones)
 #   SHELL                    (default: el login shell REAL del usuario, ver abajo)
+# Topes (docs/term-broker.md § Topes) — el broker los IMPRIME al arrancar, no hay que adivinarlos:
+#   AXON_TERM_BROKER_MAX_SESSIONS  (default 32 — sesiones de shell /run concurrentes)
+#   AXON_TERM_BROKER_MAX_PTYS      (default 32 — PTYs /pty concurrentes)
+#   AXON_TERM_BROKER_WS_HIGH_WATER (default 1 MiB — buffer al que se PAUSA al productor)
+#   AXON_TERM_BROKER_WS_MAX_BUFFER (default 8 MiB — válvula dura: cierra ESA conexión, no el broker)
 # Los nombres `AXON_*` son el CONTRATO con el cliente y además lo que `buildSessionEnv()` barre del
 # entorno de cada shell; ver src/term-broker/PROCEDENCIA.md antes de "arreglar" el prefijo.
 #

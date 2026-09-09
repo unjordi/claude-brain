@@ -250,6 +250,12 @@ AXON_TERM_BROKER_TOKEN=$(gen_token)
 # AXON_TERM_BROKER_PORT=$TERM_BROKER_PORT   # listener TCP, para clientes NATIVOS del host
 # AXON_TERM_BROKER_BIND=127.0.0.1           # ⚠️ cualquier cosa que no sea loopback expone RCE a la red
 # AXON_TERM_BROKER_HOME=$HOME               # cwd inicial de las sesiones
+#
+# TOPES (ver docs/term-broker.md § Topes). Todos traen default; descoméntalos solo para cambiarlos.
+# AXON_TERM_BROKER_MAX_SESSIONS=32          # sesiones de shell (/run) concurrentes; al pasarlo, SESSION_LIMIT
+# AXON_TERM_BROKER_MAX_PTYS=32              # PTYs (/pty) concurrentes; al pasarlo, el upgrade recibe 503
+# AXON_TERM_BROKER_WS_HIGH_WATER=1048576    # 1 MiB: buffer pendiente al que se PAUSA al productor
+# AXON_TERM_BROKER_WS_MAX_BUFFER=8388608    # 8 MiB: válvula dura, cierra ESA conexión (nunca el broker)
 EOF
     )
     chmod 600 "$TERM_BROKER_ENV"

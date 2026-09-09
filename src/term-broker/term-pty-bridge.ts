@@ -34,7 +34,17 @@ function parseControl(text: string): { type: "resize"; cols: number; rows: numbe
 export function servePtyOverWs(conn: WsConn, opts: PtyOptions): void {
   const pty = spawnPty(opts);
 
-  pty.onData((chunk) => conn.sendBinary(chunk));
+  // BACKPRESSURE (ver el bloque largo en ws.ts). Sin esto, un cliente que lee más lento que el PTY
+  // hacía crecer el buffer del socket sin techo: el PTY produce a velocidad de kernel y lo que no
+  // drena se queda en el heap del broker. La política es PAUSAR la fuente, nunca descartar bytes —
+  // un hueco en el stream corrompería la secuencia ANSI y con ella la pantalla del usuario.
+  let paused = false;
+  pty.onData((chunk) => {
+    conn.sendBinary(chunk);
+    if (!paused && conn.backpressured) { paused = true; pty.pause(); }
+  });
+  conn.onDrain(() => { if (paused) { paused = false; pty.resume(); } });
+
   pty.onExit((code, error) => {
     try {
       if (error) conn.sendText(JSON.stringify({ type: "error", error }));
@@ -61,8 +71,19 @@ export function servePtyOverWs(conn: WsConn, opts: PtyOptions): void {
  * cualquiera de los dos cierra el otro.
  */
 export function relayWsToWs(a: WsConn, b: WsConn): void {
-  a.onMessage((m) => b.send(m.data, m.binary));
-  b.onMessage((m) => a.send(m.data, m.binary));
+  // MISMO backpressure que el lado PTY, con la fuente que aquí corresponde: si el peer al que
+  // escribimos no drena, dejamos de LEER del otro socket (`from.pause()`). El productor de verdad —el
+  // PTY al otro extremo del hop— se frena solo cuando su propio socket deja de vaciarse. Nada se
+  // descarta: los frames se quedan en el socket de origen, no en el heap del broker.
+  const wire = (from: WsConn, to: WsConn): void => {
+    from.onMessage((m) => {
+      to.send(m.data, m.binary);
+      if (to.backpressured && !from.isPaused) from.pause();
+    });
+    to.onDrain(() => { if (from.isPaused) from.resume(); });
+  };
+  wire(a, b);
+  wire(b, a);
   a.onClose(() => b.close(1000, "peer closed"));
   b.onClose(() => a.close(1000, "peer closed"));
   a.onError(() => b.close(1011, "peer error"));

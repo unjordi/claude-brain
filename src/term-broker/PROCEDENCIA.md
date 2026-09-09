@@ -1,16 +1,18 @@
-# Procedencia de `src/term-broker/` — copia VENDORIZADA desde axon
+# Procedencia de `src/term-broker/` — copia vendorizada desde axon, HOY CON UN PARCHE PROPIO
 
-Los cinco `.ts` de esta carpeta son una **copia byte-a-byte** de módulos del repo `axon`. No se
-editan aquí: si hay que cambiarlos, se cambian en axon y se re-vendorizan (abajo está el comando).
+Los cinco `.ts` de esta carpeta salieron como **copia byte-a-byte** de módulos del repo `axon`, y la
+regla sigue siendo *no se editan aquí*: lo normal es cambiarlos en axon y re-vendorizar (abajo está
+el comando). **Hoy hay UNA excepción viva y pendiente de portar** — léela antes de re-vendorizar
+nada: [Divergencia vs axon](#divergencia-vs-axon--pendiente-de-portar).
 
-| archivo | origen en axon | líneas |
-|---|---|---|
-| `term-host-broker.ts` | `src/server/term-host-broker.ts` | 394 |
-| `term-session.ts` | `src/server/term-session.ts` | 263 |
-| `term-pty-bridge.ts` | `src/server/term-pty-bridge.ts` | 70 |
-| `ws.ts` | `src/server/ws.ts` | 306 |
-| `pty-session.ts` | `src/server/pty-session.ts` | 188 |
-| | **total** | **1221** |
+| archivo | origen en axon | líneas (al vendorizar) | líneas (hoy) |
+|---|---|---|---|
+| `term-host-broker.ts` | `src/server/term-host-broker.ts` | 394 | 475 |
+| `term-session.ts` | `src/server/term-session.ts` | 263 | 302 |
+| `term-pty-bridge.ts` | `src/server/term-pty-bridge.ts` | 70 | 91 |
+| `ws.ts` | `src/server/ws.ts` | 306 | 400 |
+| `pty-session.ts` | `src/server/pty-session.ts` | 188 | 206 |
+| | **total** | **1221** | **1474** |
 
 **Commit de origen:** `341fb53` (`origin/develop` de axon, 2026-09-07). Re-vendorizado desde
 `cf840e6` para traer el **socket unix** (`fix/term-broker-alcanzable`, #75): un cliente en
@@ -24,6 +26,47 @@ renglón seguido escupía un stack trace.
 
 Los `sha256` de la copia viven en [`SHA256SUMS`](SHA256SUMS), al lado. No es decoración: es lo que
 se **verifica**.
+
+## Divergencia vs axon — PENDIENTE DE PORTAR
+
+Estos módulos ya **no** son byte-a-byte iguales a axon `341fb53`. Se les añadió aquí, en cortex, los
+**topes** del broker (rama `feat/broker-topes`): techo de sesiones de shell concurrentes, techo de
+PTYs concurrentes, y **backpressure** en el relay del WebSocket. El qué y el porqué están en
+[`docs/term-broker.md` § Topes](../../docs/term-broker.md); el detalle, en los comentarios de cada
+módulo. Los cinco archivos tocados:
+
+| archivo | qué se le agregó |
+|---|---|
+| `term-session.ts` | `maxSessions` + rechazo `SESSION_LIMIT` + `size`/`limit` |
+| `term-host-broker.ts` | techo de PTYs (`503` en el handshake), cableado de las env `MAX_*`, y `uncaughtException`/`unhandledRejection` en `main()` |
+| `ws.ts` | `bufferedBytes`/`backpressured`/`onDrain`/`pause`/`resume` + válvula dura de buffer |
+| `term-pty-bridge.ts` | pausar el PTY (y el socket peer, en el relay WS↔WS) cuando el destino no drena |
+| `pty-session.ts` | `pause()`/`resume()` sobre la salida del PTY |
+
+**Lo que esto implica, dicho sin adornos:** el `diff` contra axon ya no da vacío, y una
+re-vendorización *ingenua* (copiar los cinco desde axon encima de éstos) **borraría los topes en
+silencio** — el broker volvería a no tener ninguno y nadie se enteraría hasta la siguiente fuga. Las
+dos salidas, en orden de preferencia:
+
+1. **Portar el parche a axon** (`src/server/{term-session,term-host-broker,ws,term-pty-bridge,pty-session}.ts`)
+   y re-vendorizar desde ese commit. Es la buena: axon corre EL MISMO código en su modo contenedor
+   (ver el punto 2 de "Por qué COPIA…", abajo), así que hoy el broker de cortex tiene topes y el
+   shell contenerizado de axon **no**.
+2. Si se re-vendoriza antes de portar: **re-aplicar este parche a mano** sobre la copia nueva, y
+   correr `probe-topes.ts` (abajo) para comprobar que sigue vivo. Nunca dar por buena una copia
+   nueva sin ese probe en verde.
+
+El chequeo (1) de la sección siguiente (`sha256sum -c SHA256SUMS`) **sigue sirviendo y sigue verde**:
+sus hashes se regeneraron con esta copia, así que protege de lo que siempre protegió — un edit
+accidental *aquí* que nadie declaró. Lo que ya no puede afirmar es "idéntico a axon"; eso lo dice el
+chequeo (2), que a partir de hoy va a reportar DRIFT hasta que el parche esté portado. **Es correcto
+que lo reporte** — el drift existe, y está documentado en esta sección.
+
+Los topes tienen su propia prueba funcional, que no depende de nada instalado:
+
+```bash
+node --disable-warning=ExperimentalWarning --experimental-strip-types src/term-broker/probe-topes.ts
+```
 
 ## El anti-drift, que ahora SÍ se ejecuta
 
