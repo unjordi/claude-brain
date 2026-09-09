@@ -210,6 +210,35 @@ broker **caído** → `host-down`, **no** una degradación silenciosa: el shell 
 máquina (root, `/workspace`, sin tu PATH ni tus llaves) y sustituirlo sin decirlo convierte un fallo
 ruidoso en un `rm` o un `git commit` corrido donde nadie quería.
 
+## Verlo y operarlo por GUI — la pestaña **Broker** del widget
+
+Todo lo de arriba se puede ver y hacer desde el widget de KDE, en su pestaña **🔌 Broker**, sin
+abrir una terminal:
+
+| qué | dónde en la pestaña |
+|---|---|
+| si el servicio está arriba, si arranca con la sesión, desde cuándo, pid | el recuadro de estado |
+| RAM actual y pico del cgroup | la línea de detalle (la unidad lleva `MemoryAccounting=yes` justo para esto) |
+| los DOS transportes: `127.0.0.1:<puerto>` y el socket unix con sus permisos y dueño | el bloque *Endpoint* |
+| si el token está puesto, y de cuántos caracteres | el bloque *Endpoint* |
+| las comprobaciones de la migración | el botón **Verificar** — corre `migrar-term-broker.sh --verificar` y muestra su salida tal cual |
+| arrancar · reiniciar · parar | el bloque *Servicio* |
+
+Dos cosas que la pestaña **no** hace, y no es un olvido:
+
+- **Nunca muestra el valor del token**, solo si está y cuánto mide. Su helper
+  (`broker-scan.sh`) no lo imprime ni lo pasa por la línea de comandos, donde un `ps` lo
+  expondría a cualquier otro usuario de la máquina.
+- **No reimplementa la verificación ni la migración.** Llama al migrador INSTALADO
+  (`~/.local/bin/migrar-term-broker.sh`), que es el único que conoce el token del broker que
+  está corriendo y el que sabe decir POR QUÉ falló cada comprobación.
+
+**Parar o reiniciar cierra las terminales abiertas** — sus shells son procesos hijos del broker
+(`KillMode=control-group`, ver arriba). La pestaña lo pide confirmado y lo dice con esas palabras.
+
+Si el widget avisa en rojo que `axon-term-broker.service` está **activa**, hay dos brokers
+peleándose el mismo endpoint: eso es lo que resuelve la sección siguiente.
+
 ## Migrar desde la unidad vieja (`axon-term-broker.service`)
 
 Hay máquinas donde una sesión instaló **a mano** una unidad `axon-term-broker.service` apuntando a

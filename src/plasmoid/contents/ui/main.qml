@@ -65,7 +65,10 @@ PlasmoidItem {
     property int currentTab: 0
     // Al abrir/volver a la pestaña Cerebro (idx 5) re-lee el estado real de ~/.claude (doc = realidad)
     // y chequea si hay versión nueva del widget (throttle 15 min dentro de checkUpdate).
-    onCurrentTabChanged: if (currentTab === 5) { scanBrain(); checkUpdate() }
+    onCurrentTabChanged: {
+        if (currentTab === 5) { scanBrain(); checkUpdate() }
+        if (currentTab === 6) scanBroker()
+    }
 
     readonly property string cacheDir: {
         const raw = "" + StandardPaths.writableLocation(StandardPaths.GenericCacheLocation)
@@ -248,6 +251,53 @@ PlasmoidItem {
                 root.brainHeal = root.brainIncomplete ? "error" : "ok"
             }
             disconnectSource(source)
+        }
+    }
+
+    // Estado real del broker de terminal (broker-scan.sh scan → JSON). Mismo engine "executable".
+    P5Support.DataSource {
+        id: brokerSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            if (data["exit code"] === 0 && data.stdout) {
+                try {
+                    root.brokerState = JSON.parse(data.stdout)
+                    root.brokerScannedAt = Qt.formatTime(new Date(), "hh:mm")
+                } catch (e) { /* deja el estado previo si el parse falla */ }
+            }
+            disconnectSource(source)
+        }
+    }
+
+    // Las 8 comprobaciones del migrador. El VEREDICTO es su exit code; el TEXTO es lo que se muestra.
+    P5Support.DataSource {
+        id: brokerVerifySource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            disconnectSource(source)
+            root.brokerVerifyOut = ("" + (data.stdout || "")) + ("" + (data.stderr || ""))
+            root.brokerVerify = data["exit code"] === 0 ? "ok" : "error"
+        }
+    }
+
+    // arrancar/parar/reiniciar. HONESTO como el heal del cerebro: el exit 0 de systemctl dice que
+    // ACEPTÓ la orden, no que el servicio quedó arriba — así que se RE-ESCANEA y el estado que se
+    // pinta sale del escaneo, no de haber pedido la acción.
+    P5Support.DataSource {
+        id: brokerAccionSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            disconnectSource(source)
+            root.brokerAccion = ""
+            if (data["exit code"] !== 0) {
+                root.brokerAccionMsg = "✗ " + ("" + (data.stderr || data.stdout || "systemctl falló")).trim()
+            } else {
+                root.brokerAccionMsg = ""
+            }
+            root.scanBroker()
         }
     }
 
@@ -596,6 +646,14 @@ PlasmoidItem {
         }
         flush()
         return tokens.length ? fam + " " + tokens.join(" ") : fam
+    }
+    // Bytes a una unidad legible. La memoria del broker viene de systemd en bytes crudos.
+    function fmtBytes(n) {
+        if (n === null || n === undefined || !isFinite(n)) return "—"
+        if (n < 1024) return n + " B"
+        var u = ["KiB", "MiB", "GiB", "TiB"], v = n / 1024, i = 0
+        while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
+        return (v >= 10 ? Math.round(v) : Math.round(v * 10) / 10) + " " + u[i]
     }
     function fmtTok(n) {
         if (n === undefined || n === null) return "—"
@@ -1070,6 +1128,95 @@ PlasmoidItem {
     readonly property var brainGlobalHooks: ["git-branch-guard","merge-squash-guard","confirmar-merge-develop","recordar-dashboard","secret-scan","rama-vieja","proteger-arbol","proteger-fuente-cerebro","limite-gasto","delegacion-gate","delegacion-registrar","delegacion-reporte","recordar-orquestar","rehidratar-hilo","aviso-contexto","aviso-drift-cerebro","hud-stale","exportar-sesion-master","barrer-ramas","entorno-maquina-guard","no-bypass-deploy"]
     readonly property var brainRepoHooks:   ["sesion-inicio","dod-verificar","recordar-cosechar","recordar-unificar-cerebro"]
 
+    // ---------- Pestaña BROKER (idx 6) ----------
+    // El broker de terminal es un servicio de systemd --user que hasta hoy solo se veía y se tocaba
+    // por terminal (`systemctl --user status`, `migrar-term-broker.sh --verificar`). Esta pestaña lo
+    // trae a la GUI, con la misma división de labor que la pestaña Cerebro: un helper bash que emite
+    // JSON (broker-scan.sh) leído por el DataSource "executable", y las ACCIONES delegadas a la
+    // herramienta OFICIAL del proyecto — nunca reimplementando sus pasos aquí.
+    property var brokerState: null
+    property string brokerScannedAt: ""
+    // Salida del `--verificar` del migrador: sus 8 checks, tal como los imprime. Se muestra el texto
+    // REAL y no un ✓/✗ propio: el valor del migrador es que dice POR QUÉ falló cada uno.
+    property string brokerVerifyOut: ""
+    property string brokerVerify: ""       // "" | "running" | "ok" | "error"
+    property string brokerAccion: ""       // "" | "running"
+    property string brokerAccionMsg: ""
+
+    readonly property bool brokerCargado: brokerState !== null
+    readonly property bool brokerUnidadEnDisco: (brokerState && brokerState.unidad) ? brokerState.unidad.en_disco === true : false
+    readonly property string brokerEstadoTexto: {
+        if (!brokerState || !brokerState.unidad) return "sin dato"
+        var u = brokerState.unidad
+        if (!u.en_disco) return "no instalado"
+        return u.estado ? u.estado : (u.activa ? "activo" : "inactivo")
+    }
+    readonly property string brokerArranqueTexto: {
+        if (!brokerState || !brokerState.unidad) return ""
+        return brokerState.unidad.habilitada ? "· arranca con la sesión" : "· NO arranca con la sesión"
+    }
+    readonly property string brokerDetalle: {
+        if (!brokerState || !brokerState.unidad) return ""
+        var u = brokerState.unidad, partes = []
+        if (u.desde) partes.push("desde " + u.desde)
+        if (u.pid !== null && u.pid !== undefined) partes.push("pid " + u.pid)
+        // La unidad lleva MemoryAccounting=yes justo PARA poder verlo; aquí se ve.
+        if (u.memoria_bytes !== null && u.memoria_bytes !== undefined)
+            partes.push("RAM " + fmtBytes(u.memoria_bytes)
+                        + (u.memoria_pico_bytes ? " (pico " + fmtBytes(u.memoria_pico_bytes) + ")" : ""))
+        if (u.reinicios !== null && u.reinicios !== undefined && u.reinicios > 0)
+            partes.push(u.reinicios + " reinicio(s)")
+        return partes.join(" · ")
+    }
+    readonly property string brokerTcp: (brokerState && brokerState.endpoint) ? ("127.0.0.1:" + brokerState.endpoint.puerto) : ""
+    readonly property string brokerSocketRuta: (brokerState && brokerState.endpoint && brokerState.endpoint.socket) ? brokerState.endpoint.socket : "—"
+    readonly property bool brokerSocketOk: (brokerState && brokerState.endpoint)
+        ? (brokerState.endpoint.socket_existe === true && brokerState.endpoint.socket_permisos === "600") : false
+    readonly property string brokerSocketNota: {
+        if (!brokerState || !brokerState.endpoint) return ""
+        var e = brokerState.endpoint
+        if (!e.socket_existe) return "no existe"
+        // 600 es el permiso correcto: cualquier otro deja el shell al alcance de otro uid.
+        return e.socket_permisos === "600" ? "0600 · " + e.socket_dueno
+                                           : "permisos " + e.socket_permisos + " (¡esperaba 600!)"
+    }
+    readonly property bool brokerTokenPresente: (brokerState && brokerState.token) ? brokerState.token.presente === true : false
+    // Nunca el valor del token: solo presencia y longitud.
+    readonly property string brokerTokenTexto: brokerTokenPresente
+        ? ("presente (" + brokerState.token.chars + " caracteres)") : "AUSENTE"
+    readonly property bool brokerActivo: brokerState && brokerState.unidad ? brokerState.unidad.activa === true : false
+    readonly property bool brokerLegacyActiva: brokerState && brokerState.legacy ? brokerState.legacy.activa === true : false
+    // `null` = no se pudo medir; se pinta distinto de un false ("no escucha"). Ver broker-scan.sh.
+    readonly property var brokerEscucha: brokerState && brokerState.endpoint ? brokerState.endpoint.escuchando_tcp : null
+
+    readonly property string brokerScript: {
+        var u = "" + Qt.resolvedUrl("../broker-scan.sh")
+        if (u.startsWith("file://")) u = u.substring("file://".length)
+        return u
+    }
+    function scanBroker() { brokerSource.connectSource("bash " + shq(root.brokerScript) + " scan") }
+
+    // Las 8 comprobaciones REALES las corre el migrador instalado (`~/.local/bin/…`), no un curl
+    // escrito aquí: es la herramienta oficial y la única que conoce el token del broker que corre.
+    function verificarBroker() {
+        var m = (root.brokerState && root.brokerState.migrador) ? root.brokerState.migrador.ruta : ""
+        if (!m) {
+            root.brokerVerify = "error"
+            root.brokerVerifyOut = "No encuentro el migrador instalado. Corre ./install.sh --con-term-broker desde el clon de cortex."
+            return
+        }
+        root.brokerVerify = "running"; root.brokerVerifyOut = ""
+        // 2>&1: los ❌ del migrador salen por stderr y son justo lo que hay que mostrar.
+        brokerVerifySource.connectSource("bash " + shq(m) + " --verificar 2>&1")
+    }
+
+    // arrancar | parar | reiniciar. `parar` MATA las terminales abiertas (KillMode=control-group:
+    // las sesiones son hijas del broker), así que la confirmación de la GUI no es ceremonia.
+    function accionBroker(cual) {
+        root.brokerAccion = "running"; root.brokerAccionMsg = ""
+        brokerAccionSource.connectSource("systemctl --user " + cual + " cortex-term-broker.service 2>&1")
+    }
+
     // Ruta del helper bash, resuelta relativa a este main.qml (…/contents/ui/ → …/contents/brain-scan.sh).
     readonly property string brainScript: {
         var u = "" + Qt.resolvedUrl("../brain-scan.sh")
@@ -1481,6 +1628,27 @@ PlasmoidItem {
         }
 
         // (B) Aviso de error al mover. Lo abre el Connections de abajo cuando root.sessionMoveError cambia.
+        // Parar/reiniciar el broker MATA las terminales abiertas del usuario (las sesiones son
+        // procesos hijos: KillMode=control-group). Eso NO es una acción que se dispare con un clic
+        // suelto, así que pasa por una confirmación que dice la consecuencia con nombre y apellido.
+        Kirigami.PromptDialog {
+            id: confirmarBroker
+            property string accion: ""
+            function pedir(cual) { accion = cual; open() }
+            title: accion === "stop" ? "¿Parar el broker?" : "¿Reiniciar el broker?"
+            subtitle: accion === "stop"
+                ? "Se cerrarán TODAS las terminales abiertas: sus shells son procesos hijos del broker. El servicio no volverá solo hasta que lo arranques (o hasta la próxima sesión, si está habilitado)."
+                : "Se cerrarán TODAS las terminales abiertas: sus shells son procesos hijos del broker. El servicio vuelve a levantar enseguida, pero las sesiones NO se recuperan."
+            standardButtons: QQC2.Dialog.Cancel
+            customFooterActions: [
+                Kirigami.Action {
+                    text: confirmarBroker.accion === "stop" ? "Parar" : "Reiniciar"
+                    icon.name: confirmarBroker.accion === "stop" ? "media-playback-stop" : "view-refresh"
+                    onTriggered: { root.accionBroker(confirmarBroker.accion); confirmarBroker.close() }
+                }
+            ]
+        }
+
         Kirigami.PromptDialog {
             id: moveErrorDialog
             title: "No se pudo mover la sesión"
@@ -1520,6 +1688,8 @@ PlasmoidItem {
             TabRailButton { idx: 4; emoji: "💬";                label: "Chats"; visible: root.chats && root.chats.length > 0 }
             // Sin ícono "cerebro" nativo bueno en Breeze → emoji 🧠 como glifo del riel.
             TabRailButton { idx: 5; emoji: "🧠";                label: "Cerebro" }
+            // Broker de terminal: servicio de systemd --user. Sin ícono nativo bueno → emoji 🔌.
+            TabRailButton { idx: 6; emoji: "🔌";                label: "Broker" }
             Item { Layout.fillHeight: true }
             // Pie del riel — MISMO acomodo que el macOS CANÓNICO (rail.swift, HStack en 132px): primero los
             // CONTEXTUALES (⬆ update · 🩹 cura, solo cuando aplican), luego los FIJOS (↻ refresh · ⏸/⏵ pausa).
@@ -2233,10 +2403,241 @@ PlasmoidItem {
                     }
                 }
             }
+
+            // ===== Tab 6: Broker =====
+            // El broker de terminal (`cortex-term-broker.service`) es el shell de ESTA máquina: un
+            // servicio de systemd --user que expone ejecución por un socket unix y por 127.0.0.1:8799,
+            // con token. Hasta hoy solo se veía por terminal. Aquí se ve y se opera, con dos reglas:
+            //   · el TOKEN nunca se muestra — solo si está presente y su longitud (lo garantiza
+            //     broker-scan.sh, que jamás lo imprime; ver su regla 1);
+            //   · las acciones que MUTAN van por la herramienta OFICIAL (`migrar-term-broker.sh`) o por
+            //     `systemctl`, nunca reimplementando sus pasos aquí.
+            PC3.ScrollView {
+                id: brokerScroll
+                contentWidth: availableWidth
+                clip: true
+                Component.onCompleted: root.scanBroker()
+
+                ColumnLayout {
+                    width: brokerScroll.availableWidth
+                    spacing: Kirigami.Units.gridUnit
+
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                        Kirigami.Heading { level: 3; text: "Broker de terminal" }
+                        Item { Layout.fillWidth: true }
+                        PC3.Label {
+                            visible: root.brokerScannedAt !== ""
+                            text: "leído " + root.brokerScannedAt; opacity: 0.45
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                        }
+                        PC3.ToolButton {
+                            icon.name: "view-refresh"; flat: true
+                            onClicked: root.scanBroker()
+                            PC3.ToolTip.text: "Re-leer el estado del servicio"; PC3.ToolTip.visible: hovered; PC3.ToolTip.delay: 500
+                        }
+                    }
+
+                    // Sin dato todavía: se DICE, en vez de pintar un estado inventado.
+                    PC3.Label {
+                        visible: !root.brokerCargado
+                        Layout.fillWidth: true; wrapMode: Text.WordWrap; opacity: 0.6
+                        text: "Leyendo el estado del servicio…"
+                    }
+
+                    // ── Recuadro de estado ──
+                    Rectangle {
+                        visible: root.brokerCargado
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: estadoCol.implicitHeight + Kirigami.Units.largeSpacing * 2
+                        radius: Kirigami.Units.smallSpacing
+                        color: root.brokerActivo ? Qt.rgba(0.37, 0.73, 0.56, 0.13) : Qt.rgba(0.86, 0.21, 0.27, 0.13)
+                        ColumnLayout {
+                            id: estadoCol
+                            anchors.fill: parent; anchors.margins: Kirigami.Units.largeSpacing
+                            spacing: Kirigami.Units.smallSpacing
+                            RowLayout {
+                                Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                                PC3.Label {
+                                    text: root.brokerActivo ? "●" : "○"
+                                    color: root.brokerActivo ? "#5fb98e" : "#dc3545"
+                                    font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.3
+                                }
+                                PC3.Label {
+                                    font.bold: true
+                                    text: root.brokerEstadoTexto
+                                }
+                                PC3.Label {
+                                    opacity: 0.6; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                    text: root.brokerArranqueTexto
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
+                            PC3.Label {
+                                visible: text !== ""
+                                opacity: 0.7; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                text: root.brokerDetalle
+                            }
+                            // La unidad legacy sigue en disco tras la migración; si REVIVE, hay dos
+                            // brokers peleándose el endpoint y eso hay que verlo, no deducirlo.
+                            PC3.Label {
+                                visible: root.brokerLegacyActiva
+                                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                color: "#dc3545"; font.bold: true
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                text: "⚠ axon-term-broker.service (la unidad anterior) está ACTIVA: dos brokers se pelean el mismo endpoint."
+                            }
+                        }
+                    }
+
+                    // ── Endpoint ──
+                    ColumnLayout {
+                        visible: root.brokerCargado
+                        Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                        PC3.Label { text: "Endpoint"; opacity: 0.6; font.pointSize: Kirigami.Theme.smallFont.pointSize }
+                        BrokerFila {
+                            etiqueta: "TCP"
+                            valor: root.brokerTcp
+                            // TRES estados, no dos: null es "no se pudo medir", que NO es "no escucha".
+                            nota: root.brokerEscucha === true ? "escuchando"
+                                : root.brokerEscucha === false ? "no escucha" : "sin medir"
+                            notaColor: root.brokerEscucha === true ? "#5fb98e"
+                                     : root.brokerEscucha === false ? "#dc3545" : Kirigami.Theme.textColor
+                        }
+                        BrokerFila {
+                            etiqueta: "Socket"
+                            valor: root.brokerSocketRuta
+                            nota: root.brokerSocketNota
+                            notaColor: root.brokerSocketOk ? "#5fb98e" : "#dc3545"
+                        }
+                        BrokerFila {
+                            etiqueta: "Token"
+                            // Nunca el valor: solo presencia y longitud. Es la regla que no se negocia.
+                            valor: root.brokerTokenTexto
+                            nota: root.brokerTokenPresente ? "" : "el broker no arranca sin él"
+                            notaColor: "#dc3545"
+                        }
+                    }
+
+                    // ── Verificación: los 8 checks del migrador ──
+                    ColumnLayout {
+                        Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                            PC3.Button {
+                                text: root.brokerVerify === "running" ? "Verificando…" : "Verificar"
+                                enabled: root.brokerVerify !== "running"
+                                icon.name: "checkmark"
+                                onClicked: root.verificarBroker()
+                            }
+                            PC3.Label {
+                                visible: root.brokerVerify === "ok" || root.brokerVerify === "error"
+                                text: root.brokerVerify === "ok" ? "✅ las 8 comprobaciones pasan" : "❌ falló alguna"
+                                color: root.brokerVerify === "ok" ? "#5fb98e" : "#dc3545"
+                                font.bold: true; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            }
+                            Item { Layout.fillWidth: true }
+                        }
+                        PC3.Label {
+                            Layout.fillWidth: true; opacity: 0.5; wrapMode: Text.WordWrap
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            text: "Corre `migrar-term-broker.sh --verificar`: /health por el socket y por TCP con el token real, un 401 sin token, un /run que de verdad ejecuta, y los permisos del socket."
+                        }
+                        // El texto TAL CUAL del migrador: su valor es que dice POR QUÉ falló cada check.
+                        Rectangle {
+                            visible: root.brokerVerifyOut !== ""
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: Math.min(salidaVerify.implicitHeight + Kirigami.Units.largeSpacing, Kirigami.Units.gridUnit * 16)
+                            radius: Kirigami.Units.smallSpacing
+                            color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.06)
+                            PC3.ScrollView {
+                                anchors.fill: parent; anchors.margins: Kirigami.Units.smallSpacing
+                                clip: true
+                                PC3.Label {
+                                    id: salidaVerify
+                                    text: root.brokerVerifyOut
+                                    font.family: "monospace"
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                    wrapMode: Text.NoWrap
+                                    textFormat: Text.PlainText   // salida de un proceso: JAMÁS interpretada como markup
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Acciones ──
+                    ColumnLayout {
+                        Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                        PC3.Label { text: "Servicio"; opacity: 0.6; font.pointSize: Kirigami.Theme.smallFont.pointSize }
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                            PC3.Button {
+                                text: "Arrancar"; icon.name: "media-playback-start"
+                                enabled: root.brokerAccion !== "running" && !root.brokerActivo
+                                onClicked: root.accionBroker("start")
+                            }
+                            PC3.Button {
+                                text: "Reiniciar"; icon.name: "view-refresh"
+                                enabled: root.brokerAccion !== "running"
+                                onClicked: confirmarBroker.pedir("restart")
+                            }
+                            PC3.Button {
+                                text: "Parar"; icon.name: "media-playback-stop"
+                                enabled: root.brokerAccion !== "running" && root.brokerActivo
+                                onClicked: confirmarBroker.pedir("stop")
+                            }
+                            Item { Layout.fillWidth: true }
+                            PC3.Label {
+                                visible: root.brokerAccion === "running"
+                                text: "…"; opacity: 0.6
+                            }
+                        }
+                        PC3.Label {
+                            visible: root.brokerAccionMsg !== ""
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            color: "#dc3545"; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            text: root.brokerAccionMsg
+                        }
+                        PC3.Label {
+                            Layout.fillWidth: true; opacity: 0.5; wrapMode: Text.WordWrap
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            text: "Parar o reiniciar MATA las terminales abiertas: las sesiones son procesos hijos del broker (KillMode=control-group)."
+                        }
+                    }
+                }
+            }
         }
     }
 
     // botón del riel de pestañas
+    // Fila de la pestaña Broker: etiqueta a la izquierda, el valor monoespaciado (son rutas y
+    // puertos, que se leen mal en proporcional) y una nota corta de veredicto a la derecha.
+    component BrokerFila: RowLayout {
+        property string etiqueta: ""
+        property string valor: ""
+        property string nota: ""
+        property color notaColor: Kirigami.Theme.textColor
+        Layout.fillWidth: true
+        spacing: Kirigami.Units.smallSpacing
+        PC3.Label {
+            text: etiqueta; opacity: 0.6
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+            font.pointSize: Kirigami.Theme.smallFont.pointSize
+        }
+        PC3.Label {
+            text: valor
+            font.family: "monospace"; font.pointSize: Kirigami.Theme.smallFont.pointSize
+            Layout.fillWidth: true; elide: Text.ElideMiddle   // una ruta larga se recorta EN MEDIO, no al final
+            textFormat: Text.PlainText
+        }
+        PC3.Label {
+            visible: nota !== ""
+            text: nota; color: notaColor; font.bold: true
+            font.pointSize: Kirigami.Theme.smallFont.pointSize
+        }
+    }
+
     component TabRailButton: Rectangle {
         property int idx: 0
         property string icon: ""
