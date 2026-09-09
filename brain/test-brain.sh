@@ -5268,6 +5268,107 @@ HOME="$SMHOME" node -e 'require(process.argv[1]).writeAlias("zzz","nuevo")' "$SM
 
 rm -rf "$SMFIX"
 
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (r2) skill↔bin: timestamp de PRIMER NIVEL, y que el SKILL no describa un bin/ que ya no existe =="
+R2LIB="$BINRM/session-lib.js"
+R2SK="$SCRIPT_DIR/skills/reubicar-master/SKILL.md"
+R2FIX="$(mktemp -d "${TMPDIR:-/tmp}/brain-r2.XXXXXX")"
+R2HOME="$R2FIX/home"
+R2PROJ="$R2HOME/.claude/projects"
+mkdir -p "$R2PROJ/-slug-muerto" "$R2PROJ/-slug-vivo"
+
+# ── r2-1: el `timestamp` se lee por CAMPO de primer nivel, no por regex sobre el texto crudo. Un
+#          `toolUseResult` que embebe la respuesta de una API trae SU propio timestamp (de servidor):
+#          contarlo como actividad de la sesión hacía que la copia MUERTA le ganara a la VIVA en el
+#          desempate de findSession — y contaminaba igual el freshness gate de session-import.
+R2ANID='{"type":"user","timestamp":"2026-01-01T00:00:01.000Z","toolUseResult":{"timestamp":"2099-12-31T23:59:59.000Z"}}'
+R2TLS() { node -e 'process.stdout.write(String(require(process.argv[1]).topLevelString(process.argv[2],"timestamp")))' "$R2LIB" "$1"; }
+[ "$(R2TLS "$R2ANID")" = "2026-01-01T00:00:01.000Z" ] \
+  && ok "r2-1 timestamp: topLevelString lee el campo de PRIMER NIVEL, no el anidado del toolUseResult" \
+  || bad "r2-1 timestamp: el timestamp anidado contamina la lectura de primer nivel"
+[ "$(R2TLS '{"a":{"timestamp":"2099-01-01T00:00:00.000Z"}}')" = "null" ] \
+  && ok "r2-1 timestamp: sin timestamp de primer nivel devuelve null (no hereda el del sub-objeto)" \
+  || bad "r2-1 timestamp: devolvió un timestamp que no era de primer nivel"
+# la última línea TRUNCADA de una sesión viva sí conserva su timestamp de primer nivel
+[ "$(R2TLS '{"type":"user","timestamp":"2026-03-03T00:00:00.000Z","message":{"role":"assist')" = "2026-03-03T00:00:00.000Z" ] \
+  && ok "r2-1 timestamp: la última línea TRUNCADA conserva su timestamp de primer nivel" \
+  || bad "r2-1 timestamp: una línea truncada pierde su timestamp"
+# y el efecto de punta a punta: findSession elige la copia VIVA, no la muerta con el anidado de 2099
+R2ID="dd440000-0000-0000-0000-000000000001"
+printf '{"type":"user","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/x"}\n%s\n' "$R2ANID" \
+  > "$R2PROJ/-slug-muerto/$R2ID.jsonl"
+printf '{"type":"user","timestamp":"2026-09-09T14:05:00.000Z","cwd":"/y"}\n' > "$R2PROJ/-slug-vivo/$R2ID.jsonl"
+[ "$(HOME="$R2HOME" node -e 'process.stdout.write(require(process.argv[1]).findSession(process.argv[2]).slug)' "$R2LIB" "$R2ID")" = "-slug-vivo" ] \
+  && ok "r2-1 findSession: elige la copia VIVA aunque la muerta traiga un timestamp anidado de 2099" \
+  || bad "r2-1 findSession: eligió la copia MUERTA (un timestamp ajeno le ganó a la actividad real)"
+
+# ── r2-2: Windows. La traducción de la rama win32 cubre /c/, /cygdrive/c/ Y /mnt/c/ (WSL-interop): sin
+#          ella, path.win32.resolve("/mnt/c/x") da "\mnt\c\x" ⇒ "C:\mnt\c\x", un slug fantasma. En una
+#          máquina POSIX la rama win32 no se puede EJECUTAR, así que se verifica su regex.
+grep -q 'cygdrive\\/|mnt\\/' "$R2LIB" \
+  && ok "r2-2 win: normalizeCwd traduce /c/, /cygdrive/c/ y /mnt/c/ a la forma nativa" \
+  || bad "r2-2 win: la traducción win32 no cubre las tres formas (¿falta /mnt/ de WSL?)"
+# y el preludio del skill NO resuelve la ruta física con node: node.exe nativo recibiría /c/... con la
+# conversión de MSYS apagada y la resolvería contra la unidad actual ⇒ ENOENT en la PRIMERA derivada,
+# antes de llegar a la traducción cygpath -w que sí está bien construida.
+{ grep -q 'pwd -P' "$R2SK" && ! grep -q '_real(){  node -e' "$R2SK"; } \
+  && ok "r2-2 win: _real() resuelve con cd+pwd -P (bash), no con node realpathSync sobre una ruta POSIX" \
+  || bad "r2-2 win: _real() volvió a resolver con node (rompe en Git Bash antes de traducir con cygpath)"
+{ grep -qF 'OLD_SLUG="$(_slug "$SRC_CWD")"' "$R2SK" && grep -qF 'NEW_SLUG="$(_slug "$DST_CWD")"' "$R2SK"; } \
+  && ok "r2-2 win: los slugs de origen y destino salen de la forma NATIVA (_cwdform), no de la POSIX" \
+  || bad "r2-2 win: algún slug se deriva de la ruta POSIX (en Windows apuntaría a un slug inexistente)"
+
+# ── r2-3: PARIDAD del handoff (el pendiente que §10 pedía). Se extrae el generador REAL de §6.1 y la
+#          lista de marcadores del PROPIO candado, y se exige cada marcador en una línea EJECUTABLE:
+#          una edición futura que borre un paso —o lo degrade a comentario— rompe la suite, sin
+#          depender de que alguien corra el skill.
+R2GEN="$R2FIX/gen.sh"
+awk '/^cat >> "\$H" <<.HANDOFF_EOF.$/{d=1;next} /^HANDOFF_EOF$/{d=0} d' "$R2SK" > "$R2GEN"
+R2NOCOM="$R2FIX/gen.nocom"
+grep -vE '^[[:space:]]*#' "$R2GEN" > "$R2NOCOM"
+R2MARC="$(awk "/^for m in 'G-SELF-MOVE'/,/'PUNTO DE NO RETORNO'/" "$R2SK" | grep -oE "'[^']+'" | tr -d "'")"
+r2mf=0; r2mn=0
+while IFS= read -r m; do
+  [ -n "$m" ] || continue
+  r2mn=$((r2mn+1))
+  grep -q -- "$m" "$R2NOCOM" || { echo "    falta el marcador '$m'"; r2mf=$((r2mf+1)); }
+done <<< "$R2MARC"
+{ [ "$r2mn" -ge 10 ] && [ "$r2mf" -eq 0 ]; } \
+  && ok "r2-3 paridad handoff: los $r2mn marcadores del candado están en líneas ejecutables del generador" \
+  || bad "r2-3 paridad handoff: $r2mf de $r2mn marcadores faltan (o no se pudo leer la lista del candado)"
+
+# ── r2-4: ANCLA skill↔bin. Aquí se rompió la vuelta 1: dos fixes correctos en aislamiento y la prosa
+#          del skill quedó describiendo el bin/ de ANTES. Estos asserts atan lo que el skill AFIRMA a
+#          lo que bin/ HACE, así que cambiar uno sin el otro FALLA.
+if grep -qF 'renameSync(partFile, toFile)' "$BINRM/session-move.js"; then
+  grep -qE 'session-move\.js[^.]{0,80}(writeFileSync|escribe con el umask)' "$R2SK" \
+    && bad "r2-4 ancla: session-move.js publica con rename y conserva el modo, pero el SKILL sigue diciendo writeFileSync/umask" \
+    || ok "r2-4 ancla: el SKILL no describe a session-move.js con el writeFileSync/umask que ya no tiene"
+fi
+if grep -q 'rewriteTranscriptStream' "$BINRM/session-lib.js"; then
+  grep -qE '536870888|(session-move|session-export)\.js[^.]{0,60}carga(n)? el archivo COMPLETO' "$R2SK" \
+    && bad "r2-4 ancla: la lib va en streaming, pero el SKILL sigue con el techo de 512 MiB / 'carga el archivo COMPLETO'" \
+    || ok "r2-4 ancla: el SKILL no impone un techo de tamaño que la maquinaria en streaming ya no tiene"
+fi
+{ grep -qF -- '--git-branch <rama>' "$BINRM/session-move.js" && grep -qF -- '--git-branch "$RAMA_DST"' "$R2NOCOM"; } \
+  && ok "r2-4 ancla: el skill INVOCA el --git-branch que session-move.js ofrece (re-anclaje en la misma pasada)" \
+  || bad "r2-4 ancla: session-move.js ofrece --git-branch y el handoff no lo usa (volvería el paso post-move que relee el transcript)"
+grep -v createHash "$R2NOCOM" | grep -q 'readFileSync' \
+  && bad "r2-4 ancla: el handoff volvió a leer un archivo completo a un string DESPUÉS del punto de no retorno" \
+  || ok "r2-4 ancla: cero readFileSync del transcript en los pasos destructivos del handoff"
+grep -qE 'writeAlias.{0,40}(es fail-open|no atómico)' "$R2SK" \
+  && bad "r2-4 ancla: writeAlias ya es atómico y respalda el JSON ilegible; el SKILL sigue llamándolo fail-open" \
+  || ok "r2-4 ancla: el SKILL describe writeAlias como es hoy (atómico, respalda en vez de degradar a {})"
+
+# ── r2-5: el PRELUDIO se publica con rename. Es un archivo COMPARTIDO entre corridas: dos mudanzas
+#          casi simultáneas en la misma máquina lo sobre-escribían a la vez, sin lock.
+{ grep -qF 'PRELUDIO_TMP="$PRELUDIO.tmp.$$"' "$R2SK" && grep -qF 'mv -f "$PRELUDIO_TMP" "$PRELUDIO"' "$R2SK"; } \
+  && ok "r2-5 preludio: se escribe a un temporal y se publica con mv (rename atómico), no con cat > directo" \
+  || bad "r2-5 preludio: se escribe directo al archivo compartido (dos corridas concurrentes se pisan)"
+
+rm -rf "$R2FIX"
+
 # ── #83 anti-drift: TRATO personal del usuario → archivo GLOBAL como-trabajar-con-<user> ──
 # La regla de ruteo del conocimiento de TRATO/preferencia personal debe vivir como PASO explícito en
 # las skills que procesan/cosechan/consolidan memoria (un hook no puede juzgar semánticamente "trato").

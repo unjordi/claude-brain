@@ -49,16 +49,20 @@ function slugFromCwd(cwd) { return cwd.replace(/[^a-zA-Z0-9]/g, '-'); }
 // Normaliza una ruta de proyecto a la MISMA forma que el `process.cwd()` del harness, que es de donde
 // sale el slug real: absoluta, sin barra final, sin '.'/'..' y FÍSICA (getcwd(3) devuelve la ruta
 // resuelta, así que un prefijo symlink —macOS /tmp→/private/tmp, un home en /Volumes— daría otro slug).
-// Windows: Git Bash/MSYS y Cygwin hablan `/c/Users/...` mientras el harness corre con `C:\Users\...`;
-// aquí se traduce a la forma NATIVA para que ambos deriven el MISMO slug. Al revés (una ruta `C:\...`
+// Windows: Git Bash/MSYS, Cygwin y el interop de WSL hablan `/c/Users/...`, `/cygdrive/c/...` y
+// `/mnt/c/...` mientras el harness corre con `C:\Users\...`; las tres se traducen a la forma NATIVA
+// para que todas deriven el MISMO slug (sin traducir, `path.win32.resolve('/mnt/c/x')` da `\mnt\c\x`
+// ⇒ `C:\mnt\c\x`, una ruta fantasma que el harness nunca tendrá como cwd). Al revés (una ruta `C:\...`
 // en una máquina POSIX) es irresoluble → lanza, en vez de fabricar un slug fantasma.
+// En una máquina POSIX real, `/mnt/c/...` es una ruta POSIX legítima (Node dentro de WSL) y se deja
+// intacta: la traducción vive SOLO en la rama win32.
 // Lanza Error si la ruta es vacía o intraducible; si simplemente NO EXISTE la devuelve resuelta
 // lexicográficamente, y que exista o no lo juzga el llamador con `cwdExists`.
 function normalizeCwd(p) {
   if (typeof p !== 'string' || !p.trim()) throw new Error('ruta de proyecto vacía');
   let s = p.trim();
   if (process.platform === 'win32') {
-    const m = /^\/(?:cygdrive\/)?([A-Za-z])(\/.*)?$/.exec(s);
+    const m = /^\/(?:cygdrive\/|mnt\/)?([A-Za-z])(\/.*)?$/.exec(s);
     if (m) s = m[1].toUpperCase() + ':' + ((m[2] || '/').replace(/\//g, '\\'));
   } else if (/^[A-Za-z]:[\\/]/.test(s) || s.startsWith('\\\\')) {
     throw new Error('la ruta "' + p + '" es de estilo Windows y esta máquina es ' + process.platform
@@ -91,6 +95,57 @@ function readTranscriptText(file) {
   return fs.readFileSync(file, 'utf8');
 }
 
+// Índice de la comilla de CIERRE del literal string JSON que empieza en `line[i]` (una comilla),
+// respetando los escapes. -1 si el renglón se corta a media cadena (la última línea de una sesión viva).
+function endOfJsonString(line, i) {
+  let j = i + 1;
+  while (j < line.length) {
+    const c = line.charCodeAt(j);
+    if (c === 92) { j += 2; continue; }        // '\' → el siguiente carácter va escapado
+    if (c === 34) return j;                    // '"' de cierre
+    j++;
+  }
+  return -1;
+}
+const isWs = (c) => c === 32 || c === 9 || c === 10 || c === 13;
+
+// Valor STRING de una clave de PRIMER NIVEL de un renglón JSON, leído SIN parsear el objeto completo
+// (barrer cientos de MB con un JSON.parse por línea no es viable) y SIN confundir la clave con la
+// MISMA clave dentro de un sub-objeto. Esa distinción no es cosmética: un `toolUseResult` que embebe
+// la respuesta de una API trae su propio `timestamp` de servidor, y un regex sobre el texto crudo lo
+// lee como si fuera la actividad de la sesión — con eso, la copia MUERTA de un id puede ganarle a la
+// VIVA en el desempate de `findSession` y en el gate de frescura de session-import.
+// Recorre el renglón UNA vez llevando la profundidad de llaves/corchetes y saltando los literales
+// string (que es donde vive el texto con llaves y comillas escapadas). Tolera el renglón TRUNCADO: lee
+// hasta donde alcanza. Devuelve null si la clave no está en primer nivel o su valor no es un string.
+function topLevelString(line, key) {
+  const quoted = '"' + key + '"';
+  let depth = 0, i = 0;
+  while (i < line.length) {
+    const c = line.charCodeAt(i);
+    if (c === 34) {                            // arranca un literal string
+      const end = endOfJsonString(line, i);
+      if (depth === 1 && line.startsWith(quoted, i)) {
+        let j = end < 0 ? line.length : end + 1;
+        while (j < line.length && isWs(line.charCodeAt(j))) j++;
+        if (line.charCodeAt(j) !== 58) return null;                 // ':' — no era una CLAVE
+        j++;
+        while (j < line.length && isWs(line.charCodeAt(j))) j++;
+        if (line.charCodeAt(j) !== 34) return null;                 // el valor no es un string
+        const vEnd = endOfJsonString(line, j);
+        return line.slice(j + 1, vEnd < 0 ? line.length : vEnd);
+      }
+      if (end < 0) return null;                // el renglón se cortó dentro de un string ajeno
+      i = end + 1;
+      continue;
+    }
+    if (c === 123 || c === 91) { depth++; i++; continue; }           // '{' '['
+    if (c === 125 || c === 93) { depth--; i++; continue; }           // '}' ']'
+    i++;
+  }
+  return null;
+}
+
 // Transforma UN renglón del transcript. Preserva tal cual lo que no parsea (p. ej. la última línea
 // cortada de una sesión viva) para no corromper el archivo. Devuelve {out, cwdChanged}.
 function transformLine(piece, toCwd) {
@@ -108,10 +163,13 @@ function transformLine(piece, toCwd) {
 // TIE-BREAK DETERMINISTA: si el mismo id existe en >1 slug (p. ej. un move a medias que dejó copia en
 // origen y destino), `readdirSync` los lista en orden de FS ARBITRARIO → devolver "el primero que tope"
 // sería no-determinista (`claude --resume`/session-move podrían tomar copias distintas entre corridas).
-// Se recogen TODAS y se elige por CONTENIDO: última actividad del transcript (el `timestamp` más
-// reciente de su cola) → tamaño → mtime → slug asc. El contenido manda sobre el mtime porque un
-// respaldo VIEJO restaurado trae mtime de HOY y por mtime ganaría siendo la copia muerta. El sondeo de
-// contenido corre solo si hay colisión (con una sola copia no hay nada que desempatar).
+// Se recogen TODAS y se elige por CONTENIDO: última actividad del transcript (el `timestamp` de PRIMER
+// NIVEL más reciente de su cola) → tamaño → mtime → slug asc. El contenido manda sobre el mtime porque
+// un respaldo VIEJO restaurado trae mtime de HOY y por mtime ganaría siendo la copia muerta. Y el
+// `timestamp` se lee por CAMPO de primer nivel (`topLevelString`), no por regex sobre el texto: el
+// `timestamp` que un `toolUseResult` embebe de una respuesta de API no es actividad de la sesión, y
+// leerlo como tal deja ganar a la copia muerta. El sondeo de contenido corre solo si hay colisión
+// (con una sola copia no hay nada que desempatar).
 // Las demás van en `collisions` para que el llamador AVISE del duplicado.
 function findSession(id) {
   const dir = projectsDir();
@@ -215,8 +273,10 @@ function titlesFromText(srcText) {
 //     termina en '\n' (última línea a medio escribir, caso NORMAL de una sesión viva).
 //   - opts.tailBytes > 0 ⇒ lee SOLO la cola: barato y O(1), suficiente para `ts` (el transcript es
 //     append-only) pero deja `lines`/`firstCwd`/títulos en null.
-// El `timestamp` sale por regex del renglón crudo (barrer cientos de MB con un JSON.parse por línea no
-// es viable); `cwd` y los títulos sí se parsean, pero solo en los pocos renglones que los mencionan.
+// El `timestamp` se lee con `topLevelString` (la clave de PRIMER NIVEL, no la misma clave dentro de un
+// sub-objeto: un `toolUseResult` con el timestamp de una API no es actividad de la sesión) — un solo
+// recorrido del renglón, sin el JSON.parse por línea que haría inviable barrer cientos de MB. `cwd` y
+// los títulos sí se parsean, pero solo en los pocos renglones que los mencionan.
 function scanTranscriptFile(file, opts) {
   const tailBytes = (opts && opts.tailBytes > 0) ? opts.tailBytes : 0;
   const st = fs.statSync(file);
@@ -229,15 +289,14 @@ function scanTranscriptFile(file, opts) {
   const fd = fs.openSync(file, 'r');
   const dec = new StringDecoder('utf8');
   const buf = Buffer.allocUnsafe(1 << 20);
-  const tsRe = /"timestamp"\s*:\s*"([^"]+)"/;
   let pending = '', pos = start, lastByte = null, skipFirst = start > 0, skipRest = false;
   const take = (piece) => {
     if (skipRest) { skipRest = false; return; }     // cola de un renglón opaco ya contabilizado
     if (skipFirst) { skipFirst = false; return; }   // la cola arranca a media línea: ese trozo se descarta
     if (!piece.trim()) return;
     if (res.lines !== null) res.lines++;
-    const m = tsRe.exec(piece);
-    if (m) { const t = Date.parse(m[1]); if (!Number.isNaN(t) && (res.ts === null || t > res.ts)) res.ts = t; }
+    const raw = topLevelString(piece, 'timestamp');
+    if (raw !== null) { const t = Date.parse(raw); if (!Number.isNaN(t) && (res.ts === null || t > res.ts)) res.ts = t; }
     if (tailBytes) return;
     if (res.firstCwd === null && piece.indexOf('"cwd"') >= 0) {
       try { const o = JSON.parse(piece); if (typeof o.cwd === 'string' && o.cwd) res.firstCwd = o.cwd; } catch (_) {}
@@ -440,7 +499,7 @@ module.exports = {
   MAX_TEXT_BYTES,
   claudeBase, projectsDir,
   slugFromCwd, normalizeCwd, cwdExists, slugForRepo,
-  findSession, rewriteCwd, transformLine,
+  findSession, rewriteCwd, transformLine, topLevelString,
   readTranscriptText, scanTranscriptFile, rewriteTranscriptStream,
   firstCwd, lastActivity, titleFromTranscript, titlesFromText,
   sessionAliases, writeAlias,
