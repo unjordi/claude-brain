@@ -259,25 +259,29 @@ export function spawnPty(opts: PtyOptions): PtyProcess {
 
   const onChunk = (buf: Buffer): void => {
     if (ptsResolved) { emit(buf); return; }
-    // Aún buscando el marcador: acumula y busca A NIVEL BYTE.
+    // Aún buscando el marcador: acumula y busca A NIVEL BYTE. L2 (auditoría 2026-09-09): se ITERA sobre los
+    // SOH sucesivos — un `0x01` espurio en la salida del programa ANTES del marcador real ya no lo entierra
+    // (antes `indexOf(SOH)` se clavaba en el primero y esperaba al cap, soltando el marcador real como
+    // passthrough → resize muerto para esa sesión). Solo alcanzable con un `cmd` custom que emita 0x01.
     preBuf = Buffer.concat([preBuf, buf]);
-    const start = preBuf.indexOf(SOH);
-    if (start >= 0 && preBuf.length >= start + 1 + PTS_TAG.length) {
+    let start = preBuf.indexOf(SOH);
+    while (start >= 0) {
+      if (preBuf.length < start + 1 + PTS_TAG.length) break;  // faltan bytes para decidir ESTE candidato → espera
       if (preBuf.subarray(start + 1, start + 1 + PTS_TAG.length).equals(PTS_TAG)) {
         const end = preBuf.indexOf(SOH, start + 1 + PTS_TAG.length);
         if (end >= 0) {
           ptsPath = preBuf.subarray(start + 1 + PTS_TAG.length, end).toString("utf8").trim() || null;
           ptsResolved = true;
-          const before = preBuf.subarray(0, start);
+          const before = preBuf.subarray(0, start);   // lo previo (incluido cualquier SOH espurio) es salida real
           const after = preBuf.subarray(end + 1);
           preBuf = Buffer.alloc(0);
           emit(Buffer.concat([before, after]));
           if (desired) void drainResizes(); // ya hay pts: se drena lo que se pidió durante el arranque
           return;
         }
-        // Marcador aún incompleto (falta el SOH de cierre) -> espera más data.
+        break;  // tag correcto pero falta el SOH de cierre → espera más data
       }
-      // Un SOH que NO es nuestro tag -> espera (podría ser ruido); el cap de abajo evita colgarse.
+      start = preBuf.indexOf(SOH, start + 1);  // SOH espurio → prueba el siguiente
     }
     if (preBuf.length > PTS_MARK_MAX_BUFFER) {
       // Nunca llegó el marcador -> suelta lo acumulado y sigue en modo passthrough.
