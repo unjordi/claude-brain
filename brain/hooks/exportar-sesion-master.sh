@@ -159,18 +159,33 @@ nohup bash -c '
 # Drive compartido → no generar churn de sync en cada export).
 if [ -f "$mj" ] && [ -n "$cwd" ]; then
   target="${cwd#"$HOME"/}"
-  node -e '
-    const fs=require("fs"),p=process.argv[1],id=process.argv[2],name=process.argv[3],target=process.argv[4];
-    try{const m=JSON.parse(fs.readFileSync(p,"utf8"));m.masters=m.masters||[];
-      const e=m.masters.find(x=>x.id===id); let changed=false;
-      if(!e){ m.masters.push({id,name,target}); changed=true; }
-      else {
-        if(target && e.target!==target){ e.target=target; changed=true; }
-        // name solo si es un título REAL (no el fallback al sid) y de verdad cambió
-        if(name && name!==id && e.name!==name){ e.name=name; changed=true; }
-      }
-      if(changed) fs.writeFileSync(p,JSON.stringify(m,null,2)+"\n");
-    }catch(e){}
-  ' "$mj" "$sid" "$title" "$target" 2>/dev/null || true
+  # LOCK por-archivo (mkdir atómico) para SERIALIZAR el read-modify-write de masters.json entre masters
+  # CONCURRENTES (cortex-master + cps-master haciendo Stop/SessionEnd casi a la vez sobre el Drive compartido)
+  # → sin lost-update. Best-effort: si no se puede tomar, se SALTA (el próximo export reintenta). Un lock
+  # huérfano de un crash (>5 min) se recicla → no bloquea para siempre. La escritura del JSON es ATÓMICA
+  # (tmp+rename) dentro de node → un masters.json corrupto/parcial nunca pisa el bueno si node muere a media.
+  mjlock="$mj.lock"
+  if ! mkdir "$mjlock" 2>/dev/null; then
+    if [ -n "$(find "$mjlock" -maxdepth 0 -mmin +5 2>/dev/null)" ]; then
+      rm -rf "$mjlock" 2>/dev/null; mkdir "$mjlock" 2>/dev/null || mjlock=""
+    else mjlock=""; fi
+  fi
+  if [ -n "$mjlock" ]; then
+    node -e '
+      const fs=require("fs"),p=process.argv[1],id=process.argv[2],name=process.argv[3],target=process.argv[4];
+      try{const m=JSON.parse(fs.readFileSync(p,"utf8"));m.masters=m.masters||[];
+        const e=m.masters.find(x=>x.id===id); let changed=false;
+        if(!e){ m.masters.push({id,name,target}); changed=true; }
+        else {
+          if(target && e.target!==target){ e.target=target; changed=true; }
+          // name solo si es un título REAL (no el fallback al sid) y de verdad cambió
+          if(name && name!==id && e.name!==name){ e.name=name; changed=true; }
+        }
+        // Escritura ATÓMICA: tmp en el MISMO dir + rename (nunca deja el masters.json a medio escribir).
+        if(changed){ const t=p+".tmp."+process.pid; fs.writeFileSync(t,JSON.stringify(m,null,2)+"\n"); fs.renameSync(t,p); }
+      }catch(e){}
+    ' "$mj" "$sid" "$title" "$target" 2>/dev/null || true
+    rmdir "$mjlock" 2>/dev/null || true
+  fi
 fi
 exit 0
