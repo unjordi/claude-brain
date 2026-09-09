@@ -3,7 +3,7 @@ name: claude-proyecto-autocontenido
 description: >-
   Criterio para mantener TODO el "cerebro" de Claude Code de un proyecto (memorias, skills,
   transcripts y settings) dentro de la PROPIA carpeta del proyecto, en `<proyecto>/.claude/`,
-  con un symlink desde `~/.claude/projects/<slug>/` para que Claude Code lo siga encontrando.
+  leído NATIVO desde el cwd por los hooks del cerebro (SIN symlinks — decisión dura de unjordi 2026-09-08).
   Úsala cuando quieras: que la memoria/skills "viajen" con el proyecto (Drive, iCloud, git, otra
   máquina como una MacBook), evitar que una sesión arranque "amnésica" al abrirla desde otro cwd,
   consolidar archivos de Claude dispersos, o definir esta convención para el onboarding del equipo.
@@ -11,6 +11,16 @@ description: >-
   clone-y-listo, el triage de privacidad (qué viaja al repo vs qué se queda local), la disciplina
   anti-duplicados y la verificación.
 ---
+
+> ⚠️ **RE-ARQUITECTURA A CERO-SYMLINKS (decisión dura de unjordi, 2026-09-08: "NO quiero symlinks en ningún lado").**
+> La sección **"⛔ CERO SYMLINKS"** de abajo es la VIGENTE: el cerebro del repo se lee **NATIVO** desde el cwd
+> (los HOOKS del cerebro —sesion-inicio, rehidratar-hilo— reinyectan `MEMORY.md`/`estado-proyecto.md`
+> cwd-relative), y el `~/.claude/projects/<slug>` de CC va como **DIR REAL o no existe — JAMÁS un symlink** al
+> repo. Todo lo de abajo que ARMA/verifica un symlink (el `bootstrap-claude.sh` embebido con su `ln -s`, el
+> triage "cuando el slug se symlinkea al repo", la verificación por `readlink`) está **SUPERSEDIDO** y pendiente
+> de reescritura completa — **NO lo sigas para crear symlinks nuevos.** Motivo: los symlinks CUELGAN al mover/
+> borrar/renombrar el repo (rompen `/to-do` y cuanto lea `.claude/memory`) y proliferan (15 basura en la Cachy
+> de "consolidar cerebro"). Migrar un symlink existente = convertirlo a dir real o borrarlo.
 
 # Proyecto autocontenido de Claude Code (memoria/skills/transcripts en SU folder)
 
@@ -61,19 +71,27 @@ ls -d ~/.claude/projects/"$SLUG"               # debe ser el dir (o symlink) de 
 ├── skills/                (SOLO skills específicas de ESTE proyecto)
 └── transcripts/           (logs .jsonl; opcional según el modo, ver abajo)
 
-~/.claude/projects/<slug>   →  symlink a  <proyecto>/.claude/
+~/.claude/projects/<slug>/   (dir REAL de CC: sus transcripts + su auto-memory — NUNCA un symlink al repo)
 ```
-La carpeta `<proyecto>/.claude/` cumple **doble función** sin colisión (cada rol mira entradas
-distintas): como `<cwd>/.claude` CC lee `skills/` y `settings`; como `projects/<slug>` CC lee/escribe
-`memory/` y los `*.jsonl`.
+El `<proyecto>/.claude/` se lee **NATIVO** como `<cwd>/.claude` (CC lee `skills/` y `settings`; los HOOKS
+del cerebro —sesion-inicio, rehidratar-hilo— reinyectan `memory/MEMORY.md` y `estado-proyecto.md` relativos
+al **cwd**, no dependen del slug).
 
-## Dos modos (elige según el proyecto)
-- **Modo personal / carpeta sincronizada** (Drive, iCloud, disco fijo): symlink del **dir completo**
-  `~/.claude/projects/<slug>` → `<proyecto>/.claude/`. Todo (incl. transcripts) queda co-ubicado.
-- **Modo equipo / repo git**: deja en `<proyecto>/.claude/` los `memory/`, `skills/`, `settings.json`
-  (versionados) y symlinkea **solo** `memory`:
-  `~/.claude/projects/<slug>/memory` → `<proyecto>/.claude/memory`.
-  El symlink de cada compañero lo arma el **bootstrap** de la sección siguiente (no a mano).
+## ⛔ CERO SYMLINKS (decisión dura de unjordi, 2026-09-08: "NO quiero symlinks en ningún lado")
+El cerebro del repo (`<proyecto>/.claude/memory`, `skills/`, `settings.json`, versionados) se lee NATIVO
+porque el cwd ES el proyecto. El `~/.claude/projects/<slug>/memory` de CC (su auto-memory + `*.jsonl`) va
+como **DIRECTORIO REAL** (lo crea CC solo) o **no existe** — **JAMÁS un symlink** al repo.
+- **Por qué el cambio:** un `ln -s slug/memory → repo/.claude/memory` unificaba la auto-memory de CC con el
+  cerebro del repo, PERO los symlinks son frágiles (CUELGAN al mover/borrar/renombrar el repo — rompen
+  `/to-do` y todo lo que lea `.claude/memory` por el link roto) y proliferan (medido: 15 symlinks basura en
+  la Cachy de "consolidar cerebro"). Un symlink colgante fue justo la causa de "/to-do no sirve" en un repo.
+- **Qué NO se pierde:** la continuidad del cerebro NO dependía del symlink — la dan los HOOKS del cerebro
+  (sesion-inicio reinyecta el orden de leer `MEMORY.md`/`estado-proyecto.md`; rehidratar-hilo relee el hilo),
+  todos cwd-relative. La auto-memory NATIVA de CC (que sí resuelve por slug) queda SEPARADA (su propio dir
+  real), y eso está bien: el cerebro del repo es la fuente, leída nativa.
+- **Modo personal y modo equipo:** IGUAL — `<proyecto>/.claude/` versionado y leído nativo; NUNCA se
+  symlinkea el slug ni `memory`. (Si CC ya creó un symlink `slug/memory`, conviértelo a dir real o bórralo:
+  `[ -L ~/.claude/projects/<slug>/memory ] && rm ~/.claude/projects/<slug>/memory`.)
 
 <a id="gitignore-canonico"></a>**Bloque `.gitignore` canónico (modo equipo)** — referenciado por el resto del skill, no lo repitas con variantes:
 ```gitignore
