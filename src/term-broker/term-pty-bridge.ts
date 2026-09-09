@@ -1,3 +1,9 @@
+// ⚠️ ESTE ARCHIVO SE VENDORIZA A CORTEX. Existe una COPIA byte-a-byte en `cortex/src/term-broker/`, que es
+// la que instala y corre `cortex-term-broker.service`. Se edita AQUÍ (axon es la fuente) y después se
+// RE-VENDORIZA allá: copiar los cinco módulos, regenerar `SHA256SUMS`, actualizar el commit anotado en
+// `PROCEDENCIA.md` y en `NOTICE`, y correr `probe-topes.ts` + `probe-instalador.sh`. El contrato completo,
+// con su anti-drift de tres chequeos, está en `cortex/src/term-broker/PROCEDENCIA.md`. Si cambias esto y no
+// re-vendorizas, el broker que sirve al usuario se queda atrás sin que nada lo señale.
 // src/server/term-pty-bridge.ts — pega un PTY (pty-session.ts) a una conexión WebSocket (ws.ts), y relaya
 // WS<->WS para el modo HOST (axon-en-contenedor -> broker host-side). Un solo lugar con el PROTOCOLO del
 // canal PTY, para que broker, http-server y el probe NO divergan.

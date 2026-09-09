@@ -1,3 +1,9 @@
+// ⚠️ ESTE ARCHIVO SE VENDORIZA A CORTEX. Existe una COPIA byte-a-byte en `cortex/src/term-broker/`, que es
+// la que instala y corre `cortex-term-broker.service`. Se edita AQUÍ (axon es la fuente) y después se
+// RE-VENDORIZA allá: copiar los cinco módulos, regenerar `SHA256SUMS`, actualizar el commit anotado en
+// `PROCEDENCIA.md` y en `NOTICE`, y correr `probe-topes.ts` + `probe-instalador.sh`. El contrato completo,
+// con su anti-drift de tres chequeos, está en `cortex/src/term-broker/PROCEDENCIA.md`. Si cambias esto y no
+// re-vendorizas, el broker que sirve al usuario se queda atrás sin que nada lo señale.
 // src/server/pty-session.ts — PTY REAL para el widget de Terminal INTERACTIVA de Odysseus.
 //
 // PROBLEMA que resuelve: term-session.ts (el pool one-shot) escribe comandos al stdin de un shell por un
@@ -97,6 +103,10 @@ const RESIZE_WATCHDOG_MS = RESIZE_TIMEOUT_MS + 1000;
 // `desired` vuelve a su ranura para que el próximo drenaje lo retome.
 /** Intentos TOTALES por tamaño (1 + 2 reintentos). Acotado: un pts muerto no debe girar para siempre.
  *  Exportado para que el probe afirme contra la constante REAL y no contra un 3 copiado. */
+/** Cuánto se espera antes de re-intentar el drenaje que quedó pendiente al agotar los intentos. Largo a
+ *  propósito: si el pts no respondió a tres `stty` seguidos, insistir de inmediato solo quema ciclos. */
+export const RESIZE_REAGENDA_MS = 5_000;
+
 export const RESIZE_INTENTOS = 3;
 /** Espera ENTRE intentos (ms). `RESIZE_INTENTOS - 1` entradas: el último intento no espera después. */
 const RESIZE_BACKOFF_MS = [40, 160];
@@ -218,11 +228,21 @@ export function spawnPty(opts: PtyOptions): PtyProcess {
 
         if (ok) { applied = target; continue; }
         if (exited || desired) continue; // murió, o hay algo más nuevo: la vuelta siguiente decide
-        // Agotados los intentos y NADIE pidió otra cosa: el tamaño sigue PENDIENTE, no se tira. `applied`
-        // NO se actualiza (no mentimos sobre lo aplicado) y `desired` vuelve a su ranura, así que el
-        // próximo drenaje —o un pedido idéntico del frontend— lo retoma. Se sale del bucle para no girar
-        // indefinidamente sobre un pts que ya no responde.
-        desired = target;
+
+        // Agotados los intentos y NADIE pidió otra cosa. Aquí `applied` NO puede quedarse con su valor
+        // viejo: un `stty` que falla no prueba que no haya aplicado nada — el ioctl es instantáneo y el
+        // timeout mata al proceso DESPUÉS, así que el pts puede haber cambiado igual. Con un `applied`
+        // stale, el atajo no-op de arriba se traga la reconciliación: si el frontend vuelve luego al
+        // tamaño viejo, coincide con `applied`, no se emite ningún `stty`, y el shell se queda en el
+        // tamaño nuevo PARA SIEMPRE. El frontend tampoco lo salva: marca `sent` sin ACK, así que no
+        // repite. Se marca DESCONOCIDO, que es lo único honesto: obliga al próximo pedido a emitir.
+        applied = null;
+        desired = target;   // el tamaño sigue pendiente: no se tira
+        // …y se re-agenda el drenaje, porque nada más lo haría. `drainResizes` solo lo llaman
+        // `applyResize` y la resolución del pts; sin esto, el `desired` que acabamos de guardar quedaba
+        // huérfano esperando un pedido que el frontend nunca vuelve a mandar.
+        const reintentoDiferido = setTimeout(() => { if (!exited && desired) void drainResizes(); }, RESIZE_REAGENDA_MS);
+        if (typeof reintentoDiferido.unref === "function") reintentoDiferido.unref();
         break;
       }
     } catch { /* defensa final: la sesión sigue viva pase lo que pase */ }

@@ -271,6 +271,50 @@ else
 fi
 
 echo
+echo "— I) PARIDAD: la copia vendorizada ES el commit que PROCEDENCIA.md dice —"
+# El chequeo (1) —sha256sum contra SHA256SUMS— compara la copia CONSIGO MISMA: detecta que alguien la
+# editó después de sellarla, pero un `SHA256SUMS` regenerado en la misma tanda la vuelve a firmar en verde.
+# Es justo lo que pasó (C-1 de la tupla): se re-vendorizó 17 minutos ANTES de commitear un fix en axon, y
+# los hashes firmaron en verde una copia que ya iba atrás. La única forma de ver ESO es comparar contra
+# AFUERA — el commit de axon anotado en PROCEDENCIA.md —, que hasta hoy solo existía como receta a mano
+# ("(2) ¿axon cambió desde el commit anotado?"). Una receta que nadie corre no es un candado (F-10).
+#
+# Se lee el commit del propio PROCEDENCIA.md para que no haya un segundo lugar donde el sha pueda driftear.
+# Si no hay clon de axon, o ese clon no tiene el commit (fetch superficial, clon recién hecho), se SALTA
+# contando el ⚠️ — igual que el bloque H: fallar en falso en la máquina de un colega es peor que no medir.
+VEND_SHA="$(grep -m1 -oP '\*\*Commit de origen:\*\*\s*`\K[0-9a-f]{7,40}' "$ROOT/src/term-broker/PROCEDENCIA.md" 2>/dev/null || true)"
+if [[ -z "$VEND_SHA" ]]; then
+  omitidos=$((omitidos + 1))
+  echo "  ⚠️  SALTADO: no pude leer el '**Commit de origen:**' de PROCEDENCIA.md."
+elif [[ ! -d "$AXON_SIBLING/.git" ]] || ! git -C "$AXON_SIBLING" cat-file -e "${VEND_SHA}^{commit}" 2>/dev/null; then
+  omitidos=$((omitidos + 1))
+  echo "  ⚠️  SALTADO: no encontré el commit ${VEND_SHA} en un clon de axon (busqué en $AXON_SIBLING)."
+  echo "      Fija AXON_DIR=/ruta/a/axon, o corre 'git fetch' ahí, para que este chequeo pueda medir."
+else
+  drift_par=0
+  for f in term-host-broker term-session term-pty-bridge ws pty-session; do
+    # OJO a las LLAVES: `${VEND_SHA}:`, no `$VEND_SHA:` — en zsh la segunda forma se lee como el
+    # modificador de historia `:s` y el `show` falla en los cinco, reportando DRIFT sobre una copia sana.
+    if ! git -C "$AXON_SIBLING" show "${VEND_SHA}:src/server/${f}.ts" 2>/dev/null \
+         | diff -q - "$ROOT/src/term-broker/${f}.ts" >/dev/null 2>&1; then
+      drift_par=$((drift_par + 1))
+      echo "      ↳ $f.ts DIFIERE de ${VEND_SHA}:src/server/$f.ts"
+    fi
+  done
+  ck "los 5 módulos son BYTE A BYTE el commit ${VEND_SHA} de axon" test "$drift_par" -eq 0
+  # Y, informativo: cuánto se ha movido axon desde el pin. No es un fallo —vendorizar es un acto
+  # deliberado, no una sincronización automática—, pero saberlo es lo que dispara la próxima pasada.
+  if git -C "$AXON_SIBLING" cat-file -e "origin/develop^{commit}" 2>/dev/null; then
+    movidos="$(git -C "$AXON_SIBLING" diff --name-only "${VEND_SHA}" origin/develop -- \
+                 src/server/term-host-broker.ts src/server/term-session.ts src/server/term-pty-bridge.ts \
+                 src/server/ws.ts src/server/pty-session.ts 2>/dev/null | wc -l | tr -d " ")"
+    [[ "${movidos:-0}" -gt 0 ]] \
+      && echo "  ℹ️  axon ha movido $movidos de los 5 módulos desde ${VEND_SHA} — toca re-vendorizar cuando cierres." \
+      || echo "  ℹ️  origin/develop de axon no ha tocado ninguno de los 5 desde ${VEND_SHA}."
+  fi
+fi
+
+echo
 if [[ "${omitidos:-0}" -gt 0 ]]; then
   echo "  ${pass} ✅   ${fail} ❌   ${omitidos} ⚠️ omitido(s)"
 else

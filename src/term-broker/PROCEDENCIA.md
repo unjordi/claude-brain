@@ -7,18 +7,18 @@ explica QUÉ hacer al re-vendorizar: [Divergencia vs axon](#divergencia-vs-axon-
 
 | archivo | origen en axon | líneas (al vendorizar) | líneas (hoy) |
 |---|---|---|---|
-| `term-host-broker.ts` | `src/server/term-host-broker.ts` | 394 | 498 |
-| `term-session.ts` | `src/server/term-session.ts` | 263 | 307 |
-| `term-pty-bridge.ts` | `src/server/term-pty-bridge.ts` | 70 | 100 |
-| `ws.ts` | `src/server/ws.ts` | 306 | 492 |
-| `pty-session.ts` | `src/server/pty-session.ts` | 188 | 307 |
-| | **total** | **1221** | **1704** |
+| `term-host-broker.ts` | `src/server/term-host-broker.ts` | 394 | 504 |
+| `term-session.ts` | `src/server/term-session.ts` | 263 | 313 |
+| `term-pty-bridge.ts` | `src/server/term-pty-bridge.ts` | 70 | 106 |
+| `ws.ts` | `src/server/ws.ts` | 306 | 513 |
+| `pty-session.ts` | `src/server/pty-session.ts` | 188 | 327 |
+| | **total** | **1221** | **1763** |
 
-**Commit de origen:** `ed482fb` (`origin/develop` de axon, 2026-09-09) — el commit en que los topes de
+**Commit de origen:** `44f463d` (`origin/develop` de axon, 2026-09-09) — el commit en que los topes de
 esta copia ya viven río arriba, **y que está en `develop`**. Ese detalle no es cosmético: el pin anterior
 apuntaba a un commit que solo existía en la rama de trabajo, y esa rama se borra al integrarse por squash —
 el sha se habría vuelto inalcanzable y con él los tres chequeos anti-drift de abajo. **Un pin siempre a un
-commit de una rama permanente.** Antes fue `341fb53` (2026-09-07), re-vendorizado desde
+commit de una rama permanente.** Antes fue `ed482fb` (2026-09-09), y antes `341fb53` (2026-09-07), re-vendorizado desde
 `cf840e6` para traer el **socket unix** (`fix/term-broker-alcanzable`, #75): un cliente en
 contenedor NO alcanza un bind a loopback del host, así que la copia anterior servía un broker que la
 terminal del widget no podía usar. De paso llegan `GET /health` (lo que sondea el badge) y el
@@ -75,11 +75,18 @@ cd src/term-broker && sha256sum -c SHA256SUMS
 Éste es el que atrapa el riesgo REAL de una copia vendorizada: que alguien "arregle" un módulo
 **aquí** en vez de en axon, y la copia deje de ser copia sin que nada se queje.
 
-**(2) ¿axon cambió desde el commit anotado?** Necesita un clon, y se corre a mano cuando toca
-re-vendorizar. Contra el **commit fijado**, no contra la punta móvil:
+**(2) ¿la copia SIGUE siendo ese commit, y qué se ha movido en axon desde entonces?** Desde el
+2026-09-09 esto **ya no es solo una receta a mano**: el `probe-instalador.sh` lo corre en su **bloque I**
+(lee el commit de aquí mismo, así que no hay un segundo sitio donde el sha pueda driftear) y **falla** si
+alguno de los 5 no es byte a byte ese commit; además imprime, informativo, cuántos ha movido axon desde el
+pin. Por qué hacía falta aunque ya existiera (1): el `sha256sum` compara la copia **consigo misma**, y un
+`SHA256SUMS` regenerado en la misma tanda vuelve a firmarla en verde — que es exactamente cómo se
+re-vendorizó 17 minutos ANTES de un fix y los hashes firmaron una copia atrasada. Si no hay clon de axon
+con ese commit, el bloque se SALTA contando el ⚠️, nunca falla en falso.
+La receta equivalente, a mano, contra el **commit fijado** y no contra la punta móvil:
 
 ```bash
-VEND=ed482fb   # el commit anotado arriba — NO 'origin/develop'
+VEND=44f463d   # el commit anotado arriba — NO 'origin/develop'
 for f in term-host-broker term-session term-pty-bridge ws pty-session; do
   # OJO a las LLAVES: `${VEND}:`, no `$VEND:`. En zsh —el login shell de muchas máquinas— la segunda
   # forma se lee como el modificador de expansión `:s`, y el `show` falla en los cinco archivos: la
@@ -140,7 +147,7 @@ Se evaluaron las dos y ganó la copia, por razones medibles — no por comodidad
 1. **El cierre de dependencias son 5 módulos, no 4.** El inventario previo decía
    "`term-host-broker` + `term-session` + `term-pty-bridge` + `ws` = 860 líneas". Falta
    `pty-session.ts` (188): `term-pty-bridge.ts:15` lo importa (`spawnPty`). El total real era 1048
-   con aquel commit; con el vendorizado de hoy (`ed482fb`) son **1704**.
+   con aquel commit; con el vendorizado de hoy (`44f463d`) son **1763**.
 2. **Cuatro de los cinco NO se pueden "mover": axon los sigue necesitando.** El contrato exige que
    axon **degrade** al shell del contenedor cuando no hay token, y esa ruta usa exactamente los
    mismos módulos (`src/server/http-server.ts`: `ShellSessionPool` de `term-session.ts`,

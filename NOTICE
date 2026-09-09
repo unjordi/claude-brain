@@ -32,7 +32,7 @@ src/term-broker/*.ts  —  vendored from the "axon" project
 The five TypeScript modules under src/term-broker/ (term-host-broker.ts,
 term-session.ts, term-pty-bridge.ts, ws.ts, pty-session.ts) are a verbatim copy
 of modules from the "axon" harness by the same author, taken at commit
-ed482fb (axon origin/develop, 2026-09-09). They contain no third-party code and
+44f463d (axon origin/develop, 2026-09-09). They contain no third-party code and
 no npm dependencies (Node built-ins only), and are included here under this
 repository's MIT license (LICENSE) -- both projects are the same author's, so
 this is a relicensing the author confirmed, not an assumption.

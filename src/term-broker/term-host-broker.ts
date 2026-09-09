@@ -1,3 +1,9 @@
+// ⚠️ ESTE ARCHIVO SE VENDORIZA A CORTEX. Existe una COPIA byte-a-byte en `cortex/src/term-broker/`, que es
+// la que instala y corre `cortex-term-broker.service`. Se edita AQUÍ (axon es la fuente) y después se
+// RE-VENDORIZA allá: copiar los cinco módulos, regenerar `SHA256SUMS`, actualizar el commit anotado en
+// `PROCEDENCIA.md` y en `NOTICE`, y correr `probe-topes.ts` + `probe-instalador.sh`. El contrato completo,
+// con su anti-drift de tres chequeos, está en `cortex/src/term-broker/PROCEDENCIA.md`. Si cambias esto y no
+// re-vendorizas, el broker que sirve al usuario se queda atrás sin que nada lo señale.
 // src/server/term-host-broker.ts — BROKER host-side para el widget de Terminal de Odysseus.
 //
 // CONTEXTO: `/api/axon/term` (term-stream.ts + http-server.ts) corre el comando DENTRO del proceso de axon.
