@@ -95,12 +95,21 @@ export function relayWsToWs(a: WsConn, b: WsConn): void {
   // "peer closed" genérico — el mismo problema que el HTTP 503 pelón: dos causas opuestas, un solo texto.
   // Solo se reemplaza el código cuando el que viene NO es utilizable (1005 = sin código, 1006 = cierre
   // anormal sin frame CLOSE), porque el RFC prohíbe reenviarlos tal cual.
+  // …y el prefijo NO se acumula. Un relevo puede encadenarse (navegador → axon → broker → pty), y
+  // prefijando a ciegas el motivo llegaba como `peer: peer: peer: too many pty sessions (7/8)`: el
+  // ruido crece con cada salto, empuja la causa real fuera del tope de 123 bytes del CLOSE, y el
+  // cliente que lo parsea tiene que adivinar cuántos `peer:` quitar. Se conserva UN nivel: "vino del
+  // otro lado" + la causa original.
+  const PREFIJO_RELEVO = /^(?:peer(?: error)?:\s*)+/;
   const propagar = (destino: WsConn, origen: string) => (code: number, reason: string) => {
     const utilizable = code !== 1005 && code !== 1006;
-    destino.close(utilizable ? code : 1011, reason ? `${origen}: ${reason}` : `${origen}: cierre sin motivo`);
+    const causa = reason.replace(PREFIJO_RELEVO, "");
+    destino.close(utilizable ? code : 1011, causa ? `${origen}: ${causa}` : `${origen}: cierre sin motivo`);
   };
   a.onClose(propagar(b, "peer"));
   b.onClose(propagar(a, "peer"));
-  a.onError((e) => b.close(1011, `peer error: ${e.message}`));
-  b.onError((e) => a.close(1011, `peer error: ${e.message}`));
+  const propagarError = (destino: WsConn) => (e: Error) =>
+    destino.close(1011, `peer error: ${(e.message || "").replace(PREFIJO_RELEVO, "") || "sin motivo"}`);
+  a.onError(propagarError(b));
+  b.onError(propagarError(a));
 }
