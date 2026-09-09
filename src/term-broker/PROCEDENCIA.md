@@ -1,9 +1,35 @@
 # Procedencia de `src/term-broker/` — copia vendorizada desde axon, HOY CON UN PARCHE PROPIO
 
+> ## ⚠️ DIVERGENCIA VIVA (2026-09-09) — endurecimiento de auditoría, PENDIENTE de portar a axon
+> Una tupla de auditoría (3 auditores adversariales sobre el broker, el "ancla local" del harness) destapó
+> hallazgos reales; se arreglaron **aquí** por decisión de unjordi ("cortex es frontera compartida, arréglalo;
+> merge sin squash para que axon lo vea completo"). Estos módulos **YA NO son byte-a-byte de axon** — `SHA256SUMS`
+> se regeneró sobre la copia parcheada. **axon debe PORTAR estos fixes a su fuente y re-vendorizar** (igual que
+> se hizo con los topes); hasta entonces, re-vendorizar copiando encima desde axon **BORRARÍA estos parches**.
+> Los commits van **sin squash** justo para que axon los vea uno a uno. Fixes aplicados:
+> - **ws.ts** · `#1` cap AGREGADO de fragmentación → `close(1009)` (los 3 auditores lo marcaron: sin él,
+>   una ráfaga de frames CONT hacía OOM y tumbaba TODAS las terminales). `#2` reloj de "tiempo en
+>   contrapresión" (`backpressureDeadlineMs`, 60 s) → cierra el half-open que retenía slot+PTY+shell ~15 min
+>   (la válvula dura de 8 MiB quedaba dormida al pausar el productor). `L1` `head` del upgrade vía `unshift`
+>   (no perder un 1er frame pipelineado). `L3` frame de cliente sin mask → `close(1002)` (RFC §5.1). `L4`
+>   control-frames validados `fin=1 && ≤125 B`. `L5` `esperandoPong` se reinicia en el tick saltado.
+>   `CONT` sin inicio → `close(1002)`.
+> - **term-host-broker.ts** · `#4` token comparado con `crypto.timingSafeEqual` sobre digests SHA-256
+>   (constant-time, sin fuga de longitud). `headersTimeout`/`requestTimeout` explícitos (slowloris). `head`
+>   pasado al `acceptWebSocket`.
+> - **term-session.ts** · `#3` `StringDecoder` por stream → no corromper UTF-8 (acentos/ñ) partido en el
+>   borde de un chunk en el camino `/run` (el camino PTY no sufría esto).
+> - **pty-session.ts** · `L2` el parser del marcador de pts itera sobre los SOH sucesivos (un `0x01` espurio
+>   antes del marcador real ya no lo entierra).
+> - **Verificado en macOS** (bare, sin el `script` de util-linux): parse-check de los 5 módulos, loopback WS
+>   (TEXT/BINARY/fragmentado normal reensambla, over-cap→1009 sin OOM), `StringDecoder` sobre ñ partida.
+>   Los caminos que exigen el PTY (util-linux `script`) se verifican en el contenedor Linux / con `probe-topes.ts`.
+> - **NO tocado:** `#5` (superficie TCP loopback multi-usuario) — lo mejora unjordi aparte.
+
 Los cinco `.ts` de esta carpeta salieron como **copia byte-a-byte** de módulos del repo `axon`, y la
-regla sigue siendo *no se editan aquí*: lo normal es cambiarlos en axon y re-vendorizar (abajo está
-el comando). La divergencia que hubo con los topes **ya está saldada**; queda registrada abajo porque
-explica QUÉ hacer al re-vendorizar: [Divergencia vs axon](#divergencia-vs-axon--saldada-2026-09-08).
+regla sigue siendo *no se editan aquí* **salvo la divergencia viva de arriba**: lo normal es cambiarlos en
+axon y re-vendorizar (abajo está el comando). La divergencia que hubo con los topes **ya está saldada**;
+queda registrada abajo porque explica QUÉ hacer al re-vendorizar: [Divergencia vs axon](#divergencia-vs-axon--saldada-2026-09-08).
 
 | archivo | origen en axon | líneas (al vendorizar) | líneas (hoy) |
 |---|---|---|---|
