@@ -98,6 +98,11 @@ export interface ShellSessionPoolOptions {
   readonly loginArgs: string[];   // ej. ["-l"] (login) — el shell lee comandos de stdin, sin -c
   readonly home: string;          // cwd inicial del shell
   readonly idleMs?: number;       // reap tras este tiempo sin actividad (default 30 min)
+  /** Techo de sesiones concurrentes (default `DEFAULT_MAX_SESSIONS`). Un valor no-finito o <=0 cae al
+   *  default. Llegó con los topes del broker; el constructor ya lo leía, pero la interfaz no lo
+   *  declaraba: en cortex no se veía porque ahí los módulos corren con `--experimental-strip-types`,
+   *  sin `tsc`. */
+  readonly maxSessions?: number;
 }
 
 /** Marca de fin-de-comando: \001 + token aleatorio + exit code + \001. El control-char evita colisiones. */

@@ -44,6 +44,8 @@ const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 const DEFAULT_HIGH_WATER_BYTES = positiveEnv(process.env.AXON_TERM_BROKER_WS_HIGH_WATER, 1024 * 1024);
 /** Válvula dura: buffer pendiente que cierra ESA conexión (default 8 MiB). Nunca tumba el proceso. */
 const DEFAULT_MAX_BUFFER_BYTES = positiveEnv(process.env.AXON_TERM_BROKER_WS_MAX_BUFFER, 8 * 1024 * 1024);
+/** Cada cuánto se manda un ping de keepalive (default 30 s). `0` lo APAGA. */
+const DEFAULT_KEEPALIVE_MS = positiveEnv(process.env.AXON_TERM_BROKER_WS_KEEPALIVE_MS, 30_000);
 
 /** Lee un entero POSITIVO de una env var; cualquier basura (vacío, 0, negativo, NaN) cae al default. */
 function positiveEnv(raw: string | undefined, def: number): number {
@@ -51,11 +53,27 @@ function positiveEnv(raw: string | undefined, def: number): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : def;
 }
 
+/** Lo que se sabe cuando una conexión empieza a quedarse atrás. */
+export interface PressureInfo {
+  /** Bytes pendientes en el buffer AHORA. */
+  readonly pendingBytes: number;
+  /** La marca a partir de la cual se pausa al productor. */
+  readonly highWaterBytes: number;
+  /** El techo que, de cruzarse, corta la conexión. */
+  readonly maxBufferBytes: number;
+}
+
 export interface WsConnOptions {
   /** Buffer pendiente que marca `backpressured` (default: `AXON_TERM_BROKER_WS_HIGH_WATER` o 1 MiB). */
   readonly highWaterBytes?: number;
   /** Buffer pendiente que cierra la conexión (default: `AXON_TERM_BROKER_WS_MAX_BUFFER` o 8 MiB). */
   readonly maxBufferBytes?: number;
+  /** Periodo del ping de keepalive en ms (default: `AXON_TERM_BROKER_WS_KEEPALIVE_MS` o 30 s). */
+  readonly keepaliveMs?: number;
+  /** Temporizador inyectable — el probe pasa un reloj falso para no esperar 30 s de verdad. */
+  readonly setInterval?: (fn: () => void, ms: number) => { unref?: () => void };
+  /** Pareja de `setInterval`. Inyectable por la misma razón. */
+  readonly clearInterval?: (h: unknown) => void;
 }
 
 const OP_CONT = 0x0;
@@ -111,6 +129,47 @@ export class WsConn {
     socket.on("data", (d: Buffer) => this.onData(d));
     socket.on("close", () => this.fireClose(1006, "socket closed"));
     socket.on("error", (e: Error) => { if (this.errCb) this.errCb(e); this.fireClose(1006, e.message); });
+    this.armarKeepalive(opts);
+  }
+
+  // ── Keepalive ────────────────────────────────────────────────────────────────────────────────────────
+  // Por qué existe: `ping()` estaba implementado y NADIE lo llamaba. Una laptop que suspende deja la
+  // conexión HALF-OPEN — el socket nunca emite `close`, así que el techo de PTYs concurrentes cuenta hacia
+  // arriba y no baja jamás; la única reparación era reiniciar el broker, que mata TODAS las terminales.
+  //
+  // El ciclo es de UNA sola pregunta, sin relojes ni umbrales que comparar: en cada tick, si quedó un ping
+  // SIN contestar desde el tick anterior, el peer no está; si no, se manda uno nuevo. Elegido así a
+  // propósito sobre la variante "guardar lastPongAt y comparar contra un umbral": ahí el umbral y el
+  // periodo son dos números que pueden desalinearse (con umbral == periodo, el cierre real cae al SEGUNDO
+  // tick, no al primero — un detalle que se lee mal y se prueba peor).
+  private esperandoPong = false;
+  /** Código y razón con que NOSOTROS cerramos, para no reportar el 1006 genérico del socket. */
+  private motivoLocal: { code: number; reason: string } | null = null;
+  private pressureCb: ((info: PressureInfo) => void) | null = null;
+  private keepaliveHandle: unknown = null;
+  private keepaliveClear: ((h: unknown) => void) | null = null;
+
+  private armarKeepalive(opts: WsConnOptions): void {
+    const ms = opts.keepaliveMs !== undefined ? opts.keepaliveMs : DEFAULT_KEEPALIVE_MS;
+    if (!(ms > 0)) return;                       // 0 o basura ⇒ apagado, sin timer
+    const si = opts.setInterval ?? ((fn, n) => setInterval(fn, n));
+    this.keepaliveClear = opts.clearInterval ?? ((h) => clearInterval(h as NodeJS.Timeout));
+    const h = si(() => this.tickKeepalive(), ms);
+    // Un keepalive no es motivo para que el proceso siga vivo.
+    if (h && typeof h.unref === "function") h.unref();
+    this.keepaliveHandle = h;
+  }
+
+  private tickKeepalive(): void {
+    if (this.closed || this.closeSent) { this.pararKeepalive(); return; }
+    if (this.esperandoPong) { this.close(1011, "keepalive: sin pong"); return; }
+    this.esperandoPong = true;
+    this.ping();
+  }
+
+  private pararKeepalive(): void {
+    if (this.keepaliveHandle !== null && this.keepaliveClear) this.keepaliveClear(this.keepaliveHandle);
+    this.keepaliveHandle = null;
   }
 
   onMessage(cb: MsgHandler): this { this.msgCb = cb; return this; }
@@ -151,10 +210,22 @@ export class WsConn {
 
   ping(): void { if (!this.closed) this.writeFrame(OP_PING, Buffer.alloc(0)); }
 
+  /** Aviso de que esta conexión se está quedando atrás, ANTES de que la válvula dura la corte (M-2).
+   *  Se emite una vez por episodio de presión; al drenar, se rearma. */
+  onPressure(cb: (info: PressureInfo) => void): this { this.pressureCb = cb; return this; }
+
   /** Cierra ordenadamente (envía un frame CLOSE una vez). */
   close(code = 1000, reason = ""): void {
+    // El keepalive se para AQUÍ, no solo en `fireClose`: entre `close()` y el `close` del socket puede no
+    // haber nunca un evento (un peer que no contesta, un socket que no lo emite), y ahí el timer quedaría
+    // huérfano — justo la fuga que este mecanismo existe para cerrar.
+    this.pararKeepalive();
     if (this.closed || this.closeSent) { this.destroy(); return; }
     this.closeSent = true;
+    // Se recuerda POR QUÉ cerramos. Sin esto, el cierre le llega al consumidor como el 1006 genérico del
+    // socket ("socket closed") y la causa real se pierde: un techo alcanzado, un keepalive vencido y un
+    // cable desconectado se vuelven indistinguibles justo donde hay que decidir qué hacer.
+    this.motivoLocal = { code, reason };
     const rb = Buffer.from(reason, "utf8");
     const payload = Buffer.alloc(2 + rb.length);
     payload.writeUInt16BE(code, 0);
@@ -173,7 +244,9 @@ export class WsConn {
   private fireClose(code: number, reason: string): void {
     if (this.closed) return;
     this.closed = true;
-    if (this.closeCb) this.closeCb(code, reason);
+    this.pararKeepalive();   // por aquí pasan TODAS las vías de cierre, así que el timer nunca queda huérfano
+    const m = this.motivoLocal;
+    if (this.closeCb) this.closeCb(m ? m.code : code, m ? m.reason : reason);
   }
 
   private writeFrame(opcode: number, payload: Buffer): void {
@@ -220,10 +293,19 @@ export class WsConn {
       const pending = this.bufferedBytes;
       if (pending > this.maxBufferBytes) {
         // Válvula dura: el cliente no drena ni pausando. Se cierra ESTA conexión, no el proceso.
-        this.close(1013, "cliente no drena (buffer sobre el techo)");
+        // La razón lleva los NÚMEROS: sin ellos, quien recibe el cierre no puede distinguir "tu red se
+        // atoró" de "el broker se cayó", que es el mismo problema que arrastraba el 1006 genérico.
+        this.close(1013, `cliente no drena: ${pending} B pendientes sobre el techo de ${this.maxBufferBytes} B`);
         return;
       }
       if (pending > this.highWaterBytes && !this.waitingDrain) {
+        // AVISO antes del hachazo (M-2): la válvula dura mataba la sesión sin que nadie hubiera dicho que
+        // la conexión venía quedándose atrás. Se emite UNA vez por episodio de presión — al drenar se
+        // rearma —, así que no puede convertirse en un chorro de eventos.
+        if (this.pressureCb) {
+          try { this.pressureCb({ pendingBytes: pending, highWaterBytes: this.highWaterBytes, maxBufferBytes: this.maxBufferBytes }); }
+          catch { /* el consumidor decide qué hacer con el aviso; su error no nos mata */ }
+        }
         this.waitingDrain = true;
         this.socket.once("drain", () => {
           this.waitingDrain = false;
@@ -277,6 +359,7 @@ export class WsConn {
         if (!this.closed) this.writeFrame(OP_PONG, payload);
         return;
       case OP_PONG:
+        this.esperandoPong = false;
         return;
       case OP_CLOSE: {
         const code = payload.length >= 2 ? payload.readUInt16BE(0) : 1005;

@@ -2,19 +2,20 @@
 
 Los cinco `.ts` de esta carpeta salieron como **copia byte-a-byte** de módulos del repo `axon`, y la
 regla sigue siendo *no se editan aquí*: lo normal es cambiarlos en axon y re-vendorizar (abajo está
-el comando). **Hoy hay UNA excepción viva y pendiente de portar** — léela antes de re-vendorizar
-nada: [Divergencia vs axon](#divergencia-vs-axon--pendiente-de-portar).
+el comando). La divergencia que hubo con los topes **ya está saldada**; queda registrada abajo porque
+explica QUÉ hacer al re-vendorizar: [Divergencia vs axon](#divergencia-vs-axon--saldada-2026-09-08).
 
 | archivo | origen en axon | líneas (al vendorizar) | líneas (hoy) |
 |---|---|---|---|
-| `term-host-broker.ts` | `src/server/term-host-broker.ts` | 394 | 475 |
-| `term-session.ts` | `src/server/term-session.ts` | 263 | 302 |
+| `term-host-broker.ts` | `src/server/term-host-broker.ts` | 394 | 498 |
+| `term-session.ts` | `src/server/term-session.ts` | 263 | 307 |
 | `term-pty-bridge.ts` | `src/server/term-pty-bridge.ts` | 70 | 91 |
-| `ws.ts` | `src/server/ws.ts` | 306 | 400 |
-| `pty-session.ts` | `src/server/pty-session.ts` | 188 | 206 |
-| | **total** | **1221** | **1474** |
+| `ws.ts` | `src/server/ws.ts` | 306 | 483 |
+| `pty-session.ts` | `src/server/pty-session.ts` | 188 | 307 |
+| | **total** | **1221** | **2121** |
 
-**Commit de origen:** `341fb53` (`origin/develop` de axon, 2026-09-07). Re-vendorizado desde
+**Commit de origen:** `8719248` (rama `feat/broker-conciliar-axon-cortex` de axon, 2026-09-08) — el
+commit en que los topes de esta copia ya viven río arriba. Antes fue `341fb53` (2026-09-07), re-vendorizado desde
 `cf840e6` para traer el **socket unix** (`fix/term-broker-alcanzable`, #75): un cliente en
 contenedor NO alcanza un bind a loopback del host, así que la copia anterior servía un broker que la
 terminal del widget no podía usar. De paso llegan `GET /health` (lo que sondea el badge) y el
@@ -27,42 +28,28 @@ renglón seguido escupía un stack trace.
 Los `sha256` de la copia viven en [`SHA256SUMS`](SHA256SUMS), al lado. No es decoración: es lo que
 se **verifica**.
 
-## Divergencia vs axon — PENDIENTE DE PORTAR
+## Divergencia vs axon — SALDADA (2026-09-08)
 
-Estos módulos ya **no** son byte-a-byte iguales a axon `341fb53`. Se les añadió aquí, en cortex, los
-**topes** del broker (rama `feat/broker-topes`): techo de sesiones de shell concurrentes, techo de
-PTYs concurrentes, y **backpressure** en el relay del WebSocket. El qué y el porqué están en
-[`docs/term-broker.md` § Topes](../../docs/term-broker.md); el detalle, en los comentarios de cada
-módulo. Los cinco archivos tocados:
+Hubo un rato en que estos módulos **no** eran byte-a-byte iguales a axon: aquí se les añadieron los
+**topes** del broker (techo de sesiones, techo de PTYs, backpressure en el relay) mientras axon avanzaba
+por su lado (manejo de error de `listen()`, socket unix, cola de resizes). El `diff` no daba vacío en
+ninguna de las dos direcciones, y eso dejaba una trampa: **re-vendorizar copiando encima desde axon
+habría borrado los topes en silencio**.
 
-| archivo | qué se le agregó |
-|---|---|
-| `term-session.ts` | `maxSessions` + rechazo `SESSION_LIMIT` + `size`/`limit` |
-| `term-host-broker.ts` | techo de PTYs (`503` en el handshake), cableado de las env `MAX_*`, y `uncaughtException`/`unhandledRejection` en `main()` |
-| `ws.ts` | `bufferedBytes`/`backpressured`/`onDrain`/`pause`/`resume` + válvula dura de buffer |
-| `term-pty-bridge.ts` | pausar el PTY (y el socket peer, en el relay WS↔WS) cuando el destino no drena |
-| `pty-session.ts` | `pause()`/`resume()` sobre la salida del PTY |
+Se resolvió por la vía buena, la que esta misma sección recomendaba: **portar el parche a axon** —con un
+merge a 3 vías tomando como base el commit del que se vendorizó, que entró limpio en los cinco módulos— y
+re-vendorizar desde ahí. Hoy la copia vuelve a ser byte-a-byte de axon, y axon corre EL MISMO código en su
+modo contenedor, así que el shell contenerizado ya no se queda sin topes.
 
-**Lo que esto implica, dicho sin adornos:** el `diff` contra axon ya no da vacío, y una
-re-vendorización *ingenua* (copiar los cinco desde axon encima de éstos) **borraría los topes en
-silencio** — el broker volvería a no tener ninguno y nadie se enteraría hasta la siguiente fuga. Las
-dos salidas, en orden de preferencia:
+De paso, la conciliación destapó un **error de tipos** que aquí no podía verse: el parche usaba
+`opts.maxSessions` sin declararlo en `ShellSessionPoolOptions`. Estos módulos corren con
+`--experimental-strip-types` y nunca pasan por `tsc`; axon sí typechequea, y lo cazó al primer intento.
+Ésa es la razón de que el anti-drift de abajo tenga un tercer chequeo pendiente: los hashes prueban
+"nadie editó esto a escondidas", no "esto compila".
 
-1. **Portar el parche a axon** (`src/server/{term-session,term-host-broker,ws,term-pty-bridge,pty-session}.ts`)
-   y re-vendorizar desde ese commit. Es la buena: axon corre EL MISMO código en su modo contenedor
-   (ver el punto 2 de "Por qué COPIA…", abajo), así que hoy el broker de cortex tiene topes y el
-   shell contenerizado de axon **no**.
-2. Si se re-vendoriza antes de portar: **re-aplicar este parche a mano** sobre la copia nueva, y
-   correr `probe-topes.ts` (abajo) para comprobar que sigue vivo. Nunca dar por buena una copia
-   nueva sin ese probe en verde.
-
-El chequeo (1) de la sección siguiente (`sha256sum -c SHA256SUMS`) **sigue sirviendo y sigue verde**:
-sus hashes se regeneraron con esta copia, así que protege de lo que siempre protegió — un edit
-accidental *aquí* que nadie declaró. Lo que ya no puede afirmar es "idéntico a axon"; eso lo dice el
-chequeo (2), que a partir de hoy va a reportar DRIFT hasta que el parche esté portado. **Es correcto
-que lo reporte** — el drift existe, y está documentado en esta sección.
-
-Los topes tienen su propia prueba funcional, que no depende de nada instalado:
+**La regla no cambia:** los cinco `.ts` **no se editan aquí**. Se cambian en axon y se re-vendorizan.
+Después de cada re-vendorización, correr el probe de topes — es lo que comprueba que el mecanismo sigue
+vivo, y no darlo por hecho:
 
 ```bash
 node --disable-warning=ExperimentalWarning --experimental-strip-types src/term-broker/probe-topes.ts
@@ -72,7 +59,8 @@ node --disable-warning=ExperimentalWarning --experimental-strip-types src/term-b
 
 Había un problema con el chequeo que vivía aquí: nadie lo corría, y apuntaba a `origin/develop` —una
 ref **móvil**—, así que "idéntico" solo significaba "idéntico a lo que develop tenga hoy", que es
-otra cosa que "idéntico a lo que dice este archivo". Se parte en dos, y la primera es automática:
+otra cosa que "idéntico a lo que dice este archivo". Se parte en tres, y las dos primeras son
+automáticas:
 
 **(1) ¿La copia local sigue siendo la que se vendorizó?** Lo corre `probe-instalador.sh` en cada
 pasada (check *"módulos idénticos a la fuente"*), y no necesita un clon de axon:
@@ -100,6 +88,36 @@ git -C ~/code/axon diff --stat $VEND origin/develop -- src/server/{term-host-bro
 Re-vendorizar = copiar los 5 desde el nuevo commit, regenerar `SHA256SUMS`
 (`sha256sum term-host-broker.ts term-session.ts term-pty-bridge.ts ws.ts pty-session.ts > SHA256SUMS`),
 actualizar el commit y las líneas de la tabla de arriba, y el commit en `NOTICE`.
+
+**(3) ¿Los 5 módulos COMPILAN?** Es la que faltaba, y la razón de que exista: (1) y (2) verifican que
+la copia sea idéntica a algo (a sí misma ayer, o al commit de axon) — **ninguna de las dos ejecuta el
+código ni lo typechequea**, así que un edit *declarado* y con hashes regenerados podía tener un error
+de tipos y las dos seguir en verde. Pasó de verdad: el parche de topes usaba `opts.maxSessions` en
+`term-session.ts` sin declararlo en `ShellSessionPoolOptions` — vivió así hasta que el mismo código se
+typechequeó del lado de axon, porque esta carpeta corre con `node --experimental-strip-types` (nunca
+pasa por `tsc`). Ahora lo corre `probe-instalador.sh` en cada pasada (check *"tsc --noEmit sale limpio
+sobre los 5 módulos"*):
+
+```bash
+tsc --noEmit --target ES2022 --module ES2022 --moduleResolution bundler --lib ES2023 --strict \
+  --esModuleInterop --skipLibCheck --forceConsistentCasingInFileNames --allowImportingTsExtensions \
+  --resolveJsonModule --typeRoots <ruta-a-@types-de-axon> --types node \
+  term-host-broker.ts term-session.ts term-pty-bridge.ts ws.ts pty-session.ts
+```
+
+cortex no trae `tsc` propio a propósito (cero deps de npm es parte del diseño de esta carpeta, ver
+"Por qué COPIA…" punto 4 más abajo), así que el chequeo reutiliza el `tsc` que ya trae axon —el propio
+repo de origen de estos módulos, normalmente clonado como hermano de cortex— con las mismas
+`compilerOptions` de su `tsconfig.json` (no se pueden pasar junto con una lista explícita de archivos:
+TypeScript lo rechaza con `TS5042`, de ahí que se repliquen a mano). **Si no hay un `tsc`+`@types/node`
+verificable a mano** (máquina limpia, sin axon clonado al lado, o axon sin `npm install` corrido), el
+chequeo se **SALTA con un aviso explícito** en la salida del probe — no se instala una dependencia
+nueva ni se falla en falso solo porque falte una herramienta opcional.
+
+**Lo que (3) protege y lo que NO:** atrapa cualquier error de tipos en los 5 módulos, lo haya
+introducido un patch de cortex o una re-vendorización mal aplicada. No sustituye a (1) ni a (2): un
+módulo puede typechecar perfecto y aun así haber divergido de axon en runtime (p. ej. un `any`
+disfrazando un bug de lógica), o haber sido editado aquí sin declararlo — para eso siguen (1) y (2).
 
 Como la copia es byte-a-byte, ese `diff` es el chequeo completo: cualquier cambio en axon aparece
 como un diff legible, no como "a ver quién cambió qué". Por eso **no** se tocan los comentarios

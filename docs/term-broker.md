@@ -318,7 +318,8 @@ que el buffer se quede pegado al *high water* en vez de crecer.
 
 `src/term-broker/*.ts` salió como copia **byte-a-byte** de módulos de axon, con el commit de origen y
 los `sha256` anotados, más el argumento de por qué copia y no artefacto:
-[`../src/term-broker/PROCEDENCIA.md`](../src/term-broker/PROCEDENCIA.md). ⚠️ Los **topes** de esta
-página se implementaron *aquí*, así que hoy esa copia **diverge** de axon y está pendiente de portar
-río arriba — el detalle y las dos salidas están en la sección *Divergencia vs axon* de ese mismo
-archivo. Léela antes de re-vendorizar: una copia ingenua desde axon borraría los topes en silencio.
+[`../src/term-broker/PROCEDENCIA.md`](../src/term-broker/PROCEDENCIA.md). Los **topes** de esta página
+nacieron *aquí*, y durante un tiempo eso hizo divergir la copia; ya se portaron río arriba y se
+re-vendorizó, así que hoy vuelve a ser byte-a-byte de axon. **Al re-vendorizar, corre el probe de topes
+después** (`src/term-broker/probe-topes.ts`): es lo que comprueba que el mecanismo sigue vivo en la copia
+nueva, en vez de darlo por hecho.
