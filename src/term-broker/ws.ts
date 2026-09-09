@@ -1,3 +1,9 @@
+// ⚠️ ESTE ARCHIVO SE VENDORIZA A CORTEX. Existe una COPIA byte-a-byte en `cortex/src/term-broker/`, que es
+// la que instala y corre `cortex-term-broker.service`. Se edita AQUÍ (axon es la fuente) y después se
+// RE-VENDORIZA allá: copiar los cinco módulos, regenerar `SHA256SUMS`, actualizar el commit anotado en
+// `PROCEDENCIA.md` y en `NOTICE`, y correr `probe-topes.ts` + `probe-instalador.sh`. El contrato completo,
+// con su anti-drift de tres chequeos, está en `cortex/src/term-broker/PROCEDENCIA.md`. Si cambias esto y no
+// re-vendorizas, el broker que sirve al usuario se queda atrás sin que nada lo señale.
 // src/server/ws.ts — WebSocket MÍNIMO (RFC 6455) hecho a mano, SIN dep `ws`.
 //
 // POR QUÉ a mano: axon tiene UNA sola dep de runtime (@anthropic-ai/claude-agent-sdk) y el ethos es
@@ -162,6 +168,21 @@ export class WsConn {
 
   private tickKeepalive(): void {
     if (this.closed || this.closeSent) { this.pararKeepalive(); return; }
+    // El keepalive solo puede concluir algo cuando el silencio es INFORMATIVO. Hay dos estados en que no
+    // lo es, y en los dos el veredicto "sin pong" mataría una conexión perfectamente viva:
+    //
+    //  • PAUSADA por contrapresión: `pause()` corta los eventos `data` del socket, o sea también los
+    //    PONG. El peer contestó y su respuesta está en el buffer del kernel, ilegible por diseño. Sin
+    //    esta guarda, un `find /` en la terminal la mata a media ejecución POR IR LENTA — y el keepalive
+    //    existía justo para preservar conexiones, no para cortarlas.
+    //  • Con BUFFER pendiente: el ping viaja EN BANDA, detrás de lo encolado. Un cliente vivo pero lento
+    //    (un tethering con 1 MiB por delante) no alcanza a recibirlo dentro del tick, mucho menos a
+    //    contestarlo.
+    //
+    // En ambos casos se salta el veredicto y se espera al siguiente tick. Un half-open real NO drena ni
+    // se despausa, así que el buffer se queda quieto y la válvula dura (`maxBufferBytes`) lo corta por su
+    // cuenta: la conexión muerta sigue teniendo quien la cierre.
+    if (this.isPaused || this.bufferedBytes > 0) return;
     if (this.esperandoPong) { this.close(1011, "keepalive: sin pong"); return; }
     this.esperandoPong = true;
     this.ping();
@@ -475,7 +496,16 @@ export function wsConnect(url: string, opts: WsConnectOptions = {}): Promise<WsC
       if (accept !== acceptKey(key)) { try { socket.destroy(); } catch { /* */ } reject(new Error("Sec-WebSocket-Accept inválido")); return; }
       resolve(new WsConn(socket, false, opts));
     });
-    req.on("response", (res) => { if (settled) return; settled = true; reject(new Error(`WS upgrade rechazado: HTTP ${res.statusCode}`)); req.destroy(); });
+    req.on("response", (res) => {
+      if (settled) return; settled = true;
+      // La REASON PHRASE es donde `rejectWebSocket` pone el porqué ("too many pty sessions (7/8)"), y
+      // quedarse solo con el número de estado la tiraba: al otro extremo llegaba un `HTTP 503` pelón,
+      // indistinguible de cualquier otro rechazo. Un techo alcanzado y un servicio caído piden acciones
+      // opuestas — cerrar una terminal que ya no usas, o revisar el broker —, así que el motivo VIAJA.
+      const motivo = typeof res.statusMessage === "string" ? res.statusMessage.trim() : "";
+      reject(new Error(`WS upgrade rechazado: HTTP ${res.statusCode}${motivo ? ` — ${motivo}` : ""}`));
+      req.destroy();
+    });
     req.on("error", (e) => { if (settled) return; settled = true; reject(e); });
     req.on("timeout", () => { if (settled) return; settled = true; req.destroy(); reject(new Error("WS connect timeout")); });
     req.end();
