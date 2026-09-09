@@ -52,6 +52,10 @@ const DEFAULT_HIGH_WATER_BYTES = positiveEnv(process.env.AXON_TERM_BROKER_WS_HIG
 const DEFAULT_MAX_BUFFER_BYTES = positiveEnv(process.env.AXON_TERM_BROKER_WS_MAX_BUFFER, 8 * 1024 * 1024);
 /** Cada cuánto se manda un ping de keepalive (default 30 s). `0` lo APAGA. */
 const DEFAULT_KEEPALIVE_MS = positiveEnv(process.env.AXON_TERM_BROKER_WS_KEEPALIVE_MS, 30_000);
+/** Máximo tiempo CONTINUO en contrapresión (buffer sobre high-water sin drenar) antes de cerrar ESA
+ *  conexión por half-open (#2, auditoría 2026-09-09). Generoso: un cliente lento-pero-vivo drena ALGO y
+ *  rearma el episodio mucho antes; solo un half-open real llega al tope. `0` lo apaga (default 60 s). */
+const DEFAULT_BACKPRESSURE_DEADLINE_MS = positiveEnv(process.env.AXON_TERM_BROKER_WS_BACKPRESSURE_DEADLINE_MS, 60_000);
 
 /** Lee un entero POSITIVO de una env var; cualquier basura (vacío, 0, negativo, NaN) cae al default. */
 /** El motivo de un CLOSE, recortado a los 123 bytes que deja el RFC (125 del frame de control − 2 del
@@ -87,6 +91,8 @@ export interface WsConnOptions {
   readonly maxBufferBytes?: number;
   /** Periodo del ping de keepalive en ms (default: `AXON_TERM_BROKER_WS_KEEPALIVE_MS` o 30 s). */
   readonly keepaliveMs?: number;
+  /** Máximo tiempo CONTINUO en contrapresión antes de cerrar por half-open (#2; default 60 s, `0` apaga). */
+  readonly backpressureDeadlineMs?: number;
   /** Temporizador inyectable — el probe pasa un reloj falso para no esperar 30 s de verdad. */
   readonly setInterval?: (fn: () => void, ms: number) => { unref?: () => void };
   /** Pareja de `setInterval`. Inyectable por la misma razón. */
@@ -128,6 +134,14 @@ export class WsConn {
   // Acumulador de mensajes fragmentados (continuación).
   private fragOpcode = 0;
   private fragChunks: Buffer[] = [];
+  /** Suma de bytes acumulados en la fase de fragmentación (frames CONT). Cota anti-OOM (auditoría 2026-09-09,
+   *  3/3 auditores): el cap per-frame de `onData` no acota la SUMA de una ráfaga de continuaciones. */
+  private fragTotal = 0;
+  /** Timer del "tiempo en contrapresión" (#2): se arma al ENTRAR en backpressure y se desarma al drenar.
+   *  Si vence estando aún backpressured, el cliente está muerto/half-open y NO drenó → se cierra ESTA
+   *  conexión (la válvula dura de `maxBufferBytes` queda DORMIDA cuando el productor pausa en high-water,
+   *  y el keepalive se salta con buffer>0 → sin esto solo el RTO del kernel lo reapea, ~15 min). */
+  private drainTimer: ReturnType<typeof setTimeout> | null = null;
 
   private msgCb: MsgHandler | null = null;
   private closeCb: CloseHandler | null = null;
@@ -136,6 +150,7 @@ export class WsConn {
   // Backpressure (ver el bloque de arriba): umbrales por conexión + el flag de "ya pedí un drain".
   private readonly highWaterBytes: number;
   private readonly maxBufferBytes: number;
+  private readonly backpressureDeadlineMs: number;
   private waitingDrain = false;
 
   constructor(socket: Duplex, isServer: boolean, opts: WsConnOptions = {}) {
@@ -143,6 +158,7 @@ export class WsConn {
     this.isServer = isServer;
     this.highWaterBytes = opts.highWaterBytes && opts.highWaterBytes > 0 ? opts.highWaterBytes : DEFAULT_HIGH_WATER_BYTES;
     this.maxBufferBytes = opts.maxBufferBytes && opts.maxBufferBytes > 0 ? opts.maxBufferBytes : DEFAULT_MAX_BUFFER_BYTES;
+    this.backpressureDeadlineMs = opts.backpressureDeadlineMs !== undefined ? opts.backpressureDeadlineMs : DEFAULT_BACKPRESSURE_DEADLINE_MS;
     socket.on("data", (d: Buffer) => this.onData(d));
     socket.on("close", () => this.fireClose(1006, "socket closed"));
     socket.on("error", (e: Error) => { if (this.errCb) this.errCb(e); this.fireClose(1006, e.message); });
@@ -193,7 +209,11 @@ export class WsConn {
     // En ambos casos se salta el veredicto y se espera al siguiente tick. Un half-open real NO drena ni
     // se despausa, así que el buffer se queda quieto y la válvula dura (`maxBufferBytes`) lo corta por su
     // cuenta: la conexión muerta sigue teniendo quien la cierre.
-    if (this.isPaused || this.bufferedBytes > 0) return;
+    // Al saltar el veredicto se OLVIDA que estábamos esperando pong (L5): si no, un ping quedó en vuelo, el
+    // buffer creció, saltamos este tick, y un tick posterior —en la ventana estrecha entre despausar y que
+    // llegue el pong— mataría una conexión VIVA con "sin pong". Reiniciar es conservador: a lo sumo un ping de
+    // más el próximo ciclo. El half-open real igual se cierra por el cap de contrapresión (#2) o el kernel.
+    if (this.isPaused || this.bufferedBytes > 0) { this.esperandoPong = false; return; }
     if (this.esperandoPong) { this.close(1011, "keepalive: sin pong"); return; }
     this.esperandoPong = true;
     this.ping();
@@ -252,6 +272,7 @@ export class WsConn {
     // haber nunca un evento (un peer que no contesta, un socket que no lo emite), y ahí el timer quedaría
     // huérfano — justo la fuga que este mecanismo existe para cerrar.
     this.pararKeepalive();
+    if (this.drainTimer) { clearTimeout(this.drainTimer); this.drainTimer = null; }
     if (this.closed || this.closeSent) { this.destroy(); return; }
     this.closeSent = true;
     // Se recuerda POR QUÉ cerramos. Sin esto, el cierre le llega al consumidor como el 1006 genérico del
@@ -281,6 +302,7 @@ export class WsConn {
     if (this.closed) return;
     this.closed = true;
     this.pararKeepalive();   // por aquí pasan TODAS las vías de cierre, así que el timer nunca queda huérfano
+    if (this.drainTimer) { clearTimeout(this.drainTimer); this.drainTimer = null; }
     const m = this.motivoLocal;
     if (this.closeCb) this.closeCb(m ? m.code : code, m ? m.reason : reason);
   }
@@ -343,12 +365,33 @@ export class WsConn {
           catch { /* el consumidor decide qué hacer con el aviso; su error no nos mata */ }
         }
         this.waitingDrain = true;
+        // #2: arma el reloj de "tiempo en contrapresión". Vive independiente de que `checkBackpressure`
+        // vuelva a llamarse — clave, porque cuando el productor PAUSA en high-water (term-pty-bridge) deja
+        // de llamarse y la válvula dura queda dormida. Si vence y SEGUIMOS backpressured, el cliente no
+        // drenó nunca (half-open) → cerramos ESTA conexión. Un cliente lento-pero-vivo dispara 'drain'
+        // antes, lo desarma y rearma el episodio → jamás lo mata.
+        this.armarDeadlineDrenaje();
         this.socket.once("drain", () => {
           this.waitingDrain = false;
+          if (this.drainTimer) { clearTimeout(this.drainTimer); this.drainTimer = null; }
           if (this.drainCb) { try { this.drainCb(); } catch { /* el productor decide, nosotros no morimos */ } }
         });
       }
     } catch { /* socket en un estado raro: no es motivo para tumbar el broker */ }
+  }
+
+  /** Arma (o rearma) el reloj de contrapresión (#2). Idempotente por episodio: si ya hay uno, no duplica. */
+  private armarDeadlineDrenaje(): void {
+    if (!(this.backpressureDeadlineMs > 0) || this.drainTimer !== null) return;
+    const t = setTimeout(() => {
+      this.drainTimer = null;
+      // Solo cierra si SEGUIMOS backpressured (evita la carrera de que drenara justo antes del disparo).
+      if (!this.closed && this.bufferedBytes > this.highWaterBytes) {
+        this.close(1013, `cliente no drena en ${this.backpressureDeadlineMs}ms: ${this.bufferedBytes} B atascados (half-open)`);
+      }
+    }, this.backpressureDeadlineMs);
+    if (typeof t.unref === "function") t.unref();
+    this.drainTimer = t;
   }
 
   private onData(chunk: Buffer): void {
@@ -361,6 +404,10 @@ export class WsConn {
       const fin = (b0 & 0x80) !== 0;
       const opcode = b0 & 0x0f;
       const masked = (b1 & 0x80) !== 0;
+      // RFC 6455 §5.1: un servidor DEBE fallar la conexión ante un frame de CLIENTE sin enmascarar (evita
+      // que un intermediario cachee/confunda el tráfico). Los clientes aquí son de confianza, pero el guard
+      // es barato y cierra una desviación de spec (L3, auditoría 2026-09-09). No aplica al rol cliente.
+      if (this.isServer && !masked) { this.close(1002, "frame de cliente sin mask"); return; }
       let len = b1 & 0x7f;
       let offset = 2;
       if (len === 126) {
@@ -390,6 +437,11 @@ export class WsConn {
   }
 
   private handleFrame(fin: boolean, opcode: number, payload: Buffer): void {
+    // L4 (RFC 6455 §5.5): los frames de CONTROL (>=0x8: CLOSE/PING/PONG) DEBEN ir sin fragmentar (fin=1) y
+    // con payload <=125 B. Sin esto, un PING gigante se re-emitía como PONG con longitud extendida = frame
+    // INVÁLIDO que un peer estricto tira; y un CLOSE sobredimensionado se hacía eco igual. Se tratan como
+    // error de protocolo. (auditoría 2026-09-09)
+    if (opcode >= 0x8 && (!fin || payload.length > 125)) { this.close(1002, "control frame inválido"); return; }
     switch (opcode) {
       case OP_PING:
         if (!this.closed) this.writeFrame(OP_PONG, payload);
@@ -407,16 +459,28 @@ export class WsConn {
       }
       case OP_TEXT:
       case OP_BIN: {
-        if (!fin) { this.fragOpcode = opcode; this.fragChunks = [payload]; return; }
+        if (!fin) { this.fragOpcode = opcode; this.fragChunks = [payload]; this.fragTotal = payload.length; return; }
         this.deliver(opcode, payload);
         return;
       }
       case OP_CONT: {
+        // CONT sin un TEXT/BIN fin=0 previo es un error de protocolo (RFC §5.4): sin esto se entregaba un
+        // mensaje con fragOpcode=0 (opcode inválido). (auditoría 2026-09-09)
+        if (this.fragOpcode === 0) { this.close(1002, "continuación sin inicio"); return; }
+        // #1 (3/3 auditores): CAP AGREGADO de la fragmentación. El cap per-frame de `onData` (16 MiB) NO acota
+        // la SUMA de una ráfaga de continuaciones → `fragChunks` crecía sin techo → OOM que tumba TODAS las
+        // terminales. Se topa la suma al MISMO límite que un frame único y se cierra 1009.
+        this.fragTotal += payload.length;
+        if (this.fragTotal > MAX_MESSAGE_BYTES) {
+          this.fragChunks = []; this.fragOpcode = 0; this.fragTotal = 0;
+          this.close(1009, "message too big");
+          return;
+        }
         this.fragChunks.push(payload);
         if (fin) {
           const full = Buffer.concat(this.fragChunks);
           const op = this.fragOpcode;
-          this.fragChunks = []; this.fragOpcode = 0;
+          this.fragChunks = []; this.fragOpcode = 0; this.fragTotal = 0;
           this.deliver(op, full);
         }
         return;
@@ -442,7 +506,7 @@ export function isWebSocketUpgrade(req: IncomingMessage): boolean {
  * Completa el handshake del lado SERVIDOR sobre `socket` (del evento 'upgrade' de http.Server) y devuelve una
  * WsConn lista. Devuelve `null` si el request no es un upgrade WS válido (el caller debe destruir el socket).
  */
-export function acceptWebSocket(req: IncomingMessage, socket: Duplex, opts: WsConnOptions = {}): WsConn | null {
+export function acceptWebSocket(req: IncomingMessage, socket: Duplex, opts: WsConnOptions = {}, head?: Buffer): WsConn | null {
   if (!isWebSocketUpgrade(req)) return null;
   const key = req.headers["sec-websocket-key"] as string;
   const headers = [
@@ -453,6 +517,10 @@ export function acceptWebSocket(req: IncomingMessage, socket: Duplex, opts: WsCo
     "\r\n",
   ].join("\r\n");
   socket.write(headers);
+  // L1 (auditoría 2026-09-09): Node entrega en `head` los bytes que ya leyó DESPUÉS del handshake (un peer
+  // que pipelinea su 1er frame en el mismo segmento TCP). Esos bytes NO se re-emiten como 'data' → se
+  // perderían. `unshift` los devuelve al stream para que el parser de WsConn los procese como cualquier dato.
+  if (head && head.length) { try { socket.unshift(head); } catch { /* socket ya muerto */ } }
   return new WsConn(socket, true, opts);
 }
 
@@ -505,10 +573,12 @@ export function wsConnect(url: string, opts: WsConnectOptions = {}): Promise<WsC
       timeout: opts.timeoutMs ?? 8000,
     });
     let settled = false;
-    req.on("upgrade", (res, socket) => {
+    req.on("upgrade", (res, socket, head) => {
       if (settled) return; settled = true;
       const accept = res.headers["sec-websocket-accept"];
       if (accept !== acceptKey(key)) { try { socket.destroy(); } catch { /* */ } reject(new Error("Sec-WebSocket-Accept inválido")); return; }
+      // L1: mismos bytes-tras-handshake que en el server (un peer que pipelinea su 1er frame) → unshift.
+      if (head && head.length) { try { socket.unshift(head); } catch { /* socket ya muerto */ } }
       resolve(new WsConn(socket, false, opts));
     });
     req.on("response", (res) => {
