@@ -14,6 +14,10 @@
 #      (arrancan las dos, una gana el bind, la otra cicla; si gana la nueva el cliente recibe 401 y
 #      axon se va al shell del contenedor sin una sola pista para el usuario).
 #   G) Los VENDORIZADOS instalados calzan con SHA256SUMS, y los PROBES no se copian al runtime.
+#   H) Los 5 módulos VENDORIZADOS typechecan (`tsc --noEmit`), si hay un `tsc` utilizable a mano —
+#      si no lo hay, se AVISA y se SALTA (no se falla en falso). Corre sobre el ÁRBOL del repo, no
+#      sobre el sandbox de instalación: protege contra un edit DECLARADO que no compila (el hashsum
+#      de G solo protege contra un edit NO declarado). Ver PROCEDENCIA.md § "El anti-drift".
 #
 # Cómo es seguro: HOME apunta a un temporal y PATH a un directorio de stubs donde `systemctl`,
 # `kpackagetool6`, `ccusage` y `claude` solo REGISTRAN su invocación en un log. Nada toca el
@@ -212,6 +216,45 @@ ck "systemd recibió disable del broker" grep -q "disable --now cortex-term-brok
 ck "--keep-cfg conserva el token"   test -f "$ENVF"
 ( cd "$ROOT" && bash ./uninstall.sh --no-brain >/dev/null 2>&1 )
 ck "sin --keep-cfg el token se borra" test ! -e "$ENVF"
+
+echo
+echo "— H) los 5 módulos vendorizados TYPECHECAN (tsc --noEmit) —"
+# El chequeo (1) de PROCEDENCIA.md (sha256sum contra SHA256SUMS, arriba en B/G) protege de un edit NO
+# declarado: alguien "arregla" un módulo aquí y la copia deja de ser copia sin que nada se queje. NO
+# protege de un edit DECLARADO que no compila — que es justo lo que pasó: el parche de topes usó
+# `opts.maxSessions` en term-session.ts sin declararlo en `ShellSessionPoolOptions`, y como esta
+# carpeta corre con `node --experimental-strip-types` (nunca pasa por tsc), vivió así hasta que el
+# mismo código se typechequeó del lado de axon.
+#
+# cortex no trae TypeScript propio a propósito (cero deps de npm es parte del diseño de esta carpeta,
+# ver PROCEDENCIA.md § "Por qué COPIA…" punto 4) y este chequeo no le agrega una: instalar `typescript`
+# solo para esto metería una dependencia pesada a un instalador que hoy corre con `curl | bash` en una
+# máquina limpia, sin red garantizada. En vez de eso se aprovecha, SI YA ESTÁ, el `tsc` que trae el
+# propio axon (el repo de origen de estos módulos — casi siempre clonado como hermano de cortex en la
+# máquina de quien desarrolla), con las MISMAS compilerOptions de su tsconfig.json (no se puede pasar
+# `--project` junto con una lista de archivos: TypeScript lo rechaza con TS5042, así que se replican
+# los flags a mano; si axon cambia su tsconfig, este bloque se re-sincroniza igual que se re-sincroniza
+# el commit vendorizado). Si no hay un tsc+@types/node verificable a mano (máquina limpia, sin axon
+# clonado al lado, o axon sin `npm install` corrido), el chequeo se SALTA con un aviso EXPLÍCITO —
+# fallar en falso en la máquina de un colega es peor que no tener el chequeo.
+AXON_SIBLING="$(dirname "$ROOT")/axon"
+AXON_TSC="$AXON_SIBLING/node_modules/.bin/tsc"
+AXON_TYPES="$AXON_SIBLING/node_modules/@types/node"
+if [[ -x "$AXON_TSC" && -d "$AXON_TYPES" ]]; then
+  VEND_TS=(term-host-broker term-session term-pty-bridge ws pty-session)
+  VEND_PATHS=()
+  for f in "${VEND_TS[@]}"; do VEND_PATHS+=("$ROOT/src/term-broker/$f.ts"); done
+  "$AXON_TSC" --noEmit --target ES2022 --module ES2022 --moduleResolution bundler --lib ES2023 \
+    --strict --esModuleInterop --skipLibCheck --forceConsistentCasingInFileNames \
+    --allowImportingTsExtensions --resolveJsonModule \
+    --typeRoots "$AXON_SIBLING/node_modules/@types" --types node \
+    "${VEND_PATHS[@]}" > "$SANDBOX/tsc-out.txt" 2>&1
+  rc_tsc=$?
+  ck "tsc --noEmit sale limpio sobre los 5 módulos" test "$rc_tsc" -eq 0
+  [[ "$rc_tsc" -ne 0 ]] && sed 's/^/      /' "$SANDBOX/tsc-out.txt"
+else
+  echo "  ⚠️  SALTADO: no hay un tsc utilizable a mano (se busca en \$AXON_SIBLING/node_modules/.bin/tsc + .../@types/node; no se instala nada para este chequeo — ver comentario arriba)"
+fi
 
 echo
 echo "  ${pass} ✅   ${fail} ❌"
