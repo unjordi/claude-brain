@@ -84,8 +84,17 @@ export function relayWsToWs(a: WsConn, b: WsConn): void {
   };
   wire(a, b);
   wire(b, a);
-  a.onClose(() => b.close(1000, "peer closed"));
-  b.onClose(() => a.close(1000, "peer closed"));
-  a.onError(() => b.close(1011, "peer error"));
-  b.onError(() => a.close(1011, "peer error"));
+  // El motivo del cierre VIAJA por el relevo. Antes se re-cerraba con un 1000/1011 fijo, así que un
+  // 1013 "cliente no drena: N B sobre el techo de M B" del salto de allá llegaba al navegador como un
+  // "peer closed" genérico — el mismo problema que el HTTP 503 pelón: dos causas opuestas, un solo texto.
+  // Solo se reemplaza el código cuando el que viene NO es utilizable (1005 = sin código, 1006 = cierre
+  // anormal sin frame CLOSE), porque el RFC prohíbe reenviarlos tal cual.
+  const propagar = (destino: WsConn, origen: string) => (code: number, reason: string) => {
+    const utilizable = code !== 1005 && code !== 1006;
+    destino.close(utilizable ? code : 1011, reason ? `${origen}: ${reason}` : `${origen}: cierre sin motivo`);
+  };
+  a.onClose(propagar(b, "peer"));
+  b.onClose(propagar(a, "peer"));
+  a.onError((e) => b.close(1011, `peer error: ${e.message}`));
+  b.onError((e) => a.close(1011, `peer error: ${e.message}`));
 }

@@ -237,7 +237,16 @@ echo "— H) los 5 módulos vendorizados TYPECHECAN (tsc --noEmit) —"
 # el commit vendorizado). Si no hay un tsc+@types/node verificable a mano (máquina limpia, sin axon
 # clonado al lado, o axon sin `npm install` corrido), el chequeo se SALTA con un aviso EXPLÍCITO —
 # fallar en falso en la máquina de un colega es peor que no tener el chequeo.
-AXON_SIBLING="$(dirname "$ROOT")/axon"
+# Dónde buscar axon. Una sola ruta hermana NO alcanza: en un WORKTREE (`cortex/.git-worktrees/x`) o en
+# el checkout de CI (`_work/cortex/cortex`), el hermano de $ROOT no es `~/code`, así que el chequeo se
+# saltaba EN SILENCIO justo en los dos sitios donde más importa. Se prueban varios candidatos, y `AXON_DIR`
+# permite fijarlo a mano donde el layout sea otro.
+AXON_SIBLING=""
+for cand in "${AXON_DIR:-}" "$(dirname "$ROOT")/axon" "$HOME/code/axon" \
+            "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/../../axon"; do
+  [[ -n "$cand" && -x "$cand/node_modules/.bin/tsc" ]] && { AXON_SIBLING="$cand"; break; }
+done
+[[ -z "$AXON_SIBLING" ]] && AXON_SIBLING="$(dirname "$ROOT")/axon"   # para que el aviso diga dónde buscó
 AXON_TSC="$AXON_SIBLING/node_modules/.bin/tsc"
 AXON_TYPES="$AXON_SIBLING/node_modules/@types/node"
 if [[ -x "$AXON_TSC" && -d "$AXON_TYPES" ]]; then
@@ -253,9 +262,18 @@ if [[ -x "$AXON_TSC" && -d "$AXON_TYPES" ]]; then
   ck "tsc --noEmit sale limpio sobre los 5 módulos" test "$rc_tsc" -eq 0
   [[ "$rc_tsc" -ne 0 ]] && sed 's/^/      /' "$SANDBOX/tsc-out.txt"
 else
-  echo "  ⚠️  SALTADO: no hay un tsc utilizable a mano (se busca en \$AXON_SIBLING/node_modules/.bin/tsc + .../@types/node; no se instala nada para este chequeo — ver comentario arriba)"
+  # El salto CUENTA. Antes solo hacía `echo`, así que `pass`/`fail` salían idénticos con y sin chequeo y
+  # el exit seguía 0: un probe que se salta su bloque más caro sin dejar rastro en el marcador miente por
+  # omisión. Ahora suma un ⚠️ propio, visible en el resumen.
+  omitidos=$((omitidos + 1))
+  echo "  ⚠️  SALTADO: no encontré un tsc utilizable (busqué en $AXON_TSC y sus alternativas; no se instala"
+  echo "      nada para este chequeo). Fija AXON_DIR=/ruta/a/axon para forzarlo."
 fi
 
 echo
-echo "  ${pass} ✅   ${fail} ❌"
+if [[ "${omitidos:-0}" -gt 0 ]]; then
+  echo "  ${pass} ✅   ${fail} ❌   ${omitidos} ⚠️ omitido(s)"
+else
+  echo "  ${pass} ✅   ${fail} ❌"
+fi
 [[ "$fail" -eq 0 ]] || exit 1

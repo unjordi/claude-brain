@@ -475,7 +475,16 @@ export function wsConnect(url: string, opts: WsConnectOptions = {}): Promise<WsC
       if (accept !== acceptKey(key)) { try { socket.destroy(); } catch { /* */ } reject(new Error("Sec-WebSocket-Accept inválido")); return; }
       resolve(new WsConn(socket, false, opts));
     });
-    req.on("response", (res) => { if (settled) return; settled = true; reject(new Error(`WS upgrade rechazado: HTTP ${res.statusCode}`)); req.destroy(); });
+    req.on("response", (res) => {
+      if (settled) return; settled = true;
+      // La REASON PHRASE es donde `rejectWebSocket` pone el porqué ("too many pty sessions (7/8)"), y
+      // quedarse solo con el número de estado la tiraba: al otro extremo llegaba un `HTTP 503` pelón,
+      // indistinguible de cualquier otro rechazo. Un techo alcanzado y un servicio caído piden acciones
+      // opuestas — cerrar una terminal que ya no usas, o revisar el broker —, así que el motivo VIAJA.
+      const motivo = typeof res.statusMessage === "string" ? res.statusMessage.trim() : "";
+      reject(new Error(`WS upgrade rechazado: HTTP ${res.statusCode}${motivo ? ` — ${motivo}` : ""}`));
+      req.destroy();
+    });
     req.on("error", (e) => { if (settled) return; settled = true; reject(e); });
     req.on("timeout", () => { if (settled) return; settled = true; req.destroy(); reject(new Error("WS connect timeout")); });
     req.end();
