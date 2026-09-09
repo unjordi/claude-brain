@@ -111,6 +111,12 @@ for g in $grupos_declarados; do
     || no "@grupo «$g» está declarado pero ningún knob lo usa (grupo fantasma)"
 done
 
+# Unicidad de las claves @grupo: dos filas con la misma clave harían que la GUI pinte ese grupo dos
+# veces y que el mapa de títulos sobrescriba en silencio (hallazgo de la 7ª tupla auditora, 2026-09-09).
+dups="$(awk -F'\t' '$1 == "@grupo" { print $2 }' "$SPEC" | sort | uniq -d)"
+if [ -z "$dups" ]; then ok "las claves @grupo son únicas (ningún grupo declarado dos veces)"
+else for d in $dups; do no "la clave @grupo «$d» está declarada MÁS de una vez (la GUI la pintaría duplicada)"; done; fi
+
 echo ""
 [ "$fallos" -eq 0 ] && { echo "✅ spec de knobs coherente con el código"; exit 0; } \
                     || { echo "❌ $fallos problema(s) en el spec de knobs"; exit 1; }
