@@ -81,6 +81,19 @@ mb="$(awk -F'\t' '$1=="AXON_TERM_BROKER_WS_MAX_BUFFER" {print $5}' "$SPEC")"
 [ "$mb" -gt "$hw" ] && ok "la válvula dura ($mb) queda por encima del umbral ($hw)" \
                     || no "válvula dura ($mb) <= umbral ($hw): la pausa nunca alcanzaría a actuar"
 
+# (7) La COPIA del spec dentro del paquete del plasmoid tiene que ser IDÉNTICA a la canónica.
+#     El paquete se instala con `kpackagetool6 -u src/plasmoid`, que lleva ese directorio TAL CUAL:
+#     el helper no puede alcanzar `src/widget-spec/` desde `~/.local/share/plasma/plasmoids/…`, así
+#     que necesita su copia al lado. Mismo patrón —y mismo riesgo— que los módulos vendorizados del
+#     term-broker: una copia deja de ser copia sin que nada se queje, salvo que algo lo compruebe.
+COPIA="src/plasmoid/contents/broker-knobs.tsv"
+if [ -f "$COPIA" ]; then
+  if cmp -s "$SPEC" "$COPIA"; then ok "la copia del spec en el paquete es idéntica a la canónica"
+  else no "$COPIA DIFIERE de $SPEC — cópiala de nuevo: cp -f $SPEC $COPIA"; fi
+else
+  no "falta $COPIA — el plasmoid instalado no encontraría el spec y la pestaña se quedaría sin knobs"
+fi
+
 echo ""
 [ "$fallos" -eq 0 ] && { echo "✅ spec de knobs coherente con el código"; exit 0; } \
                     || { echo "❌ $fallos problema(s) en el spec de knobs"; exit 1; }

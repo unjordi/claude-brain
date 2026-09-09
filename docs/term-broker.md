@@ -224,6 +224,25 @@ abrir una terminal:
 | las comprobaciones de la migración | el botón **Verificar** — corre `migrar-term-broker.sh --verificar` y muestra su salida tal cual |
 | arrancar · reiniciar · parar | el bloque *Servicio* |
 
+**Y los ajustes se editan ahí mismo.** El bloque *Ajustes* de la pestaña trae los knobs del broker
+—los mismos `AXON_TERM_BROKER_*` de las secciones de arriba— cada uno con su valor actual, su
+default, su rango y la advertencia de cambiarlo. Un campo vacío devuelve ese ajuste a su default.
+
+No es una lista escrita a mano en el widget: sale del spec **`src/widget-spec/broker-knobs.tsv`**,
+que es la fuente única de las tres caras del widget (el plasmoid de KDE, el puerto web y los de
+macOS/Windows). Por eso un knob nuevo en el broker aparece en la pestaña solo — y si alguien agrega
+una variable al código SIN meterla al spec, `src/widget-spec/probe-knobs-spec.sh` pone el repo en
+rojo. Ese candado existe porque el caso ya ocurrió:
+`AXON_TERM_BROKER_WS_BACKPRESSURE_DEADLINE_MS` entró y ninguna GUI se enteró.
+
+**Cuatro no se editan por GUI, a propósito** — `BIND`, `PORT`, `SOCKET` y `HOME`. `BIND` porque
+cualquier valor que no sea loopback expone ejecución de comandos arbitrarios a la red, y los otros
+tres porque son el contrato con el cliente contenerizado: cambiarlos lo rompe en silencio. Se
+editan a mano en el `.env`, y esa fricción es la intención.
+
+**Nada aplica hasta reiniciar el servicio.** El widget lo avisa con un recuadro y te ofrece el
+botón; no reinicia solo, porque reiniciar cierra las terminales abiertas.
+
 Dos cosas que la pestaña **no** hace, y no es un olvido:
 
 - **Nunca muestra el valor del token**, solo si está y cuánto mide. Su helper
