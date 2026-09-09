@@ -52,6 +52,7 @@
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { StringDecoder } from "node:string_decoder";
 
 /** Bin-dirs de usuario comunes que muchos `.zshrc`/`.bashrc` solo agregan al PATH en modo INTERACTIVO —
  *  ver el comentario largo arriba. Prependerlos aquí es el fix; una ruta que no existe es inofensiva (el
@@ -222,9 +223,16 @@ export class ShellSessionPool {
     };
     this.sessions.set(sessionId, sess);
 
-    child.stdout.on("data", (b: Buffer) => this.onStdout(sessionId, sess, b.toString("utf8")));
+    // #3 (auditoría 2026-09-09): decodificar CADA chunk con `b.toString("utf8")` por separado corrompía un
+    // carácter UTF-8 multibyte partido en el borde de dos eventos `data` (rutina en el límite de 64 KiB del
+    // pipe): cada mitad → U+FFFD (), irrecuperable. `StringDecoder` retiene la secuencia parcial de cola
+    // hasta el siguiente `write`, así que un acento/ñ a caballo entre chunks sale intacto. UNO por stream
+    // (stdout/stderr son flujos distintos). El camino PTY no sufre esto (es Buffer puro end-to-end).
+    const soDec = new StringDecoder("utf8");
+    const seDec = new StringDecoder("utf8");
+    child.stdout.on("data", (b: Buffer) => this.onStdout(sessionId, sess, soDec.write(b)));
     child.stderr.on("data", (b: Buffer) => {
-      if (sess.running && !sess.running.aborted) sess.running.onChunk({ stream: "stderr", data: b.toString("utf8") });
+      if (sess.running && !sess.running.aborted) sess.running.onChunk({ stream: "stderr", data: seDec.write(b) });
     });
     const die = (err?: string) => this.onShellDeath(sessionId, sess, err);
     child.on("error", (e) => die(e.message));
