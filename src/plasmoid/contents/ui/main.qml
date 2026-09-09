@@ -1235,14 +1235,22 @@ PlasmoidItem {
     readonly property bool brokerKnobsCargados: brokerKnobs !== null
     readonly property string brokerKnobsArchivo: (brokerKnobs && brokerKnobs.archivo) ? brokerKnobs.archivo : ""
     // Los grupos, en el orden en que se leen de arriba abajo en la pestaña.
-    readonly property var brokerGrupos: ["endpoint", "topes", "websocket", "http", "proceso"]
-    readonly property var brokerGrupoTitulo: ({
-        "endpoint": "Endpoint y contrato con el cliente",
-        "topes": "Topes de concurrencia",
-        "websocket": "WebSocket: contrapresión y keepalive",
-        "http": "Topes del HTTP",
-        "proceso": "Proceso"
-    })
+    // El ORDEN y los TÍTULOS de los grupos salen del spec (broker-knobs.tsv, filas @grupo) que el helper
+    // emite en `grupos` — #148: la última cara que se repetía a mano. Ya no se hardcodean aquí ni en la
+    // cara web; las dos LEEN la misma fuente. Fallback vacío mientras el scan aún no llega.
+    readonly property var brokerGrupos: {
+        if (!brokerKnobs || !brokerKnobs.grupos) return []
+        var r = []
+        for (var i = 0; i < brokerKnobs.grupos.length; i++) r.push(brokerKnobs.grupos[i].clave)
+        return r
+    }
+    readonly property var brokerGrupoTitulo: {
+        var m = ({})
+        if (brokerKnobs && brokerKnobs.grupos)
+            for (var i = 0; i < brokerKnobs.grupos.length; i++)
+                m[brokerKnobs.grupos[i].clave] = brokerKnobs.grupos[i].titulo
+        return m
+    }
     function brokerKnobsDe(grupo) {
         if (!brokerKnobs || !brokerKnobs.knobs) return []
         var r = []

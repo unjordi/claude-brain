@@ -46,3 +46,16 @@ AXON_TERM_BROKER_WS_KEEPALIVE_MS	websocket	Ping de keepalive	ms	30000	1000	60000
 AXON_TERM_BROKER_WS_BACKPRESSURE_DEADLINE_MS	websocket	Tope de tiempo en contrapresión	ms	60000	1000	600000	1	1	edita	Tiempo CONTINUO sobre el umbral sin drenar antes de cerrar la conexión por half-open.	Con 0 queda APAGADO: un cliente half-open retiene su slot, su PTY y su shell hasta que el kernel lo corte (~15 min).
 AXON_TERM_BROKER_HEADERS_TIMEOUT_MS	http	Tope para los headers	ms	15000	1000	120000	0	1	edita	Cuánto se espera a que un cliente complete los headers de su petición.	Subirlo mucho reabre la ventana de slowloris que este tope existe para cerrar.
 AXON_TERM_BROKER_REQUEST_TIMEOUT_MS	http	Tope de la petición	ms	30000	1000	600000	0	1	edita	Cuánto se espera a que una petición NO-upgradeada termine.	-
+#
+# ── GRUPOS ──────────────────────────────────────────────────────────────────────────────────────
+# El ORDEN y los TÍTULOS de los grupos: la última cara del spec que aún se repetía a mano (el QML y
+# el puerto web los tenían hardcodeados). Ahora salen de aquí y `list` los emite como `grupos`, así
+# ningún front vuelve a mantener su propia copia. Filas `@grupo<TAB>clave<TAB>título`, en el ORDEN de
+# despliegue (distinto a propósito del orden de aparición de los knobs de arriba). El loop de knobs
+# las salta; `probe-knobs-spec.sh` verifica que cada grupo usado por un knob esté declarado aquí y
+# viceversa (sin grupos fantasma).
+@grupo	endpoint	Endpoint y contrato con el cliente
+@grupo	topes	Topes de concurrencia
+@grupo	websocket	WebSocket: contrapresión y keepalive
+@grupo	http	Topes del HTTP
+@grupo	proceso	Proceso

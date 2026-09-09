@@ -87,7 +87,7 @@ listar() {
     printf '{"archivo":%s,"knobs":[' "$(json_str "$ENV_FILE")"
     local primero=1 env_var grupo etiqueta tipo def mn mx cero rein gui ayuda adv actual
     while IFS=$'\t' read -r env_var grupo etiqueta tipo def mn mx cero rein gui ayuda adv; do
-        case "$env_var" in ''|'#'*|env) continue ;; esac
+        case "$env_var" in ''|'#'*|env|@grupo) continue ;; esac
         [ "$primero" -eq 1 ] && primero=0 || printf ','
         # `actual` es null cuando NADIE lo configuró: el widget pinta entonces el default, y la
         # diferencia importa — "está en 32 porque lo pusiste" no es "está en 32 porque es el default".
@@ -98,6 +98,15 @@ listar() {
             "$(json_bool "$cero")" "$(json_bool "$rein")" "$(json_str "$gui")" \
             "$(json_str "$ayuda")" "$([ "$adv" = "-" ] && printf 'null' || json_str "$adv")" \
             "$(json_str "$actual")"
+    done < "$SPEC"
+    # `grupos`: el ORDEN + los TÍTULOS de los grupos, la fuente única de lo que el QML y la cara web
+    # tenían hardcodeado. Se leen de las filas `@grupo<TAB>clave<TAB>título` en su orden de declaración.
+    printf '],"grupos":['
+    local gp=1 marca clave titulo
+    while IFS=$'\t' read -r marca clave titulo; do
+        [ "$marca" = "@grupo" ] || continue
+        [ "$gp" -eq 1 ] && gp=0 || printf ','
+        printf '{"clave":%s,"titulo":%s}' "$(json_str "$clave")" "$(json_str "$titulo")"
     done < "$SPEC"
     printf ']}\n'
 }

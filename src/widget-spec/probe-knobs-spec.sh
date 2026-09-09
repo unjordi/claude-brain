@@ -26,7 +26,7 @@ leidas="$(grep -rhoE 'process\.env\.AXON_TERM_BROKER_[A-Z_]+' src/term-broker/*.
           | grep -vE '^AXON_TERM_BROKER_(TOKEN|URL)$')"
 
 # (2) Las que declara el spec (primera columna, saltando comentarios y el encabezado).
-declaradas="$(awk -F'\t' '!/^#/ && NF>1 && $1!="env" {print $1}' "$SPEC" | sort -u)"
+declaradas="$(awk -F'\t' '!/^#/ && NF>1 && $1!="env" && $1!="@grupo" {print $1}' "$SPEC" | sort -u)"
 
 faltan="$(comm -23 <(echo "$leidas") <(echo "$declaradas"))"
 sobran="$(comm -13 <(echo "$leidas") <(echo "$declaradas"))"
@@ -52,7 +52,7 @@ fi
 
 # (4) Forma del spec: 12 columnas exactas en cada fila de datos, y nada de tabs faltantes por
 #     haber usado espacios (el modo de falla clásico de un TSV editado a mano).
-malas="$(awk -F'\t' '!/^#/ && NF>1 && NF!=12 {print NR": "NF" columnas"}' "$SPEC")"
+malas="$(awk -F'\t' '!/^#/ && NF>1 && NF!=12 && $1!="@grupo" {print NR": "NF" columnas"}' "$SPEC")"
 if [ -z "$malas" ]; then ok "todas las filas tienen 12 columnas separadas por TAB"
 else while read -r m; do no "fila con forma inválida — $m (¿usaste espacios en vez de TAB?)"; done <<< "$malas"; fi
 
@@ -93,6 +93,23 @@ if [ -f "$COPIA" ]; then
 else
   no "falta $COPIA — el plasmoid instalado no encontraría el spec y la pestaña se quedaría sin knobs"
 fi
+
+# --- Candado de GRUPOS: cada grupo usado por un knob debe estar DECLARADO en una fila @grupo, y
+#     cada @grupo debe usarlo al menos un knob (sin grupos fantasma). Los títulos y el orden viven
+#     SOLO aquí desde #148; este candado evita que un knob caiga en un grupo sin título, o que sobre
+#     una declaración que ninguna GUI mostrará. ---
+grupos_usados="$(awk -F'\t' '$1 !~ /^(#|@grupo|env)/ && $1 != "" { print $2 }' "$SPEC" | sort -u)"
+grupos_declarados="$(awk -F'\t' '$1 == "@grupo" { print $2 }' "$SPEC" | sort -u)"
+for g in $grupos_usados; do
+  printf '%s\n' "$grupos_declarados" | grep -qxF "$g" \
+    && ok "el grupo «$g» que usan los knobs está declarado con su título" \
+    || no "el grupo «$g» lo usan knobs pero NO tiene fila @grupo (quedaría sin título en la GUI)"
+done
+for g in $grupos_declarados; do
+  printf '%s\n' "$grupos_usados" | grep -qxF "$g" \
+    && : \
+    || no "@grupo «$g» está declarado pero ningún knob lo usa (grupo fantasma)"
+done
 
 echo ""
 [ "$fallos" -eq 0 ] && { echo "✅ spec de knobs coherente con el código"; exit 0; } \
