@@ -54,6 +54,17 @@ const DEFAULT_MAX_BUFFER_BYTES = positiveEnv(process.env.AXON_TERM_BROKER_WS_MAX
 const DEFAULT_KEEPALIVE_MS = positiveEnv(process.env.AXON_TERM_BROKER_WS_KEEPALIVE_MS, 30_000);
 
 /** Lee un entero POSITIVO de una env var; cualquier basura (vacío, 0, negativo, NaN) cae al default. */
+/** El motivo de un CLOSE, recortado a los 123 bytes que deja el RFC (125 del frame de control − 2 del
+ *  código), sin partir un carácter multibyte a la mitad. */
+export function recortarMotivo(reason: string): Buffer {
+  const b = Buffer.from(reason, "utf8");
+  if (b.length <= 123) return b;
+  let fin = 123;
+  // retrocede mientras el byte sea una continuación UTF-8 (10xxxxxx)
+  while (fin > 0 && (b[fin] & 0xc0) === 0x80) fin--;
+  return b.subarray(0, fin);
+}
+
 function positiveEnv(raw: string | undefined, def: number): number {
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : def;
@@ -247,7 +258,11 @@ export class WsConn {
     // socket ("socket closed") y la causa real se pierde: un techo alcanzado, un keepalive vencido y un
     // cable desconectado se vuelven indistinguibles justo donde hay que decidir qué hacer.
     this.motivoLocal = { code, reason };
-    const rb = Buffer.from(reason, "utf8");
+    // El RFC 6455 topa TODO frame de control en 125 bytes de payload, y aquí los dos primeros son el
+    // código: quedan 123 para el motivo. Sin recortar, `writeFrame` emitía un CLOSE con longitud
+    // extendida —un frame INVÁLIDO— y el peer lo tira como cierre anormal: se pierde justo la causa que
+    // el motivo venía a contar. Se corta en frontera de carácter UTF-8 (nunca a media secuencia).
+    const rb = recortarMotivo(reason);
     const payload = Buffer.alloc(2 + rb.length);
     payload.writeUInt16BE(code, 0);
     rb.copy(payload, 2);
