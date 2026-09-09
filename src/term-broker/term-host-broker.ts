@@ -39,6 +39,7 @@
 // maincar) — NUNCA expongas este broker más allá de loopback/socket unix ni relajes el bind.
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { connect as netConnect } from "node:net";
 import { homedir } from "node:os";
 import { accessSync, chmodSync, constants as fsConstants, mkdirSync, statSync, unlinkSync } from "node:fs";
@@ -138,12 +139,16 @@ function readBody(req: IncomingMessage, maxBytes = 1024 * 1024): Promise<string>
   });
 }
 
-/** Compara el token recibido contra el configurado. Longitud distinta ⇒ falso rápido (evita construir un
- *  Buffer más grande de lo necesario); si calzan en longitud, compara con Buffer.equals — no es criptografía
- *  de verdad (Buffer.equals no es constant-time), pero evita el `===` de string más ingenuo. */
+/** Compara el token recibido contra el configurado en TIEMPO CONSTANTE (#4, auditoría 2026-09-09). Se hashea
+ *  cada lado a un digest SHA-256 de LONGITUD FIJA (32 B) y se comparan con `timingSafeEqual`: así no se filtra
+ *  ni la LONGITUD del token (el viejo `got.length !== want.length` era un oráculo de timing) ni su contenido
+ *  byte-a-byte (Buffer.equals corta-circuita = memcmp). Relevante en un host MULTI-USUARIO, donde otro uid
+ *  alcanza el listener TCP loopback y podría intentar recuperar el token por timing sin rate-limit. */
 function tokenMatches(got: string, want: string): boolean {
-  if (!want || got.length !== want.length) return false;
-  return Buffer.from(got).equals(Buffer.from(want));
+  if (!want) return false;
+  const a = createHash("sha256").update(got, "utf8").digest();
+  const b = createHash("sha256").update(want, "utf8").digest();
+  return timingSafeEqual(a, b);   // ambos son 32 B ⇒ sin fuga de longitud ni de contenido
 }
 
 /**
@@ -206,10 +211,16 @@ export function startTermHostBroker(opts: BrokerOptions = {}): BrokerHandle {
 
   const mkServer = (): Server => {
     const s = createServer((req: IncomingMessage, res: ServerResponse) => { void handleRequest(req, res, cfg); });
+    // Slowloris/half-open en conexiones NO-upgradeadas (BAJO, auditoría 2026-09-09): un cliente que abre el
+    // socket y gotea (o nunca completa) los headers retiene el socket con los defaults laxos de Node. Timeouts
+    // explícitos y cortos — el broker solo atiende peticiones locales rápidas, no hay caso legítimo lento.
+    s.headersTimeout = positiveEnv(process.env.AXON_TERM_BROKER_HEADERS_TIMEOUT_MS, 15_000);
+    s.requestTimeout = positiveEnv(process.env.AXON_TERM_BROKER_REQUEST_TIMEOUT_MS, 30_000);
     // TERMINAL INTERACTIVA (PTY real): upgrade a WebSocket en `/pty`. Mismo scope de seguridad que `/run` —
     // corre como el usuario del broker (unjordi), con SU shell de login y SU $HOME. Auth por el MISMO Bearer
     // token (axon-en-contenedor es el cliente y SÍ puede setear el header). Ver term-pty-bridge.ts.
-    s.on("upgrade", (req: IncomingMessage, socket: Duplex) => { handlePtyUpgrade(req, socket, { token, home, shell, ptyGuard }); });
+    // `head` (L1): bytes que llegaron pegados al handshake; se pasan para no perder un 1er frame pipelineado.
+    s.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => { handlePtyUpgrade(req, socket, { token, home, shell, ptyGuard }, head); });
     return s;
   };
 
@@ -274,6 +285,7 @@ function handlePtyUpgrade(
   req: IncomingMessage,
   socket: Duplex,
   cfg: { token: string; home: string; shell: string; ptyGuard: PtyGuard },
+  head?: Buffer,
 ): void {
   let parsed: URL;
   try { parsed = new URL(req.url ?? "/", "http://127.0.0.1"); }
@@ -294,7 +306,7 @@ function handlePtyUpgrade(
     return;
   }
 
-  const conn = acceptWebSocket(req, socket);
+  const conn = acceptWebSocket(req, socket, {}, head);
   if (!conn) { rejectWebSocket(socket, 400, "not a websocket upgrade"); return; }
 
   // La cuenta se lleva sobre el SOCKET, no sobre `conn.onClose`: WsConn guarda UN solo callback de
