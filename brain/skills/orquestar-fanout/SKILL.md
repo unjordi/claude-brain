@@ -154,31 +154,19 @@ antes de un git destructivo que orfanaría commits sin pushear).
    → No monitoreas a los agentes: el reporte y la limpieza son el cierre estándar.
 
 ## axon — el peso del loop a $0 de tu ventana (la Cachy)
-`axon` (`~/code/axon`, host CachyOS por `ssh cachy`; turf de la gemela — se USA, no se muta) es un **HARNESS
-AGÉNTICO completo** (tools Read/Grep/Glob/Edit/Write/Bash + loop local→frontera + **VLM `VerImagen`** para
-QA visual de imágenes/diagramas), **NO un despachador de ollama**. Es la vía por defecto para el PESO del
-fan-out (documentar/auditar/fixear en volumen) porque corre en **OTRA cuenta de Claude**: cuesta **$0 de tu
-ventana Y de tus tokens** aun cuando escala a frontera. Tú te quedas **orquestando + verificando ground-truth**.
-- **Úsalo AGÉNTICAMENTE:** dale la TAREA completa ("documenta este script como referencia API + valida sus
-  mermaid", "audita estos flowcharts"), NO micro-pasos — su loop lee molde+código, compone, RENDERIZA y MIRA
-  cada diagrama con VerImagen, itera y escala a frontera cuando el local no basta. (unjordi 2026-08-31: "si
-  solo fuera selector de modelos te diría que uses ollama".)
-- **Invocación:** `ssh cachy '~/code/axon/bin/axon run "<tarea>" --dir <path> --max-turns 30'`. Sin `--model`
-  = AUTO local (el más capaz que quepa en VRAM). **Sin `--local-only` = escala a frontera**; con `--local-only`
-  = $0 puro (no escala). `--plan` = solo tools de lectura. `axon ingest "<url>"` transcribe un video de YouTube.
-- **Gotchas (caso real 2026-08-31):**
-  - **NO `--json` para outputs largos** (doble-escape imparseable) → usa la salida normal (tras `Respuesta:`) o
-    pídele que ESCRIBA a archivo con su tool Write. El **single-shot TRONA** escribiendo docs largos (el JSON
-    del planner se trunca) → agéntico-a-archivo sí, doc-largo-en-una-respuesta no.
-  - **Job de fondo remoto:** `nohup <script> > log 2>&1 </dev/null &` con el SCRIPT en un ARCHIVO en cachy —
-    NO por heredoc-stdin (`ssh cachy 'bash -s' <<EOF … &` pierde el stdin al ir a background y el job no arranca).
-  - **ollama NO se expone por WireGuard:** se accede SOLO por `ssh → axon`. Un timeout a `:11434` directo NO
-    significa nada (nadie dijo que ollama estuviera accesible; el carril es ssh→axon).
-  - **Modelos:** el default seguro es `qwen3.8:27b` (VRAM). El `gpt-oss:120b` corre en RAM (~65GB, no cabe en
-    VRAM) → es **opt-in EXPLÍCITO con `--model` y con `nohup`**, nunca auto-seleccionado; pesado pero legítimo
-    (axon lo corre por offload a RAM). *(No es "jamás": el "tumba el sshd de cachy" de un caso viejo fue un
-    fluke — saturación de RAM + falta de nohup, confabulado como "cachy caído"; con nohup y de forma explícita
-    es un modelo usable. El auto-select lo excluye solo por no caber en VRAM, no por prohibición.)*
+`axon` (`~/code/axon`, `ssh cachy`; turf de la gemela — se USA, no se muta) es un **HARNESS AGÉNTICO** (tools +
+loop local→frontera + VLM `VerImagen` para QA visual), **NO un despachador de ollama**. Corre en **OTRA cuenta
+de Claude** → **$0 de tu ventana/tokens** aun escalando a frontera → es la vía por defecto para el PESO del
+fan-out (documentar/auditar/fixear en volumen); tú orquestas + verificas ground-truth. **Dale la TAREA completa,
+no micro-pasos.**
+- **Invocación:** `ssh cachy '~/code/axon/bin/axon run "<tarea>" --dir <path> --max-turns 30'`. Sin `--model` =
+  AUTO local (VRAM); sin `--local-only` = escala a frontera (con él = $0 puro); `--plan` = solo lectura;
+  `axon ingest "<url>"` transcribe YouTube.
+- **Gotchas:** NO `--json` en outputs largos (doble-escape) → salida normal o que ESCRIBA a archivo (el
+  single-shot trona con docs largos). · Job remoto: `nohup <script-en-ARCHIVO> >log 2>&1 </dev/null &`
+  (heredoc-stdin al background NO arranca). · ollama solo por `ssh→axon` (un timeout a `:11434` no significa
+  nada). · `qwen3.8:27b` (VRAM) es el default; el `gpt-oss:120b` (RAM ~65GB) es opt-in EXPLÍCITO con `--model` +
+  `nohup`, **nunca auto**.
 
 ## Hooks/tools que lo sostienen
 - **`delegacion-gate`** (PreToolUse/Task) — consentimiento de costo por ventana de 5h (ver el flujo de gasto).
