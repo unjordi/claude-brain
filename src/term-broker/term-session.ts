@@ -98,6 +98,11 @@ export interface ShellSessionPoolOptions {
   readonly loginArgs: string[];   // ej. ["-l"] (login) — el shell lee comandos de stdin, sin -c
   readonly home: string;          // cwd inicial del shell
   readonly idleMs?: number;       // reap tras este tiempo sin actividad (default 30 min)
+  /** Techo de sesiones concurrentes (default `DEFAULT_MAX_SESSIONS`). Un valor no-finito o <=0 cae al
+   *  default. El constructor ya lo leía, pero la interfaz no lo declaraba: en esta carpeta se corre con
+   *  `node --experimental-strip-types` (nunca pasa por `tsc`), así que el hueco no se veía hasta que el
+   *  mismo código se typechequeaba del lado de axon. Ver `src/term-broker/PROCEDENCIA.md` § anti-drift. */
+  readonly maxSessions?: number;
 }
 
 /** Marca de fin-de-comando: \001 + token aleatorio + exit code + \001. El control-char evita colisiones. */
