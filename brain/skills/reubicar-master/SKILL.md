@@ -264,6 +264,24 @@ Lo consumen los DOS lados: el script lo sourcea y el handoff lo **CONCATENA text
 que hace imposible que el generador y el guion ejecutable deriven por separado — la clase de falla
 histórica de este skill — y el candado del §6.1 lo exige **byte a byte**, no de palabra.
 
+#### PREFLIGHT DE CAPACIDAD — la maquinaria instalada puede ser más vieja que el skill
+El preludio no se conforma con ENCONTRAR `bin/`: **verifica que traiga lo que el guion invoca** y aborta
+si no (`session-move.js --git-branch`, `session-export.js --name`, y de `session-lib.js`
+`slugFromCwd`/`sessionAliases`/`writeAlias`/`rewriteTranscriptStream`). Mide **CAPACIDAD, no versión**: un
+SHA distinto puede ser inofensivo y uno idéntico puede seguir sin la función; una fecha no dice nada.
+
+**Medido el 2026-09-10, en la mudanza real:** el `bin/` INSTALADO (`~/.local/bin`, 3 días atrás; y
+`~/.cortex/bin`, 9 días) **no tenía ni `--git-branch` ni `rewriteTranscriptStream`** — las dos cosas que
+S4 invoca **DESPUÉS del punto de no retorno**. Solo el clon del repo las traía. Sin este gate, el handoff
+habría movido 152 MB de transcript y reventado al re-anclar, en el único tramo donde una excepción es
+catastrófica. Cuatro rondas de auditoría LEYENDO el skill no podían verlo: el hueco no vive en el texto,
+vive en la diferencia entre el `bin/` del repo y el `bin/` instalado.
+
+El sello `LIB_SHA_HORNEADO` del handoff es **complementario, no sustituto**: avisa (no bloquea) de un
+CAMBIO de la lib entre generar y correr; este preflight **exige la capacidad y falla CERRADO**. Si salta:
+actualiza cortex con **SU herramienta de release** (el updater del widget — nunca corriendo el instalador a
+mano) o apunta `CORTEX_BIN` al `bin/` del clon que sí las trae.
+
 > **Ya no hay «córrelo todo en la MISMA shell».** Cuando el preludio era un bloque de markdown que el
 > operador tenía que sourcear a mano antes de otro bloque, ese orden invisible era el punto débil: un
 > `source` dentro de un pipe (que no persiste, porque el pipe es un subshell) produjo un handoff **sin
@@ -976,6 +994,8 @@ git), y las ediciones de identidad de S6 (están en el `.t2` de respaldo).
 ## 9 · Modos de fallo → mitigación (tabla de defensa)
 | Fallo | Causa | Mitigación |
 |---|---|---|
+| **La maquinaria instalada es más vieja que el skill** | el `bin/` que resuelve el preludio puede ser un cortex INSTALADO que no trae lo que el guion invoca. **Medido 2026-09-10:** `~/.local/bin` sin `--git-branch` ni `rewriteTranscriptStream`, ambas usadas DESPUÉS del punto de no retorno | **PREFLIGHT DE CAPACIDAD** en el preludio (§2.2): mide lo que el guion INVOCA —no fechas ni SHAs— y **aborta antes de mutar**. El sello `LIB_SHA` solo AVISA de un cambio; esto EXIGE la capacidad |
+| **El generador certifica un handoff que no arranca** | el preludio no quedó embebido (un `source` en un pipe no persiste) y el candado solo medía presencia de FRASES ⇒ «handoff OK» sobre 473 líneas muertas en `DST_CWD: unbound variable` (2026-09-10) | la maquinaria es **un script** (el orden no se puede equivocar) y el candado exige el preludio **byte a byte** + sus símbolos; el bloque `(e2e)` de `test-brain.sh` corre la mudanza COMPLETA y **rechaza** el handoff sin preludio aunque su `bash -n` esté limpio |
 | Lobotomía del master | mover cwd sin llevar T1∪T2 | `G-PARITY` mide **presencia y corrección EN EL DESTINO** (no `SRC==DST`, que falla en falso cuando el cerebro nunca vivió en el origen) |
 | Lobotomía del CABLEADO | mover (a) transcript y (b) memorias y dejar (c) hooks y (d) config: el master corre sin sus candados y sin su `outputStyle` | **T4** en los tiers + `G-PARITY` verifica `settings.json`/`settings.local.json` del destino + ítem (e) del QA de S6 |
 | Lobotomía parcial en Mac | `*.local.md` no viaja por git | bundle T2 por Drive; depósito gitignored en cada máquina |

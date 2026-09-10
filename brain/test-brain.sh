@@ -5567,6 +5567,20 @@ if [ -f "$E2EH" ]; then
     bad "(e2e) el candado ACEPTA un handoff sin preludio (el agujero del 2026-09-10 sigue abierto)"
   fi
 fi
+# ── PREFLIGHT DE CAPACIDAD: un cortex INSTALADO más viejo que el skill se detecta ANTES, no a media
+#    mudanza. Medido el 2026-09-10: ~/.local/bin llevaba 3 días atrás y no tenía ni `--git-branch` ni
+#    `rewriteTranscriptStream`, las dos cosas que S4 invoca DESPUÉS del punto de no retorno.
+E2EBINVIEJO="$E2EFIX/bin-viejo"
+mkdir -p "$E2EBINVIEJO"
+cp "$E2EBIN/session-lib.js" "$E2EBIN/session-move.js" "$E2EBIN/session-export.js" "$E2EBINVIEJO/"
+# se le AMPUTA la capacidad, no se le cambia la fecha: el gate mide lo que el guion invoca
+sed -i.bak 's/--git-branch/--rama-vieja/g' "$E2EBINVIEJO/session-move.js" && rm -f "$E2EBINVIEJO/session-move.js.bak"
+E2ECAP="$E2EFIX/cap.log"
+if env -u REUBICAR_MODO HOME="$E2EHOME" CLAUDE_CONFIG_DIR="$E2EHOME/.claude" CORTEX_BIN="$E2EBINVIEJO"      bash "$E2ESH" --id "$E2EID" --dst-repo "$E2EDST" --master-name viejo-master --src-repo "$E2ESRC"      --drive "$E2EDRIVE" > "$E2ECAP" 2>&1; then
+  bad "(e2e) generó el handoff con un session-move.js SIN --git-branch (reventaría pasado el punto de no retorno)"
+else
+  grep -q 'MÁS VIEJA que este skill' "$E2ECAP"     && ok "(e2e) el preflight de CAPACIDAD aborta si el bin instalado no trae lo que el guion invoca"     || bad "(e2e) abortó, pero no por el preflight de capacidad: $(tail -2 "$E2ECAP" | tr '\n' ' ')"
+fi
 # el ID se interpola en rutas ⇒ se valida su forma, y los obligatorios no tienen default
 e2e bash "$E2ESH" --dst-repo "$E2EDST" --master-name x >/dev/null 2>&1 \
   && bad "(e2e) el script generó sin --id" || ok "(e2e) sin --id no genera (exit != 0)"

@@ -382,6 +382,37 @@ done
   "  Buscados: \$CORTEX_BIN, \$HOME/.local/bin, \$HOME/.cortex/bin, \$HOME/code/cortex/bin" \
   "  Instala cortex (bootstrap.sh / bootstrap.ps1) o exporta CORTEX_BIN=<dir>"
 
+# ── PREFLIGHT de CAPACIDAD de la maquinaria (se mide lo que el guion INVOCA, no su versión) ─────────
+# El BIN resuelto puede ser un cortex INSTALADO más viejo que este skill, y el skill lo descubriría a
+# media mutación. MEDIDO el 2026-09-10 sobre la mudanza real: `~/.local/bin` llevaba 3 días atrás y NO
+# tenía NI `--git-branch` NI `rewriteTranscriptStream` — las dos cosas que S4 invoca DESPUÉS del punto de
+# no retorno. El handoff habría movido 152 MB de transcript y reventado al re-anclar.
+# Se mide CAPACIDAD (que no caduca) y no fechas ni SHAs: un SHA distinto puede ser inofensivo, y uno
+# idéntico puede seguir sin la función. El sello LIB_SHA del handoff es complementario — avisa de un
+# CAMBIO entre generar y correr; esto exige la capacidad, y falla CERRADO.
+_capfalta=""
+_cap(){   # _cap <archivo> <patrón>
+  if [ ! -f "$BIN/$1" ]; then
+    case " $_capfalta " in *" $1(ausente) "*) : ;; *) _capfalta="$_capfalta $1(ausente)" ;; esac
+  else
+    grep -q -- "$2" "$BIN/$1" || _capfalta="$_capfalta $1:$2"
+  fi
+}
+_cap session-move.js   '--git-branch'              # S4: re-ancla (cwd, gitBranch) en la MISMA pasada
+_cap session-export.js '--name'                    # S3: exporta con el nombre FINAL (si no, un import revierte el alias)
+for _fn in slugFromCwd sessionAliases writeAlias rewriteTranscriptStream; do
+  _cap session-lib.js "$_fn"
+done
+[ -z "$_capfalta" ] || _abort \
+  "PREFLIGHT: la maquinaria de $BIN es MÁS VIEJA que este skill — le falta lo que el guion invoca:" \
+  " $_capfalta" \
+  "  Dos de esas se invocan DESPUÉS del punto de no retorno (el --git-branch del move y el re-anclaje en" \
+  "  streaming de la lib), así que descubrirlo a media mudanza deja el transcript movido y el par" \
+  "  (cwd, gitBranch) mal. Por eso se exige AQUÍ y aborta." \
+  "  ARRÉGLALO actualizando cortex con SU herramienta de release (el updater del widget), NO corriendo" \
+  "  el instalador a mano; o apunta CORTEX_BIN al bin del clon que sí las trae:" \
+  "    CORTEX_BIN=<clon>/bin  (verifica con: grep -c -- --git-branch <clon>/bin/session-move.js)"
+
 # ── DERIVADAS ───────────────────────────────────────────────────────────────────────────
 SRC="$SRC_REPO/.claude"
 DST_POSIX="$(_real "$DST_REPO")"        # ruta FÍSICA en el idioma de ESTE shell (bash la usa así)
