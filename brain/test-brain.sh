@@ -5493,9 +5493,14 @@ esac
 #          casi simultáneas en la misma máquina lo sobre-escribían a la vez, sin lock.
 # ── anti-regresión: el "descubrimiento" de §7 #2 NO vuelve a ser un grep invertido de palabras de stack.
 #    Devolvía 44 de 43 memorias (medido) y empujaba a inventar el corte que decide el humano.
-grep -qF 'grep -rilEv' "$R2SK" \
-  && bad "r2-6: §7 #2 volvió al grep invertido de palabras de stack (no descarta nada: 44 de 43)" \
-  || ok "r2-6: §7 #2 no usa el grep invertido de stack como descubrimiento"
+#    Se mide en los BLOQUES EJECUTABLES (```bash), no en el texto: la prosa que explica POR QUÉ se retiró
+#    lo cita a propósito, y esa explicación es justo lo que el skill existe para conservar. Misma
+#    distinción que el candado del handoff hace entre línea ejecutable y comentario.
+R2FENCES="$R2FIX/skill-bash.txt"
+awk '/^```bash$/{d=1;next} /^```$/{d=0} d' "$R2SK" > "$R2FENCES"
+grep -qF 'grep -rilEv' "$R2FENCES" \
+  && bad "r2-6: §7 #2 volvió a PRESCRIBIR el grep invertido de palabras de stack (no descarta nada: 44 de 43)" \
+  || ok "r2-6: ningún bloque ejecutable del SKILL prescribe el grep invertido de stack"
 { grep -qF 'clasificar --src-repo' "$R2SK" && grep -qF '= clasificar ]' "$R2SH"; } \
   && ok "r2-6: §7 #2 apunta al subcomando 'clasificar' y el script lo implementa" \
   || bad "r2-6: el skill pide 'clasificar' pero el script no lo trae (o al revés)"
