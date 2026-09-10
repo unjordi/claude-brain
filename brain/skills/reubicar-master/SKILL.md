@@ -411,7 +411,7 @@ fi
 ### G-ID · resolver el `<id>` vigente (masters.json tiene DUPLICADOS por nombre)
 [verificado] dos `claude-brain-cachy-master` (`7a6960de`, `9cbc2856`) y dos `claude-brain-master`
 (`761c82d9`, `1dd207df`), todos con target `code/plantilladotnet`. `session-lib.js` → `findSession()`
-devuelve DETERMINISTA el de **mtime más reciente** (desempate alfabético por slug, en su `matches.sort()`)
+desempata por CONTENIDO en su `matches.sort()` — **timestamp más reciente de la cola → bytes → mtime → slug** (el `mtime` es el TERCER criterio, no el primero; ver la nota de §9.1 de por qué no se vuelve a él)
 → con id duplicado elige el más nuevo, que con duplicados suele ser el vivo. Aun así el gate NO desaparece:
 es una **CONFIRMACIÓN** — el humano confirma que el `<id>` es el que quiere mover, lo CITA textual y puebla `ID=`.
 
@@ -445,7 +445,7 @@ jq -e --arg id "$ID" '.masters[]|select(.id==$id)' "$MJ" >/dev/null \
 prueba de CERRADA = **mtime frío del archivo objetivo + sin lock de export + cita humana**.
 
 **El gate mide el MISMO archivo que va a mover el mutador, no el del slug viejo.** `session-move.js` usa
-`findSession()`, que barre **todos** los slugs y elige por mtime; un gate que mire `$JSONL` a pelo puede
+`findSession()`, que barre **todos** los slugs y elige por CONTENIDO (ts→bytes→mtime); un gate que mire `$JSONL` a pelo puede
 certificar frío sobre una copia MUERTA mientras el mutador se lleva la VIVA de otro slug (medido). Y si el
 id existe en **más de un slug**, el gate **bloquea**: no hay tie-break aceptable para un `unlink`.
 ```bash
@@ -453,7 +453,7 @@ COPIAS="$(find "$PROJ" -maxdepth 2 -name "$ID.jsonl" 2>/dev/null | sort)"
 NCOP=$(printf '%s\n' "$COPIAS" | grep -c . || true)
 [ "$NCOP" -ge 1 ] || { echo "BLOQUEO G-LIVENESS: no hay ningún $ID.jsonl bajo $PROJ"; exit 1; }
 if [ "$NCOP" -gt 1 ]; then
-  echo "BLOQUEO G-LIVENESS: el id vive en $NCOP slugs — el mutador elegiría por mtime y podría llevarse la que NO es:"
+  echo "BLOQUEO G-LIVENESS: el id vive en $NCOP slugs — el mutador elegiría por CONTENIDO (ts→bytes→mtime) y podría llevarse la que NO es:"
   printf '  %s\n' $COPIAS
   echo "  Resuélvelo a mano ANTES: deja UNA sola copia (las otras a ~/.claude/session-move-backups/, con 'mv', nunca 'rm')."
   exit 1
@@ -1180,7 +1180,7 @@ if [ "$NCOP" -eq 0 ]; then
   _abort "BLOQUEO: no hay ningún $ID.jsonl bajo $PROJ"
 elif [ "$NCOP" -gt 1 ]; then
   printf '    %s\n' $COPIAS
-  _abort "BLOQUEO G-LIVENESS: el id vive en $NCOP slugs ⇒ el mutador elegiría por mtime y podría llevarse la que NO es" \
+  _abort "BLOQUEO G-LIVENESS: el id vive en $NCOP slugs ⇒ el mutador elegiría por CONTENIDO (ts→bytes→mtime) y podría llevarse la que NO es" \
          "  Deja UNA sola copia ANTES (las otras a $HOME/.claude/session-move-backups/ con 'mv', nunca 'rm')."
 fi
 TGT_FILE="$COPIAS"
@@ -1578,7 +1578,7 @@ git), y las ediciones de identidad de S6 (están en el `.t2` de respaldo).
 | Fuga de identidad con el gate en VERDE | `git check-ignore A B C` sale 0 si **cualquiera** matchea; `git status --porcelain` **no lista ignorados** | `G-GITIGNORE` verifica **archivo por archivo** con `-q`, y el chequeo de fuga exige el marcador `!!` por archivo |
 | Fuga con el secreto YA en el índice | `ls-files --error-unmatch A B` sale ≠0 si **alguna** falta ⇒ el `if` era siempre falso | `ls-files --error-unmatch -- "$f"` **uno por uno** |
 | Transcript vivo partido | `unlink` de sesión viva (`session-move.js` → `main()`, el `unlinkSync` FINAL) | `G-LIVENESS`: mtime del archivo **que se va a mover** + fail-closed si no puede medir + cita humana como gate real |
-| **Se mueve la copia VIVA aunque el gate midió una FRÍA** | el gate miraba `$JSONL` (slug viejo) y el mutador usa `findSession()`, que barre TODOS los slugs y elige por mtime | `G-LIVENESS` resuelve el archivo real y **BLOQUEA si el id vive en >1 slug** (no hay tie-break aceptable para un `unlink`) |
+| **Se mueve la copia VIVA aunque el gate midió una FRÍA** | el gate miraba `$JSONL` (slug viejo) y el mutador usa `findSession()`, que barre TODOS los slugs y elige por CONTENIDO (ts→bytes→mtime) | `G-LIVENESS` resuelve el archivo real y **BLOQUEA si el id vive en >1 slug** (no hay tie-break aceptable para un `unlink`) |
 | **Self-move con el gate en verde** | el gate comparaba contra `CLAUDE_SESSION_ID`, **que no existe** ⇒ `"<id>" = ""` siempre falso ⇒ pasaba SIEMPRE | `G-SELF-MOVE` usa `CLAUDE_CODE_SESSION_ID` (con fallback) y **falla CERRADO** si corre dentro de Claude sin poder leer su id |
 | Reencarnar helios-selene | fix de target no atómico con el move | move + UPSERT **con el lock de `$MJ.lock`** + `writeAlias` en el MISMO bloque (S4), con aserción de lectura-tras-escritura |
 | **"✅ Move hecho" con `masters.json` intacto** | `jq` en forma UPDATE (con id ausente devuelve el JSON intacto y **sale 0**) + `jq … > tmp && mv` (el `&&` **exime al `jq` de errexit**) + postcondiciones que **imprimían** en vez de aserir | UPSERT + `if ! jq …` + **todas** las postcondiciones son aserciones + el `✅` dice "pasos destructivos verificados", no LISTO |
