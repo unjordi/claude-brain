@@ -3847,6 +3847,7 @@ recordar-unificar-cerebro|unificar-cerebro
 cosechar-sesion|unificar-cerebro
 proteger-fuente-cerebro|verificar-cerebro
 aviso-drift-cerebro|verificar-cerebro
+auditar-coherencia-cerebro|auditar-proceso-algoritmo
 auditar-coherencia-cerebro|auditar-suficiencia-operativa
 auditar-coherencia-cerebro|consolidar-cerebro
 auditar-suficiencia-operativa|consolidar-cerebro
@@ -3855,6 +3856,10 @@ hud-stale|to-do
 drift-cerebro-comun|exportar-sesion-master
 drift-cerebro-comun|proteger-fuente-cerebro
 drift-cerebro-comun|verificar-cerebro"
+# auditar-coherencia-cerebro|auditar-proceso-algoritmo: FAMILIA declarada, no ciclo — proceso-algoritmo
+# es la METODOLOGÍA y apunta a secciones CONCRETAS de coherencia-cerebro (que es su modo-cerebro
+# empaquetado) donde vive el detalle; el contenido está en los dos lados, así que el lector no da vueltas.
+# Mismo caso que el par con auditar-suficiencia-operativa, ya en la lista.
 # Los 3 pares de arriba (OLA1): exportar-sesion-master, proteger-fuente-cerebro y verificar-cerebro
 # ahora SOURCEAN drift-cerebro-comun.sh para reusar su resolve_brain_dir() — es lib<->consumidor
 # (igual que delegacion-comun|delegacion-gate arriba), no una dependencia circular real.
