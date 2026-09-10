@@ -460,13 +460,68 @@ function sessionAliases() {
   } catch (_) { return {}; }
 }
 
+// ── LOCK del mapa de alias ──────────────────────────────────────────────────────────────────────────
+// `sesiones-alias.json` es un mapa COMPARTIDO por todos los masters de la máquina, y escribirlo es un
+// read-modify-write: la escritura atómica (tmp+rename) evita un archivo a medias, pero NO evita que dos
+// escritores concurrentes se pisen — el que lee primero y escribe después borra la clave del otro, en
+// silencio y sin que nada lo asevere. Con dos masters vivos (medido 2026-09-10: una mudanza y un
+// `databases-master` trabajando a la vez) el riesgo es real y ASIMÉTRICO: quien no está mirando pierde
+// su alias sin enterarse.
+// `mkdir` es la primitiva atómica en POSIX y en NTFS — el MISMO idioma que ya usa el ecosistema para
+// `masters.json` (el hook de export y el skill reubicar-master), con reciclado del huérfano a los 5 min
+// para que un crash no deje el mapa bloqueado para siempre.
+const ALIAS_LOCK_STALE_MS = 5 * 60 * 1000;
+const aliasLockPath = () => aliasFile() + '.lock';
+
+// Espera SÍNCRONA y portable (no hay `sleep` sincrónico en Node, y `execFileSync('sleep')` no existe en
+// Windows). Atomics.wait sobre un SharedArrayBuffer bloquea el hilo sin quemar CPU.
+function _esperaSync(ms) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+  catch (_) { const t = Date.now(); while (Date.now() - t < ms) { /* respaldo si Atomics no está */ } }
+}
+
+// Toma el lock. Devuelve true si lo tomó; false si no pudo tras agotar los intentos — y ENTONCES el
+// llamador NO debe escribir: preferimos no escribir a pisar.
+function takeAliasLock(opts) {
+  const o = opts || {};
+  const intentos = o.intentos != null ? o.intentos : 10;
+  const esperaMs = o.esperaMs != null ? o.esperaMs : 2000;
+  const lock = aliasLockPath();
+  for (let i = 0; i < intentos; i++) {
+    try { fs.mkdirSync(claudeBase(), { recursive: true }); fs.mkdirSync(lock); return true; }
+    catch (e) { if (e && e.code !== 'EEXIST') throw e; }
+    try {
+      const st = fs.statSync(lock);
+      if (Date.now() - st.mtimeMs > ALIAS_LOCK_STALE_MS) { fs.rmdirSync(lock); continue; }
+    } catch (_) { continue; }   // desapareció entre el mkdir y el stat: reintenta de una
+    if (i < intentos - 1) _esperaSync(esperaMs);
+  }
+  return false;
+}
+function releaseAliasLock() { try { fs.rmdirSync(aliasLockPath()); } catch (_) {} }
+
 // Fija/actualiza el alias de una sesión (merge, no pisa el resto). No-op si label es vacío; devuelve
 // true si quedó escrito. Escritura ATÓMICA (tmp en el MISMO dir + rename): un archivo a medio escribir
-// nunca pisa el bueno. Y un JSON ILEGIBLE no se degrada a {} —eso reemplazaría el mapa entero por una
-// sola entrada, borrando en silencio todos los demás alias—: se RESPALDA a un lado y se avisa.
-function writeAlias(id, label) {
+// nunca pisa el bueno. SERIALIZADA por el lock de arriba: dos escritores no se borran las claves. Y un
+// JSON ILEGIBLE no se degrada a {} —eso reemplazaría el mapa entero por una sola entrada, borrando en
+// silencio todos los demás alias—: se RESPALDA a un lado y se avisa.
+function writeAlias(id, label, opts) {
   if (!label) return false;
   const f = aliasFile();
+  if (!takeAliasLock(opts)) {
+    process.stderr.write('AVISO: no pude tomar ' + aliasLockPath() + ' en ~20s (otro master está'
+      + ' escribiendo el mapa de alias). NO escribo el alias de ' + id + ': pisarlo borraría la clave'
+      + ' del otro. Reintenta.\n');
+    return false;
+  }
+  try {
+    return _writeAliasSinLock(id, label, f);
+  } finally {
+    releaseAliasLock();
+  }
+}
+
+function _writeAliasSinLock(id, label, f) {
   let m = {}, mode = 0o600, raw = null;
   try { raw = fs.readFileSync(f, 'utf8'); mode = fs.statSync(f).mode & 0o7777; } catch (_) { raw = null; }
   if (raw !== null) {
@@ -503,4 +558,5 @@ module.exports = {
   readTranscriptText, scanTranscriptFile, rewriteTranscriptStream,
   firstCwd, lastActivity, titleFromTranscript, titlesFromText,
   sessionAliases, writeAlias,
+  aliasLockPath, takeAliasLock, releaseAliasLock,
 };

@@ -5303,6 +5303,40 @@ HOME="$SMHOME" node -e 'require(process.argv[1]).writeAlias("zzz","nuevo")' "$SM
   && ok "sm5 alias: un JSON ilegible se RESPALDA antes de pisarlo (no se pierde en silencio)" \
   || bad "sm5 alias: un JSON ilegible se pisó sin respaldo"
 
+# ── sm6 · LOCK del mapa de alias. `sesiones-alias.json` lo comparten TODOS los masters de la máquina y
+#         escribirlo es read-modify-write: la escritura atómica evita un archivo a medias, no que dos
+#         escritores se borren las claves — en silencio y sin que nada lo asevere. Medido 2026-09-10:
+#         con una mudanza y un `databases-master` vivos, el riesgo es real y ASIMÉTRICO (pierde quien no
+#         está mirando). Se prueba CONTRA LA FALLA: con el lock tomado, escribir debe NEGARSE.
+SM6="$SMFIX/alias-lock/.claude"
+mkdir -p "$SM6"
+sm6(){ env CLAUDE_CONFIG_DIR="$SM6" node -e "$1" "$SMLIB"; }
+sm6 'const l=require(process.argv[1]);l.writeAlias("aaa","uno-master");l.writeAlias("bbb","dos-master")'
+[ "$(sm6 'process.stdout.write(JSON.stringify(require(process.argv[1]).sessionAliases()))')" = '{"aaa":"uno-master","bbb":"dos-master"}' ] \
+  && ok "sm6 alias-lock: dos escrituras secuenciales conservan las dos claves" \
+  || bad "sm6 alias-lock: una escritura normal perdió la clave previa"
+sm6 'require(process.argv[1]).takeAliasLock()'      # el lock queda TOMADO a propósito
+[ -d "$SM6/sesiones-alias.json.lock" ] \
+  && ok "sm6 alias-lock: takeAliasLock crea el directorio-lock (mkdir es la primitiva atómica)" \
+  || bad "sm6 alias-lock: takeAliasLock no dejó el lock"
+# CONTRA LA FALLA: con el lock ajeno tomado, writeAlias debe NEGARSE (false) y dejar el mapa intacto.
+# Se le pasa 1 intento para no esperar los ~20s del default — el efecto medido es el mismo.
+[ "$(sm6 'const l=require(process.argv[1]);process.stdout.write(String(l.writeAlias("ccc","tres-master",{intentos:1,esperaMs:1})))' 2>/dev/null)" = false ] \
+  && ok "sm6 alias-lock: con el lock ajeno tomado writeAlias devuelve false (no escribe a ciegas)" \
+  || bad "sm6 alias-lock: writeAlias escribió con el lock ajeno tomado"
+[ "$(sm6 'process.stdout.write(JSON.stringify(require(process.argv[1]).sessionAliases()))')" = '{"aaa":"uno-master","bbb":"dos-master"}' ] \
+  && ok "sm6 alias-lock: y el mapa quedó INTACTO — la clave ajena no se perdió (era el riesgo asimétrico)" \
+  || bad "sm6 alias-lock: el mapa cambió con el lock ajeno tomado"
+[ "$(sm6 'const l=require(process.argv[1]);process.stdout.write(String(l.takeAliasLock({intentos:1,esperaMs:1})))')" = false ] \
+  && ok "sm6 alias-lock: takeAliasLock devuelve false cuando el lock está tomado (no lo roba)" \
+  || bad "sm6 alias-lock: takeAliasLock robó un lock ajeno vivo"
+# un lock HUÉRFANO de un crash no puede bloquear el mapa para siempre: se recicla a los 5 min
+touch -t "$(date -d '-10 min' '+%Y%m%d%H%M' 2>/dev/null || date -v-10M '+%Y%m%d%H%M')" "$SM6/sesiones-alias.json.lock"
+sm6 'require(process.argv[1]).writeAlias("ddd","cuatro-master")' >/dev/null 2>&1
+sm6 'process.stdout.write(JSON.stringify(require(process.argv[1]).sessionAliases()))' | grep -q 'cuatro-master' \
+  && ok "sm6 alias-lock: el lock HUÉRFANO (>5m) se recicla (un crash no deja el mapa bloqueado)" \
+  || bad "sm6 alias-lock: un lock huérfano bloquea el mapa para siempre"
+
 rm -rf "$SMFIX"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -5535,6 +5569,9 @@ chmod 600 "$E2EJSONL"
 # G-LIVENESS exige el transcript FRÍO (>=15m): se envejece a 3h. GNU primero, BSD de respaldo.
 touch -t "$(date -d '-3 hours' '+%Y%m%d%H%M' 2>/dev/null || date -v-3H '+%Y%m%d%H%M')" "$E2EJSONL"
 
+E2EDSTP="$(cd "$E2EDST" && pwd -P)"
+E2ENSLUG="$(node -e 'process.stdout.write(require(process.argv[1]).slugFromCwd(process.argv[2]))' "$E2EBIN/session-lib.js" "$E2EDSTP")"
+
 e2e(){ env -u REUBICAR_MODO -u REUBICAR_LIVENESS_OK -u REUBICAR_QUIESCE_OK \
         HOME="$E2EHOME" CLAUDE_CONFIG_DIR="$E2EHOME/.claude" CORTEX_BIN="$E2EBIN" \
         CLAUDECODE= CLAUDE_CODE_ENTRYPOINT= "$@"; }
@@ -5600,6 +5637,33 @@ if [ -f "$E2EH" ]; then
     bad "(e2e) el dry-run falló: $(tail -2 "$E2EDRY" | tr '\n' ' ')"
   fi
   [ -f "$E2EJSONL" ] && ok "(e2e) el dry NO movió el transcript" || bad "(e2e) el dry mutó el transcript"
+  # ── G-QUIESCE afinado: mide lo que la mudanza PUEDE PISAR, no "cualquier sesión de Claude viva".
+  #    Antes bloqueaba por un master trabajando en OTRO repo, que no tiene forma de tocar esta mudanza:
+  #    el humano tenía que interrumpir su trabajo por un proxy. Ahora bloquea solo por los slugs de
+  #    origen/destino, y la relajación se sostiene en que masters.json y el mapa de alias van BAJO LOCK.
+  mkdir -p "$E2EHOME/.claude/projects/-slug-de-otro-repo"
+  printf '{"type":"user","cwd":"/otro"}\n' > "$E2EHOME/.claude/projects/-slug-de-otro-repo/aaaaaaaa-0000-0000-0000-0000000000aa.jsonl"
+  E2EQ="$E2EFIX/quiesce.log"
+  if e2e env REUBICAR_MODO=dry bash "$E2EH" > "$E2EQ" 2>&1 && grep -q 'OTROS slugs' "$E2EQ"; then
+    ok "(e2e) G-QUIESCE AVISA (no bloquea) por una sesión viva en un repo ajeno a la mudanza"
+  else
+    bad "(e2e) G-QUIESCE bloquea por una sesión que no puede tocar la mudanza: $(tail -2 "$E2EQ" | tr '\n' ' ')"
+  fi
+  e2e env REUBICAR_MODO=dry REUBICAR_QUIESCE_ESTRICTO=1 bash "$E2EH" >/dev/null 2>&1 \
+    && bad "(e2e) REUBICAR_QUIESCE_ESTRICTO=1 no restauró el todo-o-nada" \
+    || ok "(e2e) REUBICAR_QUIESCE_ESTRICTO=1 restaura el todo-o-nada (cero sesiones vivas)"
+  # … y en el slug DESTINO sí bloquea: ahí la colisión es real (el .jsonl del destino, el depósito T2)
+  mkdir -p "$E2EHOME/.claude/projects/$E2ENSLUG"
+  printf '{"type":"user","cwd":"/x"}\n' > "$E2EHOME/.claude/projects/$E2ENSLUG/bbbbbbbb-0000-0000-0000-0000000000bb.jsonl"
+  if e2e env REUBICAR_MODO=dry bash "$E2EH" > "$E2EQ" 2>&1; then
+    bad "(e2e) G-QUIESCE NO bloqueó con una sesión ajena viva en el slug DESTINO"
+  else
+    grep -q 'ORIGEN o de DESTINO' "$E2EQ" \
+      && ok "(e2e) G-QUIESCE BLOQUEA por una sesión ajena viva en el slug de origen/destino" \
+      || bad "(e2e) bloqueó, pero no por el slug relevante: $(tail -2 "$E2EQ" | tr '\n' ' ')"
+  fi
+  command rm -f "$E2EHOME/.claude/projects/$E2ENSLUG/bbbbbbbb-0000-0000-0000-0000000000bb.jsonl" \
+               "$E2EHOME/.claude/projects/-slug-de-otro-repo/aaaaaaaa-0000-0000-0000-0000000000aa.jsonl"
   # ── full: los pasos DESTRUCTIVOS, con sus dos citas humanas ──
   E2EFULL="$E2EFIX/full.log"
   if e2e env REUBICAR_LIVENESS_OK=1 REUBICAR_QUIESCE_OK=1 bash "$E2EH" > "$E2EFULL" 2>&1 \
@@ -5608,8 +5672,6 @@ if [ -f "$E2EH" ]; then
   else
     bad "(e2e) los pasos destructivos fallaron: $(tail -4 "$E2EFULL" | tr '\n' ' ')"
   fi
-  E2EDSTP="$(cd "$E2EDST" && pwd -P)"
-  E2ENSLUG="$(node -e 'process.stdout.write(require(process.argv[1]).slugFromCwd(process.argv[2]))' "$E2EBIN/session-lib.js" "$E2EDSTP")"
   [ -f "$E2EHOME/.claude/projects/$E2ENSLUG/$E2EID.jsonl" ] && [ ! -f "$E2EJSONL" ] \
     && ok "(e2e) el transcript vive en el slug NUEVO y el viejo quedó barrido (quirúrgico)" \
     || bad "(e2e) el transcript no quedó en el slug nuevo, o el viejo sobrevivió"

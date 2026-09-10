@@ -87,8 +87,9 @@ USO
 # Los símbolos que el PRELUDIO aporta y de los que el handoff DEPENDE. Se verifica contra el preludio
 # real cuando está disponible (una lista que drifte del preludio se detecta, no se cree).
 _SIMBOLOS_PRELUDIO='_abort() _mtime() _size() _perm() _fecha() _ahora() _real() _cwdform() _cwds()
-_cwds_n() _ultimo_par() _slug() SO= NOMBRE_FINAL= MJ= BIN= SRC= DST_POSIX= SRC_POSIX= DST= DST_CWD=
-SRC_CWD= HOME_CWD= OLD_SLUG= NEW_SLUG= PROJ= JSONL= NEW_JSONL= GLOBAL_MEM= ST= TARGET='
+_cwds_n() _ultimo_par() _slug() _cap() _capfalta= SO= NOMBRE_FINAL= MJ= BIN= SRC= DST_POSIX=
+SRC_POSIX= DST= DST_CWD= SRC_CWD= HOME_CWD= OLD_SLUG= NEW_SLUG= PROJ= JSONL= NEW_JSONL= GLOBAL_MEM=
+ST= TARGET='
 
 # Los parámetros que la CABECERA hornea. Sin ellos el handoff no sabe qué mover.
 _SIMBOLOS_CABECERA='LIB_SHA_HORNEADO= ID= MASTER_NAME= MASTER_NAME_NUEVO= SRC_REPO= DST_REPO= DRIVE=
@@ -97,7 +98,8 @@ DST_PROTEGIDO= T2_ROOT= T2_LOCAL=( MEMORIAS_T1=('
 # Un paso obligatorio por marcador. Si un paso se retira A PROPÓSITO, su marcador sale de aquí en el
 # MISMO commit: el candado y el generador se mantienen juntos o dejan de significar algo.
 _MARCADORES='G-SELF-MOVE G-LIVENESS G-QUIESCE --git-branch _reancla S4-2c UPSERT MJ.lock
-_postcondiciones REUBICAR_MODO REUBICAR_LIVENESS_OK REUBICAR_QUIESCE_OK DESHACER fail-closed'
+_postcondiciones REUBICAR_MODO REUBICAR_LIVENESS_OK REUBICAR_QUIESCE_OK REUBICAR_QUIESCE_ESTRICTO
+ALIAS_ANTES DESHACER fail-closed'
 _MARCADOR_FRASE='PUNTO DE NO RETORNO'
 
 # Un símbolo se busca como DEFINICIÓN o ASIGNACIÓN en frontera de palabra, NO como substring: 'ST='
@@ -400,7 +402,7 @@ _cap(){   # _cap <archivo> <patrón>
 }
 _cap session-move.js   '--git-branch'              # S4: re-ancla (cwd, gitBranch) en la MISMA pasada
 _cap session-export.js '--name'                    # S3: exporta con el nombre FINAL (si no, un import revierte el alias)
-for _fn in slugFromCwd sessionAliases writeAlias rewriteTranscriptStream; do
+for _fn in slugFromCwd sessionAliases writeAlias rewriteTranscriptStream aliasLockPath; do
   _cap session-lib.js "$_fn"
 done
 [ -z "$_capfalta" ] || _abort \
@@ -534,6 +536,21 @@ fi
 
 # ── G-QUIESCE por ARTEFACTO (no por proceso: contar con pgrep falla en las dos direcciones — ver §9
 #    del skill, fila "El gate de quiescencia no mide nada") ───────────────────────────────────────
+# Mide lo que esta mudanza REALMENTE puede pisar, no "cualquier sesión de Claude en la máquina":
+#   · BLOQUEA una sesión ajena caliente en el slug ORIGEN o el slug DESTINO. Ahí la colisión es real: el
+#     barrido del origen, el `.jsonl` del destino y el depósito T2 en el repo destino se pisan con lo que
+#     esa sesión escriba — y el daemon transitorio CUENTA, porque arrastra el PWD de quien lo lanzó y
+#     puede sembrar un transcript justo en el slug nuevo.
+#   · AVISA (no bloquea) por las de OTROS slugs. Los dos artefactos COMPARTIDOS que quedan —`masters.json`
+#     y el mapa de alias— se escriben BAJO LOCK (`mkdir`, con reciclado del huérfano) por todo lo que pasa
+#     por la lib, y todo lo demás que el guion toca está scopeado a $ID. **La relajación es sólida SOLO
+#     por ese lock**, y por eso el preflight de capacidad EXIGE `aliasLockPath`: una lib vieja sin lock no
+#     llega hasta aquí. Excepción conocida (§10 del skill): el widget de Plasma escribe el mapa desde QML
+#     sin la lib ⇒ sin lock; por eso `_postcondiciones` asevera además que ningún alias AJENO se perdió —
+#     el lock ata a quien pasa por la lib, la aserción caza a quien no.
+#   · REUBICAR_QUIESCE_ESTRICTO=1 restaura el todo-o-nada (cero sesiones vivas en la máquina).
+# Medido el 2026-09-10: con un `databases-master` trabajando en otro repo, el gate viejo bloqueaba una
+# mudanza que no tenía forma de tocarlo, y el humano tenía que interrumpir su trabajo por un proxy.
 echo "── G-QUIESCE ──"
 QUIESCE_MIN="${REUBICAR_QUIESCE_MIN:-5}"
 _ref="$(mktemp)"
@@ -542,20 +559,35 @@ touch -t "$(date -v-"${QUIESCE_MIN}"M '+%Y%m%d%H%M' 2>/dev/null || date -d "-${Q
 _calientes="$(find "$PROJ" -maxdepth 2 -name '*.jsonl' -newer "$_ref" ! -name "$ID.jsonl" 2>/dev/null || true)"
 rm -f "$_ref"
 [ -n "$YO" ] && _calientes="$(printf '%s\n' "$_calientes" | grep -v "/$YO\.jsonl\$" || true)"
-if [ -n "$(printf '%s' "$_calientes" | tr -d '[:space:]')" ]; then
-  echo "  transcript(s) ajenos tocados hace <${QUIESCE_MIN}m ⇒ sesiones presuntamente VIVAS:"
-  printf '    %s\n' $_calientes
-  _abort "BLOQUEO G-QUIESCE: cierra TODAS las sesiones de Claude en esta máquina y vuelve a correr" \
+# los slugs son [A-Za-z0-9-] por construcción (todo lo demás se vuelve '-'), así que van directo en la ERE
+_cal_relev="$(printf '%s\n' "$_calientes" | grep -E "/($OLD_SLUG|$NEW_SLUG)/[^/]+\.jsonl\$" || true)"
+_cal_otros="$(printf '%s\n' "$_calientes" | grep -vE "/($OLD_SLUG|$NEW_SLUG)/[^/]+\.jsonl\$" || true)"
+if [ -n "$(printf '%s' "$_cal_relev" | tr -d '[:space:]')" ]; then
+  echo "  sesión(es) ajena(s) CALIENTE(s) en el slug de ORIGEN o de DESTINO:"
+  printf '    %s\n' $_cal_relev
+  _abort "BLOQUEO G-QUIESCE: hay una sesión viva parada en el repo ORIGEN o DESTINO de esta mudanza." \
+         "  Ahí la colisión es REAL (barrido del origen · .jsonl del destino · depósito T2 en el repo" \
+         "  destino). Ciérrala y vuelve a correr; las de OTROS repos no hace falta cerrarlas." \
          "  (el daemon transitorio CUENTA: arrastra el PWD de quien lo lanzó)"
 fi
-echo "  ok: ningún transcript ajeno caliente (<${QUIESCE_MIN}m)"
+echo "  ok: nada ajeno caliente en los slugs de origen/destino (<${QUIESCE_MIN}m)"
+if [ -n "$(printf '%s' "$_cal_otros" | tr -d '[:space:]')" ]; then
+  if [ "${REUBICAR_QUIESCE_ESTRICTO:-0}" = "1" ]; then
+    echo "  transcript(s) ajenos calientes en otros slugs, y REUBICAR_QUIESCE_ESTRICTO=1:"
+    printf '    %s\n' $_cal_otros
+    _abort "BLOQUEO G-QUIESCE (estricto): cierra TODAS las sesiones de Claude en esta máquina"
+  fi
+  echo "  ⚠ sesión(es) viva(s) en OTROS slugs — NO bloquean (masters.json y el mapa de alias van bajo lock):"
+  printf '    %s\n' $_cal_otros
+  echo "    Si quieres cero riesgo compartido, ciérralas y corre con REUBICAR_QUIESCE_ESTRICTO=1."
+fi
 
 # ── CITAS HUMANAS materializadas como GATES (en 'dry' se listan, no se exigen) ──────────────────
 if [ "$MODO" != dry ]; then
   [ "${REUBICAR_QUIESCE_OK:-0}" = "1" ] || _abort \
     "BLOQUEO: falta la CITA HUMANA de G-QUIESCE." \
-    "  Cuando el humano diga textual «cerré todas las sesiones de Claude en <máquina>»," \
-    "  re-corre con  REUBICAR_QUIESCE_OK=1"
+    "  Cuando el humano diga textual «no hay ninguna sesión de Claude trabajando en <origen> ni en" \
+    "  <destino>» (las de OTROS repos pueden seguir abiertas), re-corre con  REUBICAR_QUIESCE_OK=1"
   if [ "$MODO" = full ]; then
     [ "${REUBICAR_LIVENESS_OK:-0}" = "1" ] || _abort \
       "BLOQUEO: falta la CITA HUMANA de G-LIVENESS." \
@@ -570,9 +602,16 @@ RAMA_DST="$(git -C "$DST_POSIX" branch --show-current 2>/dev/null || true)"
 [ -n "$RAMA_DST" ] || _abort "BLOQUEO: el destino está en detached HEAD ⇒ no hay rama que escribir en el último evento" \
   "  Haz checkout de la rama de trabajo del destino y vuelve a correr."
 
+# Fotografía de las claves del mapa de alias ANTES de tocarlo. El mapa es COMPARTIDO por todos los
+# masters de la máquina: `writeAlias` ya va bajo lock, pero una lib VIEJA corriendo en otro proceso puede
+# seguir escribiéndolo sin lock ⇒ no se confía en el lock, se ASEVERA el resultado. Vacío = no aplica
+# (modo s7, o el paso del alias aún no corrió).
+ALIAS_ANTES=""
+_alias_keys(){ node -e 'const a=require(process.argv[1]).sessionAliases();process.stdout.write(Object.keys(a).sort().join("\n"))' "$BIN/session-lib.js"; }
+
 # ── POSTCONDICIONES · UNA sola definición, la usan S4/S5 (modo full) y S7 ───────────────────────
 _postcondiciones(){
-  local n uniq_n uniq_v got par modo_f alias_leido enl
+  local n uniq_n uniq_v got par modo_f alias_leido enl perdidas keys_ahora k
   echo "── POSTCONDICIONES (aserciones: si una falla, NO se imprime el ✅) ──"
   n="$(find "$PROJ" -maxdepth 2 -name "$ID.jsonl" 2>/dev/null | grep -c . || true)"
   if [ "$n" -ne 1 ]; then
@@ -608,9 +647,24 @@ _postcondiciones(){
   alias_leido="$(node -e 'const a=require(process.argv[1]).sessionAliases(); process.stdout.write(a[process.argv[2]]||"")' "$BIN/session-lib.js" "$ID")"
   [ "$alias_leido" = "$NOMBRE_FINAL" ] \
     || _abort "ABORTO: el alias quedó '$alias_leido', esperaba '$NOMBRE_FINAL'" \
-              "  writeAlias respalda y avisa si el JSON es ilegible, pero NO serializa a dos escritores:" \
-              "  con otra sesión escribiendo alias a la vez, la última gana. Revisa ~/.claude/sesiones-alias.json."
+              "  writeAlias respalda un JSON ilegible y va BAJO LOCK (no pisa a otro escritor): si el alias" \
+              "  no quedó, o el lock estaba tomado (lo dice en su AVISO) o alguien escribió el mapa SIN lock" \
+              "  (una lib de cortex vieja en otro proceso). Revisa ~/.claude/sesiones-alias.json y su .lock."
   echo "  ok: alias = $alias_leido"
+  if [ -n "${ALIAS_ANTES:-}" ]; then
+    keys_ahora="$(_alias_keys)"; perdidas=""
+    for k in $ALIAS_ANTES; do
+      printf '%s\n' "$keys_ahora" | grep -qx -- "$k" || perdidas="$perdidas $k"
+    done
+    [ -z "$perdidas" ] || _abort \
+      "ABORTO: se PERDIERON alias AJENOS del mapa compartido:$perdidas" \
+      "  El mapa lo comparten todos los masters de la máquina. Otro escritor SIN lock (una lib de cortex" \
+      "  vieja en otro proceso) hizo read-modify-write encima. Recupéralos: el respaldo del mapa vive en" \
+      "  $HOME/.claude/sesiones-alias.json.ilegible.* si estaba corrupto, y si no, re-fíjalos con" \
+      "  node -e 'require(\"$BIN/session-lib.js\").writeAlias(\"<id>\",\"<nombre>\")' — y actualiza el" \
+      "  cortex de esa otra máquina/proceso: sin el lock esto se repite."
+    echo "  ok: los $(printf '%s\n' $ALIAS_ANTES | grep -c . || true) alias que ya existían siguen en el mapa"
+  fi
   [ -L "$PROJ/$NEW_SLUG/memory" ] && _abort "ABORTO: reapareció el symlink 'memory' en el slug nuevo (el bootstrap lo re-siembra) ⇒ retíralo" || true
   enl="$(find "$DST" -type l 2>/dev/null || true)"      # SIN -L: con -L, find solo ve los ROTOS (verificado)
   [ -z "$enl" ] || _abort "ABORTO: el cerebro del destino tiene symlinks (ni rotos ni sanos deben quedar):" "$(printf '%s\n' "$enl" | sed 's/^/    /')"
@@ -700,6 +754,8 @@ fi
 # ── MODO s7: re-verificar DESPUÉS del QA (§S7) ──────────────────────────────────────────────────
 if [ "$MODO" = s7 ]; then
   echo "── S7 · re-verificando las invariantes DESPUÉS del QA ──"
+  ALIAS_ANTES="$(_alias_keys)"   # el QA fue un resume: si el mapa ya perdió claves, esto NO lo caza —
+                                 # aquí solo se verifica que S7 mismo no las pierda. Lo dice para no mentir.
   [ -f "$NEW_JSONL" ] || _abort "S7: no hay transcript en el slug nuevo ($NEW_JSONL)"
   uniq_v="$(_cwds "$NEW_JSONL")"; uniq_n="$(_cwds_n "$NEW_JSONL")"
   par="$(_ultimo_par "$NEW_JSONL")"
@@ -862,8 +918,10 @@ mv -f "$_tmpm" "$MJ"
 rmdir "$_mjlock" 2>/dev/null || true
 echo "S4:masters-ok" > "$ST"
 
-# S4 paso 4 · alias con el nombre FINAL (usa la lib, no editar a mano)
+# S4 paso 4 · alias con el nombre FINAL (usa la lib, no editar a mano). El mapa es compartido: se
+# fotografían las claves ajenas ANTES, y `_postcondiciones` asevera que ninguna se perdió.
 echo "  S4 paso 4 · alias"
+ALIAS_ANTES="$(_alias_keys)"
 node -e 'require(process.argv[1]).writeAlias(process.argv[2],process.argv[3])' "$BIN/session-lib.js" "$ID" "$NOMBRE_FINAL"
 
 # S4 paso 5 · residuo REAL del renombre (el alias no es un symlink: es un mapa JSON por id)

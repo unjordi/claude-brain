@@ -6,7 +6,8 @@ description: >-
   RENOMBRE del master, y slug global + TODAS las referencias (masters.json target y name por-id, alias)
   corregidas en un bloque ININTERRUMPIDO con respaldo y punto-de-no-retorno explícito (todo-o-nada por
   RECUPERACIÓN, no atómico de filesystem), residuo QUIRÚRGICO barrido, cero symlinks nuevos y
-  doc=realidad. Incluye G-QUIESCE (cero sesiones vivas, antes Y después) y S7 (re-verificar tras el QA,
+  doc=realidad. Incluye G-QUIESCE (por artefacto, antes Y después: bloquea por una sesión viva en el repo
+  origen o destino, avisa por las de otros repos) y S7 (re-verificar tras el QA,
   porque el QA es un resume y un resume MUTA). El destino es un PARÁMETRO (`$DST_REPO`), no una
   constante: sirve igual para `cortex`, `axon` o el repo que sea, y el corte de qué viaja versionado se
   calibra según la VISIBILIDAD REAL del destino, verificada en runtime. Úsala cuando: un `--resume` cae
@@ -394,7 +395,7 @@ pelo: `ssh <host> 'stat -c %Y <jsonl> 2>/dev/null || stat -f %m <jsonl>'`.
 > **Consecuencia clave:** la sesión que EJECUTA esta skill NO puede moverse a sí misma (mtime caliente +
 > `G-SELF-MOVE`). Por eso el move de cada master lo dispara **el OTRO** — ver la danza §6.
 
-### G-QUIESCE · CERO sesiones vivas — por ARTEFACTO, ANTES **y DESPUÉS** del move
+### G-QUIESCE · quiescencia DONDE IMPORTA — por ARTEFACTO, ANTES **y DESPUÉS** del move
 > **[verificado 2026-09-08, mudanza de axon-master]** `G-LIVENESS` solo prueba que la sesión OBJETIVO está
 > fría. **No basta:** cualquier sesión viva puede deshacer la mudanza *después* de que las postcondiciones
 > de S4/S5 pasaron. Lo que pasó: el move quedó impecable y medido; luego un resume escribió un transcript
@@ -412,27 +413,40 @@ pelo: `ssh <host> 'stat -c %Y <jsonl> 2>/dev/null || stat -f %m <jsonl>'`.
 tres OS. Contar procesos con `pgrep` no sirve aquí y falla en las DOS direcciones (bloquea siempre en macOS,
 pasa vacío en Git Bash): la narrativa causal completa está en §9, fila *"El gate de quiescencia no mide
 nada"*, y no se repite aquí.
-```bash
-QUIESCE_MIN="${REUBICAR_QUIESCE_MIN:-5}"
-ref="$(mktemp)"
-touch -t "$(date -v-"${QUIESCE_MIN}"M '+%Y%m%d%H%M' 2>/dev/null || date -d "-${QUIESCE_MIN} min" '+%Y%m%d%H%M')" "$ref" \
-  || { rm -f "$ref"; echo "BLOQUEO G-QUIESCE (fail-closed): no pude fabricar la referencia de tiempo (ni 'date -v' ni 'date -d')"; exit 1; }
-calientes="$(find "$PROJ" -maxdepth 2 -name '*.jsonl' -newer "$ref" ! -name "$ID.jsonl" 2>/dev/null || true)"
-rm -f "$ref"
-[ -n "${YO:-}" ] && calientes="$(printf '%s\n' "$calientes" | grep -v "/$YO\.jsonl\$" || true)"   # el ejecutor no se cuenta
-if [ -n "$(printf '%s' "$calientes" | tr -d '[:space:]')" ]; then
-  echo "BLOQUEO G-QUIESCE: transcript(s) tocados hace <${QUIESCE_MIN}m ⇒ sesiones presuntamente VIVAS:"
-  printf '  %s\n' $calientes
-  echo "  Cierra TODAS las sesiones de Claude en esta máquina (el daemon transitorio CUENTA: arrastra el"
-  echo "  PWD de quien lo lanzó) y vuelve a correr."
-  exit 1
-fi
-echo "  ok G-QUIESCE: ningún transcript ajeno caliente (<${QUIESCE_MIN}m)"
-```
-+ **CITA HUMANA obligatoria:** *"cerré todas las sesiones de Claude en `<máquina>`"*. El humano ES el gate;
-el barrido de artefactos solo lo corrobora. En el handoff se materializa como `REUBICAR_QUIESCE_OK=1`.
-> **Corolario para el QA de S6:** el resume de verificación debe ser **el único** proceso de Claude en la
-> máquina. Con otro encendido no sabrás si un síntoma es de la mudanza o del vecino.
+**Qué mide, y por qué eso y no más** (implementado en el preludio; el gate corre en el handoff, antes de
+S3 y otra vez en S7):
+- **BLOQUEA** por una sesión ajena caliente en el **slug de ORIGEN** o el **slug de DESTINO**. Ahí la
+  colisión es real: el barrido del origen, el `.jsonl` del destino y el depósito T2 en el repo destino se
+  pisan con lo que esa sesión escriba. Y el **daemon transitorio CUENTA**: arrastra el PWD de quien lo
+  lanzó, así que puede sembrar un transcript justo en el slug nuevo.
+- **AVISA** (no bloquea) por las de **otros** repos. Los dos artefactos COMPARTIDOS que quedan
+  —`masters.json` y `~/.claude/sesiones-alias.json`— se escriben **bajo lock** (`mkdir`, con reciclado del
+  huérfano a los 5 min) por **todo lo que pasa por la lib**: `exportar-sesion-master.sh` (que de hecho no
+  toca el mapa de alias, solo `masters.json`), `session-import.js` y este skill. Todo lo demás que el guion
+  toca está scopeado a `$ID`.
+  **Excepción CONOCIDA, no tapada:** el **widget de Plasma** escribe `sesiones-alias.json` desde QML sin
+  pasar por la lib, así que **no toma el lock** (§10, pendiente abierto). Solo ocurre cuando alguien
+  RENOMBRA una sesión en el widget —acción humana deliberada, no de fondo— y `_postcondiciones` lo caza
+  **ruidosamente** si pisa una clave. En una Mac ni existe (el widget es Plasma).
+- **`REUBICAR_QUIESCE_ESTRICTO=1`** restaura el todo-o-nada (cero sesiones vivas en la máquina).
+
+> **La relajación se sostiene EN el lock, no en la confianza.** El preflight de capacidad EXIGE
+> `aliasLockPath` en `session-lib.js`, así que una lib vieja **sin** lock no llega hasta aquí; y
+> `_postcondiciones` asevera además que **ningún alias AJENO se perdió** — cinturón junto al tirante,
+> porque el lock protege al código que pasa por la lib y la aserción caza a lo que no (la lib vieja de otro
+> proceso, o el widget escribiendo desde QML).
+>
+> **Por qué se afinó (2026-09-10, medido).** El gate viejo bloqueaba por *cualquier* transcript caliente
+> en la máquina. Con un `databases-master` trabajando en otro repo —que no tiene forma de tocar esta
+> mudanza— el humano tenía que interrumpir su trabajo para satisfacer un **proxy**. Afinarlo fue decisión
+> explícita de unjordi, y el arreglo de fondo (el lock del mapa de alias) entró en la misma tanda: primero
+> se cerró el riesgo compartido, después se relajó el gate.
+
++ **CITA HUMANA obligatoria:** *"no hay ninguna sesión de Claude trabajando en `<origen>` ni en
+`<destino>`"* — las de otros repos pueden seguir abiertas. El humano ES el gate; el barrido de artefactos
+solo lo corrobora. En el handoff se materializa como `REUBICAR_QUIESCE_OK=1`.
+> **Corolario para el QA de S6:** el resume de verificación debe ser el único proceso de Claude **parado
+> en el repo destino**. Con otro ahí no sabrás si un síntoma es de la mudanza o del vecino.
 
 ### G-GITIGNORE · BLINDAR el `.gitignore` del destino ANTES de depositar nada sensible
 Un destino cuyo `.gitignore` no cubra el `CLAUDE.local.md` de la raíz dejaría lo sensible TRACKEADO = fuga
@@ -644,9 +658,10 @@ postcondiciones propias). Sub-pasos y su razón:
 7. **4 · alias** con `writeAlias` **y su verificador**. `writeAlias` ya escribe tmp+rename y, si el
    `sesiones-alias.json` existente es ilegible, lo **respalda y avisa** en vez de degradarlo a `{}` (que
    habría reemplazado el mapa entero por una sola entrada). El verificador se queda: relee con
-   `sessionAliases()` y **asere** — lo que queda sin cubrir del lado de la lib es el escritor
-   CONCURRENTE (dos `writeAlias` a la vez pueden perder una actualización por last-writer-wins), y
-   `G-QUIESCE` es lo que hace improbable ese escenario durante la mudanza.
+   `sessionAliases()` y **asere**. El escritor CONCURRENTE **ya está cubierto** (2026-09-10):
+   `writeAlias` toma un **lock `mkdir`** —el mismo idioma que el de `masters.json`— y si no lo consigue
+   **NO escribe** (devuelve `false` y lo dice), porque pisar borraría la clave del otro master. Y como el
+   lock solo ata al código nuevo, `_postcondiciones` asevera además que **ningún alias ajeno se perdió**.
 8. **5 · residuo del RENOMBRE, el real.** El alias **no es un symlink** (es un mapa JSON por id en
    `~/.claude/sesiones-alias.json`, y `writeAlias` sobrescribe la misma clave), así que el `find … -type l`
    de la versión anterior era un paso fantasma que siempre imprimía nada. Los residuos que SÍ existen:
@@ -946,8 +961,8 @@ resuelve explícitamente **quién borra el `.jsonl` de la máquina de ORIGEN** �
 8. **`$DST_PROTEGIDO`** — ¿el destino tiene un subdirectorio que JAMÁS se muta (p. ej. `brain/` en cortex)?
    Default: vacío (ninguno). No se hardcodea: `axon` no tiene `brain/` y asumirlo abortaba con un
    diagnóstico falso.
-+ **Las DOS citas de liveness/quiescencia** — *"la sesión `<id>` en `<máquina>` está CERRADA"* y *"cerré
-  todas las sesiones de Claude en `<máquina>`"*. No las infiere el skill, y en el handoff son **gates
++ **Las DOS citas de liveness/quiescencia** — *"la sesión `<id>` en `<máquina>` está CERRADA"* y *"no hay
+  ninguna sesión de Claude trabajando en `<origen>` ni en `<destino>`"*. No las infiere el skill, y en el handoff son **gates
   reales** (`REUBICAR_LIVENESS_OK=1`, `REUBICAR_QUIESCE_OK=1`).
 
 ---
@@ -1037,7 +1052,7 @@ git), y las ediciones de identidad de S6 (están en el `.t2` de respaldo).
 | **El cuerpo y el handoff derivan por separado** | eran dos superficies mantenidas a mano; los parches entraban en una y media | los pasos destructivos viven **SOLO** en §6.1, el preludio es **UN archivo** que los dos consumen, y el gate de marcadores lo vigila |
 | Cross-máquina: "sembré" sin sembrar | `session-import.js` lee `<repo>/.claude/sessions/` por default y el `.gz` está en el Drive ⇒ `{"ok":true,"imported":[]}` con exit 0 | §6.3: `--sessions-dir "$DRIVE" --only "$ID" --force` + aserción `.imported \| length >= 1` |
 | Renombre que revive con el nombre viejo | el hook re-deriva la identidad del `customTitle`; `session-import.js` restaura el alias desde `meta.label` | S3 exporta con `$NOMBRE_FINAL`; el preludio exige el sufijo `-master`; S4 paso 5 lista las otras entradas con el nombre viejo y recuerda renombrar el `customTitle` |
-| Alias perdidos en silencio | degradar un `sesiones-alias.json` ilegible a `{}` en el camino de ESCRITURA: la siguiente escritura deja **una sola** entrada y borra los demás | `writeAlias` escribe **tmp+rename** y un JSON ilegible lo **respalda y avisa** en vez de degradarlo; el verificador con `sessionAliases()` en `_postcondiciones` se queda. **Sigue sin cubrirse** el escritor CONCURRENTE (dos `writeAlias` a la vez: last-writer-wins) — lo hace improbable `G-QUIESCE` |
+| Alias perdidos en silencio | (a) degradar un `sesiones-alias.json` ilegible a `{}` al ESCRIBIR: la siguiente escritura deja **una sola** entrada y borra las demás. (b) dos `writeAlias` CONCURRENTES: el mapa lo comparten todos los masters de la máquina y escribirlo es read-modify-write ⇒ last-writer-wins, **en silencio y asimétrico** (pierde quien no está mirando) | (a) `writeAlias` escribe **tmp+rename** y un JSON ilegible lo **respalda y avisa** en vez de degradarlo. (b) **CERRADO 2026-09-10:** `writeAlias` toma un **lock `mkdir`** (huérfano reciclado a los 5 min) y si no lo consigue **no escribe**; el preflight de capacidad EXIGE `aliasLockPath` en la lib; y `_postcondiciones` asevera que **ningún alias ajeno se perdió** — porque el lock ata al código nuevo, no al viejo que corra en otro proceso |
 | Nombre de archivo con espacio parte el flujo | listas por word-splitting (`for m in $MEMORIAS_T1`) | **arrays** (`${ARR[@]+"${ARR[@]}"}`) y `while IFS= read -r` para las listas de archivos |
 | Glob expandido en el cwd EQUIVOCADO | `.claude/memory/*.local.md` lo expande el shell del operador, no git en el destino (y en zsh sin match **aborta**) | rutas construidas desde el array y pasadas a git con `--` una por una |
 | El árbol de trabajo del humano movido de rama | S1 hacía `git checkout develop` en el destino y ramificaba de `develop` | S1 exige árbol limpio y **ramifica de la rama VIVA del destino** |
@@ -1089,7 +1104,13 @@ lista:** cuando `bin/` cierre un ítem, el ítem baja a "Ya NO son pendientes" *
 se toca `bin/` — una lista que pide lo que el código ya hace no es un backlog, es doc que miente, y ya
 produjo un gate que bloqueaba una mudanza posible (el techo de 512 MiB, retirado).
 
-**ABIERTOS de verdad (3):**
+**ABIERTOS de verdad (4):**
+- **El WIDGET escribe `sesiones-alias.json` sin el lock.** `src/plasmoid/contents/ui/main.qml`
+  (`writeAliasMap`) escribe el mapa por shell, sin pasar por `session-lib.js` ⇒ se salta el lock que
+  `writeAlias` ya toma (2026-09-10). Mismo caso con `proyectos-alias.json`. Riesgo REAL pero angosto: solo
+  al renombrar una sesión en el widget (acción humana deliberada) y `_postcondiciones` lo caza ruidoso.
+  Arreglo de raíz: que el widget tome el mismo lock `mkdir` en el shell que ya usa, o que delegue la
+  escritura a la lib. **Ojo:** este es el escritor que impide afirmar "todo el mapa va bajo lock".
 - **`session-move.js`: `--from-slug`.** Para que el llamador FIJE el archivo objetivo en vez de dejarlo al
   tie-break de `findSession()`. Mitigado por partida doble: `G-LIVENESS` **bloquea** si el id vive en >1
   slug, y el tie-break ya desempata por contenido de primer nivel. Sigue siendo la solución de raíz.
