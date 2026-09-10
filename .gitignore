@@ -88,3 +88,4 @@ docs/flowcharts/*
 
 # Worktrees locales de sesiones de trabajo (nunca se versionan: son checkouts, no contenido).
 .git-worktrees/
+CLAUDE.local.md
