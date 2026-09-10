@@ -5690,6 +5690,56 @@ grep -qiE 'veredicto:|T1$|=> T1|⇒ T1' "$E2ECLAS" \
   && bad "(e2e) clasificar: emitió un veredicto por memoria (invita a aceptar el corte sin leerlo)" \
   || ok "(e2e) clasificar: cero columna de veredicto por memoria"
 command rm -f "$E2ESRC/.claude/memory"/*.md "$E2EDST/.claude/memory/ya-en-destino.md"
+# ── `paridad` (G-PARITY ejecutable). Era otro bloque de markdown, y al CORRERLO aparecieron dos defectos
+#    que la lectura no vio: (a) exigía `.claude/settings.json` en TODO destino, contradiciendo la norma dura
+#    «repo PERSONAL: guards por-repo NUNCA» ⇒ bloqueaba un destino correcto y empujaba a crear el drift que
+#    la norma prohíbe; (b) reportaba «FALTA» sobre T2 que estaba en el bundle esperando a S5.
+E2EPAR="$E2EFIX/paridad.log"
+printf '{"hooks":{}}\n' > "$E2EHOME/.claude/settings.json"    # simula el install GLOBAL de la máquina
+printf 'contenido igual\n' > "$E2ESRC/.claude/memory/t1-migrada.md"
+printf 'contenido igual\n' > "$E2EDST/.claude/memory/t1-migrada.md"
+printf 'solo en el origen\n' > "$E2ESRC/.claude/memory/t1-pendiente.md"
+printf 'sensible\n' > "$E2ESRC/.claude/memory/secreta.local.md"
+E2EBUNDLE="$E2EFIX/bundle.tgz"
+tar -C "$E2ESRC/.claude/memory" -czf "$E2EBUNDLE" secreta.local.md
+# (1) destino PERSONAL (sin marca) + T1 presente + T2 en el bundle ⇒ VERDE
+if e2e bash "$E2ESH" paridad --src-repo "$E2ESRC" --dst-repo "$E2EDST" --bundle "$E2EBUNDLE" \
+     --t1 t1-migrada.md --t2-local secreta.local.md > "$E2EPAR" 2>&1; then
+  ok "(e2e) paridad: destino PERSONAL sin settings.json pasa VERDE (la norma prohíbe guards por-repo ahí)"
+else
+  bad "(e2e) paridad: bloqueó un destino PERSONAL correcto: $(grep -E 'FALTA' "$E2EPAR" | head -2 | tr '\n' ' ')"
+fi
+grep -q 'destino PERSONAL' "$E2EPAR" \
+  && ok "(e2e) paridad: T4 DICE por qué no exige settings.json en un destino personal" \
+  || bad "(e2e) paridad: T4 no explica la bifurcación personal/compartido"
+grep -qE '^  pend  secreta\.local\.md' "$E2EPAR" \
+  && ok "(e2e) paridad: un T2 que viaja en el bundle es 'pend' (lo deposita S5), no un fallo" \
+  || bad "(e2e) paridad: cuenta como FALTA un T2 que está en el bundle esperando a S5"
+# (2) la MISMA situación declarada COMPARTIDA y sin settings.json ⇒ BLOQUEA (ahí el correo sí hace falta)
+touch "$E2EDST/.claude/repo-compartido"
+if e2e bash "$E2ESH" paridad --src-repo "$E2ESRC" --dst-repo "$E2EDST" --bundle "$E2EBUNDLE" \
+     --t1 t1-migrada.md --t2-local secreta.local.md > "$E2EPAR" 2>&1; then
+  bad "(e2e) paridad: un destino COMPARTIDO sin settings.json pasó (un colega clonaría SIN guards)"
+else
+  grep -q 'se declara COMPARTIDO' "$E2EPAR" \
+    && ok "(e2e) paridad: un destino COMPARTIDO sin settings.json BLOQUEA (el correo de guards falta)" \
+    || bad "(e2e) paridad: bloqueó, pero no por la marca de repo compartido"
+fi
+command rm -f "$E2EDST/.claude/repo-compartido"
+# (3) un T1 que sigue solo en el origen ⇒ FALTA de verdad
+if e2e bash "$E2ESH" paridad --src-repo "$E2ESRC" --dst-repo "$E2EDST" \
+     --t1 t1-pendiente.md --t2-local secreta.local.md > "$E2EPAR" 2>&1; then
+  bad "(e2e) paridad: dio verde con un T1 ausente del destino"
+else
+  grep -qE '^  FALTA t1-pendiente\.md' "$E2EPAR" \
+    && ok "(e2e) paridad: un T1 ausente del destino sí es FALTA (sin bundle que lo excuse)" \
+    || bad "(e2e) paridad: no reportó el T1 ausente"
+fi
+grep -q 'rama:' "$E2EPAR" \
+  && ok "(e2e) paridad: declara la RAMA del destino (un FALTA puede ser el working tree rotando)" \
+  || bad "(e2e) paridad: no declara la rama del destino"
+command rm -f "$E2ESRC/.claude/memory"/*.md "$E2EDST/.claude/memory/t1-migrada.md"
+
 # el ID se interpola en rutas ⇒ se valida su forma, y los obligatorios no tienen default
 e2e bash "$E2ESH" --dst-repo "$E2EDST" --master-name x >/dev/null 2>&1 \
   && bad "(e2e) el script generó sin --id" || ok "(e2e) sin --id no genera (exit != 0)"

@@ -485,29 +485,32 @@ No se mide "18 vs 4 skills" (mezcla plantilla con master). Y **no** se mide `SRC
 ausente falla siempre y el gate bloquearía aunque el destino esté COMPLETO. Se mide lo que el invariante
 enuncia: que lo clasificado del-master **esté en el destino y sea el bueno**.
 ```bash
-fail=0
-_paridad(){ # $1 = ruta en el origen (puede no existir), $2 = ruta en el destino, $3 = etiqueta
-  if   [ -e "$1" ] && [ -e "$2" ]; then
-    diff -q "$1" "$2" >/dev/null 2>&1 || { echo "  PARIDAD ROTA (existe en ambos y DIFIERE): $3"; fail=1; }
-  elif [ -e "$2" ]; then echo "  ok (no venía del origen, ya está en el destino): $3"
-  elif [ -e "$1" ]; then echo "  FALTA EN EL DESTINO: $3"; fail=1
-  else echo "  FALTA EN AMBOS: $3 — ¿está bien clasificada en T1/T2? (Decisión #2)"; fail=1; fi
-}
-for m in ${MEMORIAS_T1[@]+"${MEMORIAS_T1[@]}"} ${T2_LOCAL[@]+"${T2_LOCAL[@]}"}; do
-  _paridad "$SRC/memory/$m" "$DST/memory/$m" "$m"
-done
-_paridad "$SRC_REPO/$T2_ROOT" "$DST_POSIX/$T2_ROOT" "$T2_ROOT"
-# T4 · CABLEADO: no se copia del origen, se VERIFICA que el destino tenga el suyo.
-[ -f "$DST/settings.json" ] || { echo "  T4: falta $DST/settings.json (los hooks tier-repo del destino NO se cargarían)"; fail=1; }
-[ -f "$DST/settings.local.json" ] || echo "  T4 aviso: sin settings.local.json en el destino ⇒ el master despertará SIN su outputStyle (config per-máquina, gitignored: se re-crea a mano)"
-# El subdir intocable del destino es PARAMÉTRICO (vacío = ninguno). No todo destino tiene 'brain/':
-# `axon` no lo tiene, y hardcodearlo abortaba con un diagnóstico FALSO ("¿repo equivocado?").
-if [ -n "${DST_PROTEGIDO:-}" ]; then
-  [ -d "$DST_POSIX/$DST_PROTEGIDO" ] || { echo "  falta '$DST_PROTEGIDO' en $DST_POSIX (¿destino equivocado?)"; fail=1; }
-fi
-[ "$fail" -eq 0 ] || { echo "G-PARITY: BLOQUEA hasta migrar (S1/S2/S5)"; exit 1; }
-echo "  ok G-PARITY"
+reubicar-master.sh paridad --dst-repo "$DST_REPO" --dst-protegido "$DST_PROTEGIDO" \
+  --bundle "$DRIVE/$ID.brain-local.tgz" --t1 <memoria>… --t2-local <archivo>…
 ```
+Sale **0** en verde y **1** si bloquea, así que encadena. Qué mide cada fila: `ok` (presente y correcto, o
+ya estaba en el destino sin venir del origen) · `ROTA` (existe en ambos y DIFIERE ⇒ **reconciliación
+humana**, jamás se pisa) · `pend` (falta en el destino pero **viaja en el bundle**: lo deposita S5, no es
+un fallo aún) · `FALTA` (ausente y sin bundle que lo excuse) · `ambos` (no está en ninguno ⇒ ¿bien
+clasificada?, Decisión #2).
+
+**Tres cosas que solo aparecieron al EJECUTARLO (2026-09-10) y que la versión en markdown tenía mal:**
+
+1. **T4 no puede exigir `.claude/settings.json` en TODO destino.** La norma dura del cerebro dice *«repo
+   PERSONAL: memoria/skills SÍ, guards por-repo NUNCA»* — sus candados salen del install GLOBAL + la
+   cláusula de dedupe, y una copia por-repo solo puede driftar. `cortex` **no** trae la marca
+   `.claude/repo-compartido` ⇒ es PERSONAL y correctamente no tiene `settings.json`; el gate lo declaraba
+   **lobotomía del cableado** y bloqueaba un destino correcto, empujando a crear justo la copia que la
+   norma prohíbe. **Dos piezas correctas por separado que se contradecían juntas** — la clase que la
+   pasada COLECTIVA de una auditoría debe cazar. Ahora **bifurca por la marca**: la exige en COMPARTIDO
+   (donde el brain por-repo es el CORREO de quien clona sin brain global) y en PERSONAL verifica que el
+   install GLOBAL exista.
+2. **Las filas de T2 solo son evaluables DESPUÉS de S5.** Corrido donde el flujo lo pone —tras S1/S2—
+   reportaba `FALTA` sobre archivos que estaban en el bundle esperando su turno. Con `--bundle` los
+   distingue; sin él, un T2 en tránsito se lee como pérdida.
+3. **G-PARITY depende de la RAMA del destino**, y el skill no lo decía: T1 vive en la ramita de S1, así
+   que medir con el destino parado en otra rama reporta un `FALTA` que es **el working tree rotando**, no
+   una pérdida. El subcomando **imprime la rama** y avisa cuando no es la ramita de S1.
 
 ---
 ## 4 · MÁQUINA DE ESTADOS (INV: NADA A MEDIAS — re-entrante, postcondición verificada por paso)
