@@ -1139,13 +1139,30 @@ if [ "$MODO" = dry ]; then
   echo "  masters target  : $TARGET"
   echo "  rama del destino: $RAMA_DST"
   echo "  bundle T2       : $( [ -f "$DRIVE/$ID.brain-local.tgz" ] && echo presente || echo "ausente ($( [ -f "$DRIVE/$ID.brain-local.tgz.aplicado" ] && echo 'ya aplicado' || echo 'S2 fue no-op' ))" )"
-  _t="$(find "$PROJ" -maxdepth 2 -name "$ID.jsonl" 2>/dev/null | head -1)"
-  if [ -n "$_t" ]; then
+  # dry REPLICA el chequeo de colisión de G-LIVENESS (que solo corre en MODO=full): con `head -1`
+  # el dry-run daba un plan silencioso sobre UNA copia mientras full bloquearía por las N.
+  _COPIAS_DRY="$(find "$PROJ" -maxdepth 2 -name "$ID.jsonl" 2>/dev/null)"
+  _NCOP_DRY=$(printf '%s\n' "$_COPIAS_DRY" | grep -c . || true)
+  _DRY_ALERTA=0
+  if [ "$_NCOP_DRY" -eq 0 ]; then
+    echo "  transcript      : ⚠️ NINGUNO bajo $PROJ ⇒ MODO=full BLOQUEARÍA en G-LIVENESS"
+    _DRY_ALERTA=1
+  elif [ "$_NCOP_DRY" -gt 1 ]; then
+    echo "  transcript      : ⚠️ el id vive en $_NCOP_DRY slugs ⇒ MODO=full BLOQUEARÍA en G-LIVENESS y pediría limpieza manual:"
+    printf '%s\n' "$_COPIAS_DRY" | sed 's/^/                      /'
+    echo "                    (estado típico de una corrida previa muerta entre el rename y el unlink: recuperable, pero se resuelve A MANO)"
+    _DRY_ALERTA=1
+  else
+    _t="$_COPIAS_DRY"
     echo "  transcript      : $_t  ($(_size "$_t") bytes, $(_cwds_n "$_t") cwd distintos)"
     echo "  último evento   : $(_ultimo_par "$_t")   ⇒ quedará '$DST_CWD|$RAMA_DST' (move --git-branch)"
   fi
   echo "  citas humanas   : LIVENESS=${REUBICAR_LIVENESS_OK:-0}  QUIESCE=${REUBICAR_QUIESCE_OK:-0}  (ambas deben ser 1 en MODO=full)"
-  echo "✅ dry-run OK: los gates pasan y el plan es el de arriba. Nada se mutó."
+  if [ "${_DRY_ALERTA:-0}" -eq 0 ]; then
+    echo "✅ dry-run OK: los gates pasan y el plan es el de arriba. Nada se mutó."
+  else
+    echo "⚠️ dry-run con AVISO: MODO=full bloquearía por lo marcado arriba. Nada se mutó."
+  fi
   exit 0
 fi
 
@@ -1200,8 +1217,9 @@ else
   # (medido: el pico lo fija la ventana de retención, no el archivo — ver §9). Lo único que ESCALA con
   # el tamaño es el DISCO: el move escribe la copia completa del destino ANTES de borrar el origen.
   _sz="$(_size "$TGT_FILE")"
-  echo "  transcript: $_sz bytes ⇒ necesitas ~$(( _sz / 1024 / 1024 * 2 )) MB libres en el filesystem de"
-  echo "    $PROJ mientras el move sostiene origen + destino (el origen se borra al final)."
+  echo "  transcript: $_sz bytes ⇒ necesitas ~$(( _sz / 1024 / 1024 * 4 )) MB libres en el filesystem de"
+  echo "    $PROJ: pueden coexistir hasta 4 copias — origen + respaldo del handoff + respaldo interno"
+  echo "    de session-move.js + el .part del destino (el origen se borra al final)."
 fi
 
 # ── S3 export-first (capa 3 de recuperación; postcondición por CONTENIDO, no por mtime) ─────────
