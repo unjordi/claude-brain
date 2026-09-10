@@ -5050,8 +5050,8 @@ printf '{"type":"user","cwd":"%s"}\n' "$SRCREPO" > "$PROJ/$OLD_SLUG/$COLID.jsonl
 printf '{"type":"user","cwd":"%s"}\n' "$DSTREPO" > "$PROJ/$NEW_SLUG/$COLID.jsonl"   # ya existe en destino
 out="$(RUNMOVE "$COLID" --to-cwd "$DSTREPO" 2>&1)"; rc=$?
 # el motor tiene 2 mensajes de colisión (session-move.js 'ya está en el slug destino' / 'ya tiene…no la piso').
-# findSession ahora elige la copia por mtime de forma DETERMINISTA (fix #1 §9 — ver s1); el destino-ya-existe
-# igual ABORTA sin pisar, que es lo que este test verifica.
+# findSession desempata por CONTENIDO (ts→bytes→mtime→slug) de forma DETERMINISTA (fix #1 §9 — ver s1/s1b/s1c);
+# el destino-ya-existe igual ABORTA sin pisar, que es lo que este test verifica.
 { [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -qiE 'ya tiene|ya est[aá] en el slug|"ok":[[:space:]]*false'; } \
   && ok "g9 colisión: session-move ABORTA sin pisar cuando el destino ya tiene el id" \
   || bad "g9 colisión: no abortó ante id existente en destino"
@@ -5099,7 +5099,11 @@ SIPROJ="$SIHOME/.claude/projects"
 mkdir -p "$SIPROJ"
 LIB="$BINRM/session-lib.js"
 
-# ── s1: findSession TIE-BREAK determinista + collisions (mismo id en 2 slugs → gana el mtime más nuevo) ──
+# ── s1: findSession TIE-BREAK determinista + collisions. Con ts Y bytes EMPATADOS a propósito
+#        (ambas copias son `{"type":"user"}\n`, sin `timestamp`), el desempate real cae en el TERCER
+#        criterio (mtimeMs). Este caso por sí solo NO distingue el algoritmo nuevo (ts→bytes→mtime→slug)
+#        del viejo (solo mtime→slug) — para eso están s1b/s1c, que sí empatan ts o bytes a propósito y
+#        dejan un mtime CONTRARIO al resultado esperado.
 SID1="aa110000-0000-0000-0000-000000000001"
 mkdir -p "$SIPROJ/-slug-vieja" "$SIPROJ/-slug-nueva"
 printf '{"type":"user"}\n' > "$SIPROJ/-slug-vieja/$SID1.jsonl"
@@ -5109,8 +5113,36 @@ node -e 'const fs=require("fs");fs.utimesSync(process.argv[1],new Date("2026-08-
 r1="$(HOME="$SIHOME" node -e 'const r=require(process.argv[1]).findSession(process.argv[2]);process.stdout.write(r.slug+"|"+r.collisions.length)' "$LIB" "$SID1")"
 r2="$(HOME="$SIHOME" node -e 'const r=require(process.argv[1]).findSession(process.argv[2]);process.stdout.write(r.slug+"|"+r.collisions.length)' "$LIB" "$SID1")"
 { [ "$r1" = "-slug-nueva|1" ] && [ "$r1" = "$r2" ]; } \
-  && ok "s1 tie-break: findSession elige el mtime más nuevo DETERMINISTA y reporta la colisión" \
+  && ok "s1 tie-break: con ts/bytes empatados, findSession decide por mtimeMs DETERMINISTA y reporta la colisión" \
   || bad "s1 tie-break: no determinista o sin colisión (r1=$r1 r2=$r2)"
+
+# ── s1b: ts MANDA sobre un mtime más fresco — el caso real que motivó el fix (vuelta 3, #9 abajo).
+#         Copia MUERTA = un respaldo viejo restaurado HOY (mtime fresco, ts viejo); copia VIVA = ts más
+#         reciente pero mtime más viejo (no se ha tocado desde que se escribió). El algoritmo correcto
+#         (ts primero) debe elegir la VIVA aunque su mtime pierda contra la muerta.
+SID1B="aa110000-0000-0000-0000-000000000011"
+mkdir -p "$SIPROJ/-slug-muerta-restaurada" "$SIPROJ/-slug-viva"
+printf '{"type":"user","timestamp":"2026-01-01T00:00:00.000Z"}\n' > "$SIPROJ/-slug-muerta-restaurada/$SID1B.jsonl"
+printf '{"type":"user","timestamp":"2026-09-01T00:00:00.000Z"}\n' > "$SIPROJ/-slug-viva/$SID1B.jsonl"
+node -e 'const fs=require("fs");fs.utimesSync(process.argv[1],new Date(),new Date());fs.utimesSync(process.argv[2],new Date("2026-08-01"),new Date("2026-08-01"));' \
+  "$SIPROJ/-slug-muerta-restaurada/$SID1B.jsonl" "$SIPROJ/-slug-viva/$SID1B.jsonl"
+r1b="$(HOME="$SIHOME" node -e 'process.stdout.write(require(process.argv[1]).findSession(process.argv[2]).slug)' "$LIB" "$SID1B")"
+[ "$r1b" = "-slug-viva" ] \
+  && ok "s1b tie-break: el ts más reciente gana aunque el mtime de la copia MUERTA sea de HOY (restaurada)" \
+  || bad "s1b tie-break: ganó la copia MUERTA por mtime más fresco (r1b=$r1b, esperado -slug-viva)"
+
+# ── s1c: ts EMPATADO → decide bytes, no mtime. La copia CHICA tiene el mtime más fresco a propósito;
+#         la GRANDE (más bytes) debe ganar porque el ts de ambas es idéntico.
+SID1C="aa110000-0000-0000-0000-000000000012"
+mkdir -p "$SIPROJ/-slug-chica" "$SIPROJ/-slug-grande"
+printf '{"type":"user","timestamp":"2026-05-05T00:00:00.000Z"}\n' > "$SIPROJ/-slug-chica/$SID1C.jsonl"
+printf '{"type":"user","timestamp":"2026-05-05T00:00:00.000Z","relleno":"%s"}\n' "$(printf 'X%.0s' $(seq 1 200))" > "$SIPROJ/-slug-grande/$SID1C.jsonl"
+node -e 'const fs=require("fs");fs.utimesSync(process.argv[1],new Date(),new Date());fs.utimesSync(process.argv[2],new Date("2026-01-01"),new Date("2026-01-01"));' \
+  "$SIPROJ/-slug-chica/$SID1C.jsonl" "$SIPROJ/-slug-grande/$SID1C.jsonl"
+r1c="$(HOME="$SIHOME" node -e 'process.stdout.write(require(process.argv[1]).findSession(process.argv[2]).slug)' "$LIB" "$SID1C")"
+[ "$r1c" = "-slug-grande" ] \
+  && ok "s1c tie-break: con ts empatado gana la copia de MÁS bytes, aunque la chica tenga mtime más fresco" \
+  || bad "s1c tie-break: ganó la copia CHICA por mtime más fresco (r1c=$r1c, esperado -slug-grande)"
 
 # ── s2: session-import FRESHNESS GATE — --force NO regresa una sesión más viva; --force-stale sí ──
 SREPO="$SIHOME/code/proj-s2"; mkdir -p "$SREPO"
@@ -5360,6 +5392,54 @@ grep -v createHash "$R2NOCOM" | grep -q 'readFileSync' \
 grep -qE 'writeAlias.{0,40}(es fail-open|no atómico)' "$R2SK" \
   && bad "r2-4 ancla: writeAlias ya es atómico y respalda el JSON ilegible; el SKILL sigue llamándolo fail-open" \
   || ok "r2-4 ancla: el SKILL describe writeAlias como es hoy (atómico, respalda en vez de degradar a {})"
+
+# ── r3-1: ANCLA POR SÍMBOLO (no por frase) — el tie-break de findSession ya driftó DOS veces (vuelta 2
+#          y vuelta 3) porque cada anchor anterior ataba UNA frase concreta a mano. Este extrae el orden
+#          REAL de campos de `matches.sort()` en session-lib.js (introspección del cuerpo de la función,
+#          no una copia pegada) y lo compara contra TODAS las menciones del tie-break en el SKILL — cierra
+#          la CLASE (cualquier reordenamiento futuro de matches.sort revienta esto sin que nadie tenga que
+#          acordarse de actualizar una lista de frases).
+R3OUT="$(node -e '
+const fs = require("fs");
+const libPath = process.argv[1], skillPath = process.argv[2];
+const src = fs.readFileSync(libPath, "utf8");
+const m = src.match(/matches\.sort\(\(a,\s*b\)\s*=>\s*([\s\S]*?)\);/);
+if (!m) { console.log("FAIL:no-sort-found"); process.exit(0); }
+const body = m[1];
+const canon = { ts: "ts", bytes: "bytes", mtimeMs: "mtime", slug: "slug" };
+const fre = /\b[ab]\.(ts|bytes|mtimeMs|slug)\b/g;
+const real = []; let mm;
+while ((mm = fre.exec(body))) { const f = canon[mm[1]]; if (real[real.length-1] !== f) real.push(f); }
+const realOrder = real.join(",");
+const txt = fs.readFileSync(skillPath, "utf8");
+const cre = /(?:\bts\b|timestamp[^→\n]{0,40})\s*→\s*bytes\s*→\s*mtime\w*(?:\s*→\s*slug)?/g;
+const claims = []; let cm;
+while ((cm = cre.exec(txt))) claims.push(cm[0]);
+if (claims.length < 4) { console.log("FAIL:pocas-menciones:" + claims.length); process.exit(0); }
+let bad = 0; const details = [];
+for (const claim of claims) {
+  const seq = [];
+  const tre = /\b(ts|timestamp|bytes|mtime\w*|slug)\b/g;
+  let tm;
+  while ((tm = tre.exec(claim))) {
+    let f = tm[1];
+    if (f === "timestamp") f = "ts";
+    if (/^mtime/.test(f)) f = "mtime";
+    if (seq[seq.length-1] !== f) seq.push(f);
+  }
+  const claimOrder = seq.join(",");
+  if (!realOrder.startsWith(claimOrder)) { bad++; details.push(claimOrder + " vs " + realOrder); }
+}
+if (bad > 0) { console.log("FAIL:" + bad + ":" + details.join(";")); process.exit(0); }
+console.log("OK:" + realOrder + ":" + claims.length);
+' "$BINRM/session-lib.js" "$R2SK")"
+case "$R3OUT" in
+  OK:*)
+    r3order="$(printf '%s' "$R3OUT" | cut -d: -f2)"; r3n="$(printf '%s' "$R3OUT" | cut -d: -f3)"
+    ok "r3-1 ancla-símbolo: las $r3n menciones del tie-break en el SKILL coinciden con el orden REAL ($r3order) extraído de matches.sort()"
+    ;;
+  *) bad "r3-1 ancla-símbolo: el SKILL diverge del orden real de matches.sort() ($R3OUT)" ;;
+esac
 
 # ── r2-5: el PRELUDIO se publica con rename. Es un archivo COMPARTIDO entre corridas: dos mudanzas
 #          casi simultáneas en la misma máquina lo sobre-escribían a la vez, sin lock.
