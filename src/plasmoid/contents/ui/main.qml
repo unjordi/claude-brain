@@ -65,7 +65,10 @@ PlasmoidItem {
     property int currentTab: 0
     // Al abrir/volver a la pestaña Cerebro (idx 5) re-lee el estado real de ~/.claude (doc = realidad)
     // y chequea si hay versión nueva del widget (throttle 15 min dentro de checkUpdate).
-    onCurrentTabChanged: if (currentTab === 5) { scanBrain(); checkUpdate() }
+    onCurrentTabChanged: {
+        if (currentTab === 5) { scanBrain(); checkUpdate() }
+        if (currentTab === 6) { scanBroker(); scanKnobs() }
+    }
 
     readonly property string cacheDir: {
         const raw = "" + StandardPaths.writableLocation(StandardPaths.GenericCacheLocation)
@@ -248,6 +251,86 @@ PlasmoidItem {
                 root.brainHeal = root.brainIncomplete ? "error" : "ok"
             }
             disconnectSource(source)
+        }
+    }
+
+    // Estado real del broker de terminal (broker-scan.sh scan → JSON). Mismo engine "executable".
+    P5Support.DataSource {
+        id: brokerSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            if (data["exit code"] === 0 && data.stdout) {
+                try {
+                    root.brokerState = JSON.parse(data.stdout)
+                    root.brokerScannedAt = Qt.formatTime(new Date(), "hh:mm")
+                } catch (e) { /* deja el estado previo si el parse falla */ }
+            }
+            disconnectSource(source)
+        }
+    }
+
+    // El spec de knobs + el valor actual de cada uno (`broker-knobs.sh list`).
+    P5Support.DataSource {
+        id: brokerKnobsSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            if (data["exit code"] === 0 && data.stdout) {
+                try { root.brokerKnobs = JSON.parse(data.stdout) } catch (e) { /* deja el previo */ }
+            }
+            disconnectSource(source)
+        }
+    }
+
+    // La ESCRITURA de un knob. El escritor valida contra el spec y sale != 0 si rechaza, con el
+    // motivo por stdout — que es justo lo que hay que mostrarle al usuario, no un "error" genérico.
+    P5Support.DataSource {
+        id: brokerKnobsSetSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            disconnectSource(source)
+            root.brokerKnobsGuardando = false
+            if (data["exit code"] === 0) {
+                root.brokerReinicioPendiente = true
+                root.brokerKnobsMsg = ""
+            } else {
+                root.brokerKnobsMsg = ("" + (data.stdout || data.stderr || "no se pudo escribir")).trim()
+            }
+            // Se RE-LEE siempre: lo que se pinta sale del archivo, no de haber pedido el cambio.
+            root.scanKnobs()
+        }
+    }
+
+    // Las 8 comprobaciones del migrador. El VEREDICTO es su exit code; el TEXTO es lo que se muestra.
+    P5Support.DataSource {
+        id: brokerVerifySource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            disconnectSource(source)
+            root.brokerVerifyOut = ("" + (data.stdout || "")) + ("" + (data.stderr || ""))
+            root.brokerVerify = data["exit code"] === 0 ? "ok" : "error"
+        }
+    }
+
+    // arrancar/parar/reiniciar. HONESTO como el heal del cerebro: el exit 0 de systemctl dice que
+    // ACEPTÓ la orden, no que el servicio quedó arriba — así que se RE-ESCANEA y el estado que se
+    // pinta sale del escaneo, no de haber pedido la acción.
+    P5Support.DataSource {
+        id: brokerAccionSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            disconnectSource(source)
+            root.brokerAccion = ""
+            if (data["exit code"] !== 0) {
+                root.brokerAccionMsg = "✗ " + ("" + (data.stderr || data.stdout || "systemctl falló")).trim()
+            } else {
+                root.brokerAccionMsg = ""
+            }
+            root.scanBroker()
         }
     }
 
@@ -596,6 +679,14 @@ PlasmoidItem {
         }
         flush()
         return tokens.length ? fam + " " + tokens.join(" ") : fam
+    }
+    // Bytes a una unidad legible. La memoria del broker viene de systemd en bytes crudos.
+    function fmtBytes(n) {
+        if (n === null || n === undefined || !isFinite(n)) return "—"
+        if (n < 1024) return n + " B"
+        var u = ["KiB", "MiB", "GiB", "TiB"], v = n / 1024, i = 0
+        while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
+        return (v >= 10 ? Math.round(v) : Math.round(v * 10) / 10) + " " + u[i]
     }
     function fmtTok(n) {
         if (n === undefined || n === null) return "—"
@@ -1070,6 +1161,149 @@ PlasmoidItem {
     readonly property var brainGlobalHooks: ["git-branch-guard","merge-squash-guard","confirmar-merge-develop","recordar-dashboard","secret-scan","rama-vieja","proteger-arbol","proteger-fuente-cerebro","limite-gasto","delegacion-gate","delegacion-registrar","delegacion-reporte","recordar-orquestar","rehidratar-hilo","aviso-contexto","aviso-drift-cerebro","hud-stale","exportar-sesion-master","barrer-ramas","entorno-maquina-guard","no-bypass-deploy"]
     readonly property var brainRepoHooks:   ["sesion-inicio","dod-verificar","recordar-cosechar","recordar-unificar-cerebro"]
 
+    // ---------- Pestaña BROKER (idx 6) ----------
+    // El broker de terminal es un servicio de systemd --user que hasta hoy solo se veía y se tocaba
+    // por terminal (`systemctl --user status`, `migrar-term-broker.sh --verificar`). Esta pestaña lo
+    // trae a la GUI, con la misma división de labor que la pestaña Cerebro: un helper bash que emite
+    // JSON (broker-scan.sh) leído por el DataSource "executable", y las ACCIONES delegadas a la
+    // herramienta OFICIAL del proyecto — nunca reimplementando sus pasos aquí.
+    property var brokerState: null
+    property string brokerScannedAt: ""
+    // Salida del `--verificar` del migrador: sus 8 checks, tal como los imprime. Se muestra el texto
+    // REAL y no un ✓/✗ propio: el valor del migrador es que dice POR QUÉ falló cada uno.
+    property string brokerVerifyOut: ""
+    property string brokerVerify: ""       // "" | "running" | "ok" | "error"
+    property string brokerAccion: ""       // "" | "running"
+    property string brokerAccionMsg: ""
+
+    readonly property bool brokerCargado: brokerState !== null
+    readonly property bool brokerUnidadEnDisco: (brokerState && brokerState.unidad) ? brokerState.unidad.en_disco === true : false
+    readonly property string brokerEstadoTexto: {
+        if (!brokerState || !brokerState.unidad) return "sin dato"
+        var u = brokerState.unidad
+        if (!u.en_disco) return "no instalado"
+        return u.estado ? u.estado : (u.activa ? "activo" : "inactivo")
+    }
+    readonly property string brokerArranqueTexto: {
+        if (!brokerState || !brokerState.unidad) return ""
+        return brokerState.unidad.habilitada ? "· arranca con la sesión" : "· NO arranca con la sesión"
+    }
+    readonly property string brokerDetalle: {
+        if (!brokerState || !brokerState.unidad) return ""
+        var u = brokerState.unidad, partes = []
+        if (u.desde) partes.push("desde " + u.desde)
+        if (u.pid !== null && u.pid !== undefined) partes.push("pid " + u.pid)
+        // La unidad lleva MemoryAccounting=yes justo PARA poder verlo; aquí se ve.
+        if (u.memoria_bytes !== null && u.memoria_bytes !== undefined)
+            partes.push("RAM " + fmtBytes(u.memoria_bytes)
+                        + (u.memoria_pico_bytes ? " (pico " + fmtBytes(u.memoria_pico_bytes) + ")" : ""))
+        if (u.reinicios !== null && u.reinicios !== undefined && u.reinicios > 0)
+            partes.push(u.reinicios + " reinicio(s)")
+        return partes.join(" · ")
+    }
+    readonly property string brokerTcp: (brokerState && brokerState.endpoint) ? ("127.0.0.1:" + brokerState.endpoint.puerto) : ""
+    readonly property string brokerSocketRuta: (brokerState && brokerState.endpoint && brokerState.endpoint.socket) ? brokerState.endpoint.socket : "—"
+    readonly property bool brokerSocketOk: (brokerState && brokerState.endpoint)
+        ? (brokerState.endpoint.socket_existe === true && brokerState.endpoint.socket_permisos === "600") : false
+    readonly property string brokerSocketNota: {
+        if (!brokerState || !brokerState.endpoint) return ""
+        var e = brokerState.endpoint
+        if (!e.socket_existe) return "no existe"
+        // 600 es el permiso correcto: cualquier otro deja el shell al alcance de otro uid.
+        return e.socket_permisos === "600" ? "0600 · " + e.socket_dueno
+                                           : "permisos " + e.socket_permisos + " (¡esperaba 600!)"
+    }
+    readonly property bool brokerTokenPresente: (brokerState && brokerState.token) ? brokerState.token.presente === true : false
+    // Nunca el valor del token: solo presencia y longitud.
+    readonly property string brokerTokenTexto: brokerTokenPresente
+        ? ("presente (" + brokerState.token.chars + " caracteres)") : "AUSENTE"
+    readonly property bool brokerActivo: brokerState && brokerState.unidad ? brokerState.unidad.activa === true : false
+    readonly property bool brokerLegacyActiva: brokerState && brokerState.legacy ? brokerState.legacy.activa === true : false
+    // `null` = no se pudo medir; se pinta distinto de un false ("no escucha"). Ver broker-scan.sh.
+    readonly property var brokerEscucha: brokerState && brokerState.endpoint ? brokerState.endpoint.escuchando_tcp : null
+
+    // Los KNOBS: se dibujan GENÉRICOS desde el spec (`broker-knobs.tsv`), no de una lista escrita
+    // aquí. Es el punto: si mañana entra una env var nueva al broker, aparece en la pestaña sola —
+    // y si alguien la agrega SIN meterla al spec, `probe-knobs-spec.sh` pone rojo el repo.
+    property var brokerKnobs: null
+    property string brokerKnobsMsg: ""       // error de la última escritura, o ""
+    property bool brokerKnobsGuardando: false
+    // Se enciende con la primera escritura de la sesión: el cambio vive en el .env pero el broker
+    // que CORRE sigue con los valores viejos hasta reiniciar. Se DICE, no se insinúa.
+    property bool brokerReinicioPendiente: false
+
+    readonly property bool brokerKnobsCargados: brokerKnobs !== null
+    readonly property string brokerKnobsArchivo: (brokerKnobs && brokerKnobs.archivo) ? brokerKnobs.archivo : ""
+    // Los grupos, en el orden en que se leen de arriba abajo en la pestaña.
+    // El ORDEN y los TÍTULOS de los grupos salen del spec (broker-knobs.tsv, filas @grupo) que el helper
+    // emite en `grupos` — #148: la última cara que se repetía a mano. Ya no se hardcodean aquí ni en la
+    // cara web; las dos LEEN la misma fuente. Fallback vacío mientras el scan aún no llega.
+    readonly property var brokerGrupos: {
+        if (!brokerKnobs || !brokerKnobs.grupos) return []
+        var r = []
+        for (var i = 0; i < brokerKnobs.grupos.length; i++) r.push(brokerKnobs.grupos[i].clave)
+        return r
+    }
+    readonly property var brokerGrupoTitulo: {
+        var m = ({})
+        if (brokerKnobs && brokerKnobs.grupos)
+            for (var i = 0; i < brokerKnobs.grupos.length; i++)
+                m[brokerKnobs.grupos[i].clave] = brokerKnobs.grupos[i].titulo
+        return m
+    }
+    function brokerKnobsDe(grupo) {
+        if (!brokerKnobs || !brokerKnobs.knobs) return []
+        var r = []
+        for (var i = 0; i < brokerKnobs.knobs.length; i++)
+            if (brokerKnobs.knobs[i].grupo === grupo) r.push(brokerKnobs.knobs[i])
+        return r
+    }
+
+    readonly property string brokerKnobsScript: {
+        var u = "" + Qt.resolvedUrl("../broker-knobs.sh")
+        if (u.startsWith("file://")) u = u.substring("file://".length)
+        return u
+    }
+    function scanKnobs() { brokerKnobsSource.connectSource("bash " + shq(root.brokerKnobsScript) + " list") }
+
+    // `valor` vacío ⇒ `unset` (vuelve al default del código). El valor va SIEMPRE por shq: un knob
+    // es texto que viene de un campo editable, y sin comillar, un espacio lo partiría en dos args.
+    function guardarKnob(envVar, valor) {
+        root.brokerKnobsGuardando = true
+        root.brokerKnobsMsg = ""
+        var sub = (("" + valor).trim() === "") ? "unset " + shq(envVar)
+                                               : "set " + shq(envVar) + " " + shq("" + valor)
+        brokerKnobsSetSource.connectSource("bash " + shq(root.brokerKnobsScript) + " " + sub + " 2>&1")
+    }
+
+    readonly property string brokerScript: {
+        var u = "" + Qt.resolvedUrl("../broker-scan.sh")
+        if (u.startsWith("file://")) u = u.substring("file://".length)
+        return u
+    }
+    function scanBroker() { brokerSource.connectSource("bash " + shq(root.brokerScript) + " scan") }
+
+    // Las 8 comprobaciones REALES las corre el migrador instalado (`~/.local/bin/…`), no un curl
+    // escrito aquí: es la herramienta oficial y la única que conoce el token del broker que corre.
+    function verificarBroker() {
+        var m = (root.brokerState && root.brokerState.migrador) ? root.brokerState.migrador.ruta : ""
+        if (!m) {
+            root.brokerVerify = "error"
+            root.brokerVerifyOut = "No encuentro el migrador instalado. Corre ./install.sh --con-term-broker desde el clon de cortex."
+            return
+        }
+        root.brokerVerify = "running"; root.brokerVerifyOut = ""
+        // 2>&1: los ❌ del migrador salen por stderr y son justo lo que hay que mostrar.
+        brokerVerifySource.connectSource("bash " + shq(m) + " --verificar 2>&1")
+    }
+
+    // arrancar | parar | reiniciar. `parar` MATA las terminales abiertas (KillMode=control-group:
+    // las sesiones son hijas del broker), así que la confirmación de la GUI no es ceremonia.
+    function accionBroker(cual) {
+        root.brokerAccion = "running"; root.brokerAccionMsg = ""
+        brokerAccionSource.connectSource("systemctl --user " + cual + " cortex-term-broker.service 2>&1")
+    }
+
     // Ruta del helper bash, resuelta relativa a este main.qml (…/contents/ui/ → …/contents/brain-scan.sh).
     readonly property string brainScript: {
         var u = "" + Qt.resolvedUrl("../brain-scan.sh")
@@ -1481,6 +1715,27 @@ PlasmoidItem {
         }
 
         // (B) Aviso de error al mover. Lo abre el Connections de abajo cuando root.sessionMoveError cambia.
+        // Parar/reiniciar el broker MATA las terminales abiertas del usuario (las sesiones son
+        // procesos hijos: KillMode=control-group). Eso NO es una acción que se dispare con un clic
+        // suelto, así que pasa por una confirmación que dice la consecuencia con nombre y apellido.
+        Kirigami.PromptDialog {
+            id: confirmarBroker
+            property string accion: ""
+            function pedir(cual) { accion = cual; open() }
+            title: accion === "stop" ? "¿Parar el broker?" : "¿Reiniciar el broker?"
+            subtitle: accion === "stop"
+                ? "Se cerrarán TODAS las terminales abiertas: sus shells son procesos hijos del broker. El servicio no volverá solo hasta que lo arranques (o hasta la próxima sesión, si está habilitado)."
+                : "Se cerrarán TODAS las terminales abiertas: sus shells son procesos hijos del broker. El servicio vuelve a levantar enseguida, pero las sesiones NO se recuperan."
+            standardButtons: QQC2.Dialog.Cancel
+            customFooterActions: [
+                Kirigami.Action {
+                    text: confirmarBroker.accion === "stop" ? "Parar" : "Reiniciar"
+                    icon.name: confirmarBroker.accion === "stop" ? "media-playback-stop" : "view-refresh"
+                    onTriggered: { root.accionBroker(confirmarBroker.accion); confirmarBroker.close() }
+                }
+            ]
+        }
+
         Kirigami.PromptDialog {
             id: moveErrorDialog
             title: "No se pudo mover la sesión"
@@ -1520,6 +1775,8 @@ PlasmoidItem {
             TabRailButton { idx: 4; emoji: "💬";                label: "Chats"; visible: root.chats && root.chats.length > 0 }
             // Sin ícono "cerebro" nativo bueno en Breeze → emoji 🧠 como glifo del riel.
             TabRailButton { idx: 5; emoji: "🧠";                label: "Cerebro" }
+            // Broker de terminal: servicio de systemd --user. Sin ícono nativo bueno → emoji 🔌.
+            TabRailButton { idx: 6; emoji: "🔌";                label: "Broker" }
             Item { Layout.fillHeight: true }
             // Pie del riel — MISMO acomodo que el macOS CANÓNICO (rail.swift, HStack en 132px): primero los
             // CONTEXTUALES (⬆ update · 🩹 cura, solo cuando aplican), luego los FIJOS (↻ refresh · ⏸/⏵ pausa).
@@ -2233,10 +2490,444 @@ PlasmoidItem {
                     }
                 }
             }
+
+            // ===== Tab 6: Broker =====
+            // El broker de terminal (`cortex-term-broker.service`) es el shell de ESTA máquina: un
+            // servicio de systemd --user que expone ejecución por un socket unix y por 127.0.0.1:8799,
+            // con token. Hasta hoy solo se veía por terminal. Aquí se ve y se opera, con dos reglas:
+            //   · el TOKEN nunca se muestra — solo si está presente y su longitud (lo garantiza
+            //     broker-scan.sh, que jamás lo imprime; ver su regla 1);
+            //   · las acciones que MUTAN van por la herramienta OFICIAL (`migrar-term-broker.sh`) o por
+            //     `systemctl`, nunca reimplementando sus pasos aquí.
+            PC3.ScrollView {
+                id: brokerScroll
+                contentWidth: availableWidth
+                clip: true
+                Component.onCompleted: { root.scanBroker(); root.scanKnobs() }
+
+                ColumnLayout {
+                    width: brokerScroll.availableWidth
+                    spacing: Kirigami.Units.gridUnit
+
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                        Kirigami.Heading { level: 3; text: "Broker de terminal" }
+                        Item { Layout.fillWidth: true }
+                        PC3.Label {
+                            visible: root.brokerScannedAt !== ""
+                            text: "leído " + root.brokerScannedAt; opacity: 0.45
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                        }
+                        PC3.ToolButton {
+                            icon.name: "view-refresh"; flat: true
+                            onClicked: root.scanBroker()
+                            PC3.ToolTip.text: "Re-leer el estado del servicio"; PC3.ToolTip.visible: hovered; PC3.ToolTip.delay: 500
+                        }
+                    }
+
+                    // Sin dato todavía: se DICE, en vez de pintar un estado inventado.
+                    PC3.Label {
+                        visible: !root.brokerCargado
+                        Layout.fillWidth: true; wrapMode: Text.WordWrap; opacity: 0.6
+                        text: "Leyendo el estado del servicio…"
+                    }
+
+                    // ── Recuadro de estado ──
+                    Rectangle {
+                        visible: root.brokerCargado
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: estadoCol.implicitHeight + Kirigami.Units.largeSpacing * 2
+                        radius: Kirigami.Units.smallSpacing
+                        color: root.brokerActivo ? Qt.rgba(0.37, 0.73, 0.56, 0.13) : Qt.rgba(0.86, 0.21, 0.27, 0.13)
+                        ColumnLayout {
+                            id: estadoCol
+                            anchors.fill: parent; anchors.margins: Kirigami.Units.largeSpacing
+                            spacing: Kirigami.Units.smallSpacing
+                            RowLayout {
+                                Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                                PC3.Label {
+                                    text: root.brokerActivo ? "●" : "○"
+                                    color: root.brokerActivo ? "#5fb98e" : "#dc3545"
+                                    font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.3
+                                }
+                                PC3.Label {
+                                    font.bold: true
+                                    text: root.brokerEstadoTexto
+                                }
+                                PC3.Label {
+                                    opacity: 0.6; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                    text: root.brokerArranqueTexto
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
+                            PC3.Label {
+                                visible: text !== ""
+                                opacity: 0.7; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                text: root.brokerDetalle
+                            }
+                            // La unidad legacy sigue en disco tras la migración; si REVIVE, hay dos
+                            // brokers peleándose el endpoint y eso hay que verlo, no deducirlo.
+                            PC3.Label {
+                                visible: root.brokerLegacyActiva
+                                Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                color: "#dc3545"; font.bold: true
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                text: "⚠ axon-term-broker.service (la unidad anterior) está ACTIVA: dos brokers se pelean el mismo endpoint."
+                            }
+                        }
+                    }
+
+                    // ── Endpoint ──
+                    ColumnLayout {
+                        visible: root.brokerCargado
+                        Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                        PC3.Label { text: "Endpoint"; opacity: 0.6; font.pointSize: Kirigami.Theme.smallFont.pointSize }
+                        BrokerFila {
+                            etiqueta: "TCP"
+                            valor: root.brokerTcp
+                            // TRES estados, no dos: null es "no se pudo medir", que NO es "no escucha".
+                            nota: root.brokerEscucha === true ? "escuchando"
+                                : root.brokerEscucha === false ? "no escucha" : "sin medir"
+                            notaColor: root.brokerEscucha === true ? "#5fb98e"
+                                     : root.brokerEscucha === false ? "#dc3545" : Kirigami.Theme.textColor
+                        }
+                        BrokerFila {
+                            etiqueta: "Socket"
+                            valor: root.brokerSocketRuta
+                            nota: root.brokerSocketNota
+                            notaColor: root.brokerSocketOk ? "#5fb98e" : "#dc3545"
+                        }
+                        BrokerFila {
+                            etiqueta: "Token"
+                            // Nunca el valor: solo presencia y longitud. Es la regla que no se negocia.
+                            valor: root.brokerTokenTexto
+                            nota: root.brokerTokenPresente ? "" : "el broker no arranca sin él"
+                            notaColor: "#dc3545"
+                        }
+                    }
+
+                    // ── Verificación: los 8 checks del migrador ──
+                    ColumnLayout {
+                        Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                            PC3.Button {
+                                text: root.brokerVerify === "running" ? "Verificando…" : "Verificar"
+                                enabled: root.brokerVerify !== "running"
+                                icon.name: "checkmark"
+                                onClicked: root.verificarBroker()
+                            }
+                            PC3.Label {
+                                visible: root.brokerVerify === "ok" || root.brokerVerify === "error"
+                                text: root.brokerVerify === "ok" ? "✅ las 8 comprobaciones pasan" : "❌ falló alguna"
+                                color: root.brokerVerify === "ok" ? "#5fb98e" : "#dc3545"
+                                font.bold: true; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            }
+                            Item { Layout.fillWidth: true }
+                        }
+                        PC3.Label {
+                            Layout.fillWidth: true; opacity: 0.5; wrapMode: Text.WordWrap
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            text: "Corre `migrar-term-broker.sh --verificar`: /health por el socket y por TCP con el token real, un 401 sin token, un /run que de verdad ejecuta, y los permisos del socket."
+                        }
+                        // El texto TAL CUAL del migrador: su valor es que dice POR QUÉ falló cada check.
+                        Rectangle {
+                            visible: root.brokerVerifyOut !== ""
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: Math.min(salidaVerify.implicitHeight + Kirigami.Units.largeSpacing, Kirigami.Units.gridUnit * 16)
+                            radius: Kirigami.Units.smallSpacing
+                            color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.06)
+                            PC3.ScrollView {
+                                anchors.fill: parent; anchors.margins: Kirigami.Units.smallSpacing
+                                clip: true
+                                PC3.Label {
+                                    id: salidaVerify
+                                    text: root.brokerVerifyOut
+                                    font.family: "monospace"
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                    wrapMode: Text.NoWrap
+                                    textFormat: Text.PlainText   // salida de un proceso: JAMÁS interpretada como markup
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Ajustes (los knobs) ──
+                    // Se dibujan del SPEC, no de una lista escrita aquí: `broker-knobs.sh list`
+                    // devuelve cada knob con su tipo, rango, default real y advertencia, y el
+                    // Repeater los pinta. Un knob nuevo en el broker aparece solo.
+                    ColumnLayout {
+                        Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                            PC3.Label { text: "Ajustes"; opacity: 0.6; font.pointSize: Kirigami.Theme.smallFont.pointSize }
+                            Item { Layout.fillWidth: true }
+                            PC3.Label {
+                                visible: root.brokerKnobsArchivo !== ""
+                                text: root.brokerKnobsArchivo
+                                opacity: 0.35; font.family: "monospace"
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                elide: Text.ElideMiddle
+                                Layout.maximumWidth: Kirigami.Units.gridUnit * 16
+                            }
+                        }
+
+                        PC3.Label {
+                            visible: !root.brokerKnobsCargados
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap; opacity: 0.6
+                            text: "Leyendo los ajustes…"
+                        }
+
+                        // El aviso que NO se puede omitir: el .env ya cambió, el broker que corre no.
+                        Rectangle {
+                            visible: root.brokerReinicioPendiente
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: avisoReinicio.implicitHeight + Kirigami.Units.largeSpacing
+                            radius: Kirigami.Units.smallSpacing
+                            color: Qt.rgba(0.91, 0.53, 0.29, 0.18)
+                            RowLayout {
+                                id: avisoReinicio
+                                anchors.fill: parent; anchors.margins: Kirigami.Units.smallSpacing
+                                spacing: Kirigami.Units.smallSpacing
+                                PC3.Label {
+                                    Layout.fillWidth: true; wrapMode: Text.WordWrap
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                    text: "Los cambios están guardados, pero el broker que CORRE sigue con los valores viejos. Reinícialo para aplicarlos — recuerda que eso cierra las terminales abiertas."
+                                }
+                                PC3.Button {
+                                    text: "Reiniciar"; icon.name: "view-refresh"
+                                    enabled: root.brokerAccion !== "running"
+                                    onClicked: confirmarBroker.pedir("restart")
+                                }
+                            }
+                        }
+
+                        PC3.Label {
+                            visible: root.brokerKnobsMsg !== ""
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            color: "#dc3545"; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            text: root.brokerKnobsMsg
+                        }
+
+                        // Un bloque por grupo, y el grupo se OMITE si no tiene knobs (así el spec
+                        // puede crecer con grupos nuevos sin dejar encabezados huérfanos).
+                        Repeater {
+                            model: root.brokerKnobsCargados ? root.brokerGrupos : []
+                            delegate: ColumnLayout {
+                                required property string modelData
+                                readonly property var knobsDelGrupo: root.brokerKnobsDe(modelData)
+                                visible: knobsDelGrupo.length > 0
+                                Layout.fillWidth: true
+                                spacing: Kirigami.Units.smallSpacing
+
+                                PC3.Label {
+                                    Layout.fillWidth: true; Layout.topMargin: Kirigami.Units.smallSpacing
+                                    text: root.brokerGrupoTitulo[modelData] !== undefined
+                                          ? root.brokerGrupoTitulo[modelData] : modelData
+                                    font.bold: true; opacity: 0.75
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                }
+                                Repeater {
+                                    model: knobsDelGrupo
+                                    delegate: BrokerKnob {
+                                        required property var modelData
+                                        knob: modelData
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+                        }
+
+                        PC3.Label {
+                            visible: root.brokerKnobsCargados
+                            Layout.fillWidth: true; Layout.topMargin: Kirigami.Units.smallSpacing
+                            wrapMode: Text.WordWrap; opacity: 0.45
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            text: "Dejar un campo vacío devuelve ese ajuste a su default. El token no se edita aquí a propósito, y los cuatro del endpoint tampoco: cambiarlos rompe al cliente en contenedor, o expone el broker a la red."
+                        }
+                    }
+
+                    // ── Acciones ──
+                    ColumnLayout {
+                        Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                        PC3.Label { text: "Servicio"; opacity: 0.6; font.pointSize: Kirigami.Theme.smallFont.pointSize }
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: Kirigami.Units.smallSpacing
+                            PC3.Button {
+                                text: "Arrancar"; icon.name: "media-playback-start"
+                                enabled: root.brokerAccion !== "running" && !root.brokerActivo
+                                onClicked: root.accionBroker("start")
+                            }
+                            PC3.Button {
+                                text: "Reiniciar"; icon.name: "view-refresh"
+                                enabled: root.brokerAccion !== "running"
+                                onClicked: confirmarBroker.pedir("restart")
+                            }
+                            PC3.Button {
+                                text: "Parar"; icon.name: "media-playback-stop"
+                                enabled: root.brokerAccion !== "running" && root.brokerActivo
+                                onClicked: confirmarBroker.pedir("stop")
+                            }
+                            Item { Layout.fillWidth: true }
+                            PC3.Label {
+                                visible: root.brokerAccion === "running"
+                                text: "…"; opacity: 0.6
+                            }
+                        }
+                        PC3.Label {
+                            visible: root.brokerAccionMsg !== ""
+                            Layout.fillWidth: true; wrapMode: Text.WordWrap
+                            color: "#dc3545"; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            text: root.brokerAccionMsg
+                        }
+                        PC3.Label {
+                            Layout.fillWidth: true; opacity: 0.5; wrapMode: Text.WordWrap
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            text: "Parar o reiniciar MATA las terminales abiertas: las sesiones son procesos hijos del broker (KillMode=control-group)."
+                        }
+                    }
+                }
+            }
         }
     }
 
     // botón del riel de pestañas
+    // Fila de la pestaña Broker: etiqueta a la izquierda, el valor monoespaciado (son rutas y
+    // puertos, que se leen mal en proporcional) y una nota corta de veredicto a la derecha.
+    // Una fila de KNOB. Todo lo que decide su forma sale del spec: el tipo, el rango, si es
+    // editable, si el 0 apaga, y la advertencia. Este componente no sabe nada de ningún knob
+    // concreto — es lo que hace que un knob nuevo aparezca sin tocar QML.
+    component BrokerKnob: ColumnLayout {
+        property var knob: null
+        readonly property bool editable: knob && knob.gui === "edita"
+        // `actual` vacío = nadie lo configuró ⇒ manda el default del código. La distinción importa:
+        // "está en 32 porque lo pusiste" no es lo mismo que "está en 32 porque es el default".
+        readonly property bool enDefault: !knob || !knob.actual || ("" + knob.actual).length === 0
+        readonly property string efectivo: enDefault ? ("" + (knob ? knob.default : "")) : ("" + knob.actual)
+
+        Layout.fillWidth: true
+        spacing: 2
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Kirigami.Units.smallSpacing
+
+            PC3.Label {
+                text: knob ? knob.etiqueta : ""
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 11
+                elide: Text.ElideRight
+                PC3.ToolTip.text: knob ? knob.env : ""      // el nombre EXACTO de la env var, para el .env
+                PC3.ToolTip.visible: hoverEtiqueta.hovered
+                PC3.ToolTip.delay: 400
+                // HoverHandler y NO un MouseArea con `anchors.fill`: dentro de un Layout, anchors
+                // en un Item hijo es undefined behavior y QML lo avisa. Un Handler no es un Item.
+                HoverHandler { id: hoverEtiqueta }
+            }
+
+            // Editable: campo + botón de guardar. Se muestra el valor EFECTIVO como texto inicial,
+            // para que editar sea partir de lo que hay y no de un campo vacío.
+            PC3.TextField {
+                id: campoKnob
+                visible: editable
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 7
+                text: efectivo
+                enabled: !root.brokerKnobsGuardando
+                // Vacío ⇒ vuelve al default (el escritor hace `unset`). Se dice en el placeholder.
+                placeholderText: knob ? ("" + knob.default) : ""
+                onAccepted: root.guardarKnob(knob.env, text)
+                horizontalAlignment: Text.AlignRight
+            }
+            PC3.ToolButton {
+                visible: editable
+                icon.name: "document-save"
+                enabled: !root.brokerKnobsGuardando && campoKnob.text !== efectivo
+                onClicked: root.guardarKnob(knob.env, campoKnob.text)
+                PC3.ToolTip.text: "Guardar en " + root.brokerKnobsArchivo
+                PC3.ToolTip.visible: hovered; PC3.ToolTip.delay: 400
+            }
+            PC3.ToolButton {
+                visible: editable && !enDefault
+                icon.name: "edit-undo"
+                enabled: !root.brokerKnobsGuardando
+                onClicked: { campoKnob.text = ""; root.guardarKnob(knob.env, "") }
+                PC3.ToolTip.text: "Volver al default (" + (knob ? knob.default : "") + ")"
+                PC3.ToolTip.visible: hovered; PC3.ToolTip.delay: 400
+            }
+
+            // Solo-lectura: el valor, y por qué no se toca aquí.
+            PC3.Label {
+                visible: !editable
+                text: efectivo
+                font.family: "monospace"; font.pointSize: Kirigami.Theme.smallFont.pointSize
+                Layout.fillWidth: true; elide: Text.ElideMiddle
+                textFormat: Text.PlainText
+            }
+            PC3.Label {
+                visible: !editable
+                text: "solo a mano"; opacity: 0.5
+                font.pointSize: Kirigami.Theme.smallFont.pointSize
+            }
+
+            Item { Layout.fillWidth: editable }
+            // Se marca cuándo el valor es el DEFAULT y cuándo alguien lo cambió.
+            PC3.Label {
+                text: enDefault ? "default" : "personalizado"
+                opacity: enDefault ? 0.4 : 0.75
+                color: enDefault ? Kirigami.Theme.textColor : "#e8884a"
+                font.pointSize: Kirigami.Theme.smallFont.pointSize
+            }
+        }
+
+        PC3.Label {
+            Layout.fillWidth: true; Layout.leftMargin: Kirigami.Units.smallSpacing
+            wrapMode: Text.WordWrap; opacity: 0.55
+            font.pointSize: Kirigami.Theme.smallFont.pointSize
+            text: {
+                if (!knob) return ""
+                var s = knob.ayuda
+                if (knob.cero_apaga) s += "  ·  0 lo APAGA."
+                if (knob.min !== null && knob.max !== null) s += "  ·  entre " + knob.min + " y " + knob.max + "."
+                return s
+            }
+        }
+        // La advertencia NO se mezcla con la ayuda: es el riesgo concreto de cambiarlo.
+        PC3.Label {
+            visible: knob && knob.advertencia
+            Layout.fillWidth: true; Layout.leftMargin: Kirigami.Units.smallSpacing
+            wrapMode: Text.WordWrap
+            color: "#d6a15b"
+            font.pointSize: Kirigami.Theme.smallFont.pointSize
+            text: knob && knob.advertencia ? ("⚠ " + knob.advertencia) : ""
+        }
+    }
+
+    component BrokerFila: RowLayout {
+        property string etiqueta: ""
+        property string valor: ""
+        property string nota: ""
+        property color notaColor: Kirigami.Theme.textColor
+        Layout.fillWidth: true
+        spacing: Kirigami.Units.smallSpacing
+        PC3.Label {
+            text: etiqueta; opacity: 0.6
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+            font.pointSize: Kirigami.Theme.smallFont.pointSize
+        }
+        PC3.Label {
+            text: valor
+            font.family: "monospace"; font.pointSize: Kirigami.Theme.smallFont.pointSize
+            Layout.fillWidth: true; elide: Text.ElideMiddle   // una ruta larga se recorta EN MEDIO, no al final
+            textFormat: Text.PlainText
+        }
+        PC3.Label {
+            visible: nota !== ""
+            text: nota; color: notaColor; font.bold: true
+            font.pointSize: Kirigami.Theme.smallFont.pointSize
+        }
+    }
+
     component TabRailButton: Rectangle {
         property int idx: 0
         property string icon: ""

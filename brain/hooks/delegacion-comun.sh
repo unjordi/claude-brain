@@ -96,13 +96,17 @@ linea_cuota() {
     [ -f "$c" ] && { snap="$c"; break; }
   done
   [ -n "$snap" ] || return 0
+  # Frescura del snapshot: si el daemon de cuota lleva >5 min sin escribir, el % puede estar RANCIO →
+  # márcalo, para no mostrar datos viejos como "estado real" (el ask del gate se apoya en esta línea).
+  local stale=""
+  [ -n "$(find "$snap" -mmin +5 2>/dev/null)" ] && stale=" ⚠️posible dato rancio"
   local pct cost cap tok
   pct=$(jq -r '.five_hour.percent // empty'      "$snap" 2>/dev/null)
   cost=$(jq -r '.five_hour.cost_usd // empty'    "$snap" 2>/dev/null)
   cap=$(jq -r '.five_hour.cost_cap // empty'     "$snap" 2>/dev/null)
   tok=$(jq -r '.five_hour.tokens_used // empty'  "$snap" 2>/dev/null)
   [ -n "$pct" ] || return 0
-  local msg=" Ventana 5h: ${pct}%"
+  local msg=" Ventana 5h: ${pct}%${stale}"
   if [ -n "$cost" ] && [ -n "$cap" ]; then
     msg="$msg (\$${cost} de \$${cap}"
     [ -n "$tok" ] && msg="$msg; $(fmt_tokens "$tok") tokens"

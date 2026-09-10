@@ -41,7 +41,12 @@ CODE_DIR="${CLAUDE_CODE_DIR:-$HOME/code}"
 ROOTS_FILE=""
 STATEDIR="${CLAUDE_DRIFT_STATEDIR:-$HOME/.claude/memory/.drift-cerebro}"
 REPORT=""
-DASHBOARD="${CLAUDE_DASHBOARD:-$HOME/.claude/projects/-Users-$(id -un 2>/dev/null || echo user)/memory/dashboard_cerebro.md}"
+# El slug del proyecto en ~/.claude/projects/ es $HOME con las "/" → "-" (Claude Code lo forma así):
+# /Users/unjordi → -Users-unjordi (macOS) · /home/unjordi → -home-unjordi (Linux). Hardcodear "-Users-"
+# rompía en Linux (la Cachy): el path no existía → `[ -f "$DASHBOARD" ]` fallaba → la bitácora del sweeper
+# NUNCA se escribía (en silencio, por el `|| true`). Derivarlo de $HOME lo hace portable Mac/Linux.
+_projslug="$(printf '%s' "$HOME" | sed 's#/#-#g')"
+DASHBOARD="${CLAUDE_DASHBOARD:-$HOME/.claude/projects/${_projslug}/memory/dashboard_cerebro.md}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -83,7 +88,7 @@ descubrir_flotilla() {
 
 # ── Barrido ────────────────────────────────────────────────────────────────────────────────────────
 ts="$(date '+%Y-%m-%d %H:%M:%S')"
-n_total=0; n_synced=0; n_wouldsync=0; n_drift=0; n_flag=0; n_clean=0; n_locked=0; n_skip=0
+n_total=0; n_synced=0; n_wouldsync=0; n_drift=0; n_flag=0; n_clean=0; n_locked=0; n_skip=0; n_syncfail=0
 BODY_SYNCED=""; BODY_ATT=""; BODY_LOCKED=""
 
 # lock por-repo (mkdir es atómico) en STATEDIR con sufijo .lock — no colisiona con los stamps del throttle
@@ -113,6 +118,11 @@ while IFS= read -r repo; do
       BODY_SYNCED="$BODY_SYNCED
   - ✅ $repo — auto-sincronizado (apply+commit+push en su mini-develop)"
       ;;
+    synced-push-failed)
+      n_syncfail=$((n_syncfail+1))
+      BODY_ATT="$BODY_ATT
+  - 🧬⚠️ $repo — apply+commit LOCAL OK pero el PUSH FALLÓ (red/auth) → el commit está en su mini-develop local, NO en el remoto. Re-pushea a mano cuando haya red, o el develop compartido queda stale."
+      ;;
     would-sync)
       n_wouldsync=$((n_wouldsync+1))
       BODY_SYNCED="$BODY_SYNCED
@@ -141,7 +151,7 @@ EOF
 
 # ── Reporte ──────────────────────────────────────────────────────────────────────────────────────────
 modo="APLICA"; [ "$DRY_RUN" = 1 ] && modo="DRY-RUN (no escribió nada)"
-resumen_linea="barrer-flotilla-cerebro [$modo] $ts — $n_total repo(s): $n_synced sync · $n_wouldsync would-sync · $n_drift drift · $n_flag personal-flag · $n_clean al día · $n_locked lock · $n_skip n/a"
+resumen_linea="barrer-flotilla-cerebro [$modo] $ts — $n_total repo(s): $n_synced sync · $n_syncfail push-fallido · $n_wouldsync would-sync · $n_drift drift · $n_flag personal-flag · $n_clean al día · $n_locked lock · $n_skip n/a"
 
 {
   echo "# Reporte del sweeper de flotilla — $ts"
@@ -158,7 +168,7 @@ resumen_linea="barrer-flotilla-cerebro [$modo] $ts — $n_total repo(s): $n_sync
 # Append de UNA línea (append-only con `>>`, la norma para docs que varias sesiones tocan a la vez → no
 # choca) a la Bitácora del dashboard GLOBAL, SOLO si hubo algo accionable (sync/would/drift/flag) para no
 # ensuciar la bitácora con corridas 100% limpias. El detalle completo vive en $REPORT.
-if [ -n "$DASHBOARD" ] && [ -f "$DASHBOARD" ] && [ $(( n_synced + n_wouldsync + n_drift + n_flag )) -gt 0 ]; then
+if [ -n "$DASHBOARD" ] && [ -f "$DASHBOARD" ] && [ $(( n_synced + n_syncfail + n_wouldsync + n_drift + n_flag )) -gt 0 ]; then
   printf '\n- **[%s] barrer-flotilla-cerebro:** %s (detalle: `%s`)\n' \
     "$(date '+%Y-%m-%d')" "${resumen_linea#barrer-flotilla-cerebro }" "$REPORT" >> "$DASHBOARD" 2>/dev/null || true
 fi

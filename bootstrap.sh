@@ -8,6 +8,9 @@
 # / zypper), (2) clona o actualiza el repo, (3) corre ./install.sh (cerebro + daemon + widget).
 # Idempotente: re-correrlo solo actualiza. Flags para install.sh se pasan tal cual:
 #   curl -fsSL …/bootstrap.sh | bash -s -- --no-gui        # p.ej. solo cerebro + daemon
+# Banderas OPT-IN que NO están en el camino por defecto (léelas antes de usarlas):
+#   … | bash -s -- --con-term-broker   # broker de terminal (Linux): sirve un SHELL de esta máquina
+#                                      # en 127.0.0.1:8799. Ver docs/term-broker.md.
 # Para QA de una RAMA (p. ej. develop) en vez de la rama default, antepón CLAUDE_BRAIN_REF:
 #   curl -fsSL …/develop/bootstrap.sh | CLAUDE_BRAIN_REF=develop bash
 set -euo pipefail
@@ -78,7 +81,12 @@ fi
 # clonar/actualizar se hace checkout de esa rama igualando el remoto; sin ella, la rama default.
 REF="${CLAUDE_BRAIN_REF:-}"
 if [[ -d "$DIR/.git" ]]; then
-  say "actualizando el clon en $DIR"; git -C "$DIR" fetch -q --prune origin
+  say "actualizando el clon en $DIR"; git -C "$DIR" fetch -q --prune origin || say "sin red / fetch falló — sigo con el clon local ya presente (no bloqueo la instalación por estar offline)"
+  # Guardar trabajo no commiteado antes del checkout -B (que lo DESCARTA): stash si hay cambios.
+  if [ -n "$(git -C "$DIR" status --porcelain 2>/dev/null)" ]; then
+    git -C "$DIR" stash push -u -m "pre-bootstrap-$(date +%s)" 2>/dev/null || true
+    say "guardé tus cambios locales en un stash (checkout -B los habría descartado)"
+  fi
   # Sin REF: alinear SIEMPRE a main (NO `pull` de la rama actual). Un clon que quedó en una rama
   # vieja/borrada —leftover de dev— rompía el `pull --ff-only` (su upstream ya no existe en el remoto).
   if [[ -n "$REF" ]]; then git -C "$DIR" checkout -B "$REF" "origin/$REF"; else git -C "$DIR" checkout -B main origin/main; fi

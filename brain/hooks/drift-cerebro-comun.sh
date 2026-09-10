@@ -27,7 +27,10 @@
 #   personal-clean repo PERSONAL (sin marca .claude/repo-compartido) sano: cero guards del brain sobrando.
 #   personal-flag  repo PERSONAL con guards del brain que SOBRAN → mensaje = flag "quítalos" (no auto-git).
 #   clean          repo COMPARTIDO al día (0 drift).
-#   synced         repo COMPARTIDO: auto-sincronizado (apply+commit+push) en la mini-develop. mensaje = ctx.
+#   synced         repo COMPARTIDO: auto-sincronizado (apply+commit+push OK) en la mini-develop. mensaje = ctx.
+#   synced-push-failed  COMPARTIDO: apply+commit local OK pero el PUSH falló (red/auth) → commit en la rama
+#                  LOCAL, aún no en el remoto. NO se cachea (no es clean): avisa re-pushear a mano. Antídoto al
+#                  falso "synced" que ocultaba un remoto stale (el commit local hacía desaparecer el drift).
 #   would-sync     (solo DRY_RUN) habría auto-sincronizado, pero en dry-run NO se tocó nada.
 #   drift          repo COMPARTIDO con drift que NO se auto-aplicó (ramita/.claude sucio/fuente stale/etc).
 #
@@ -120,7 +123,7 @@ Cómo: borra esos .sh de .claude/hooks/ + sus entradas en .claude/settings.json.
   if [ "$total" -eq 0 ]; then printf 'STATUS=%s\n' "clean"; return 0; fi
 
   local detalle
-  detalle=$(printf '%s\n' "$out" | grep -E '(NUEVO|NUEVA|ACTUALIZA|RETIRAR|HUÉRFAN)' | sed 's/^[[:space:]]*/    /' | head -14)
+  detalle=$(printf '%s\n' "$out" | grep -E '(NUEVO|NUEVA|ACTUALIZA|RETIRAR|HUÉRFAN|SIN CABLEAR)' | sed 's/^[[:space:]]*/    /' | head -14)
 
   # ── Nudge de la DUPLA (suficiencia + coherencia): BIFURCA según AGENTS.md esté instanciado. ──
   local dupla_nota
@@ -178,12 +181,21 @@ NO commiteé ni pusheé nada (des-estageé el cambio; el working tree quedó con
             return 0
           fi
           if git -C "$ROOT" commit -q -o -m "chore(cerebro): auto-sync de la copia por-repo (aviso-drift, $total archivo(s) al día)" -- .claude/ >/dev/null 2>&1; then
-            git -C "$ROOT" push -q origin "$cur" >/dev/null 2>&1 || true
             local sha
             sha=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo "?")
-            printf 'STATUS=%s\n' "synced"
-            printf '%s\n' "🧬✅ CEREBRO AUTO-SINCRONIZADO en tu mini-develop ($cur, commit $sha): la copia por-repo estaba $total archivo(s) atrás y se puso al día SOLA (apply+commit+push). Llegará al develop compartido con tu próxima integración coordinada. Qué cambió:
+            # El push puede fallar (red/auth/rate-limit) DESPUÉS del commit local. NO lo tragues con `|| true`
+            # + STATUS=synced: eso reporta éxito falso, y como el commit local YA pone la copia al día vs la
+            # fuente, la próxima sesión ve 0 drift → clean → NUNCA reintenta el push → el colega/clon queda
+            # stale para siempre sin que nada lo detecte. Reporta el fallo de push HONESTO.
+            if git -C "$ROOT" push -q origin "$cur" >/dev/null 2>&1; then
+              printf 'STATUS=%s\n' "synced"
+              printf '%s\n' "🧬✅ CEREBRO AUTO-SINCRONIZADO en tu mini-develop ($cur, commit $sha): la copia por-repo estaba $total archivo(s) atrás y se puso al día SOLA (apply+commit+push). Llegará al develop compartido con tu próxima integración coordinada. Qué cambió:
 $detalle$dupla_nota"
+            else
+              printf 'STATUS=%s\n' "synced-push-failed"
+              printf '%s\n' "🧬⚠️ CEREBRO auto-sincronizado LOCALMENTE (commit $sha en $cur, $total archivo(s)) pero el PUSH FALLÓ (red/auth/rate-limit). El commit está en tu rama LOCAL; re-pushéalo cuando tengas red: \`git -C $ROOT push origin $cur\` — si no, tu copia local se ve al día pero el develop compartido (y los colegas/clones) siguen con la copia STALE. Qué cambió:
+$detalle$dupla_nota"
+            fi
             return 0
           fi
         fi
@@ -249,7 +261,63 @@ EOF
   fi
   if [ "$n_st" -gt 0 ]; then
     msg="$msg
-  · $n_st archivo(s) DESACTUALIZADOS/ausentes en la copia instalada (la fuente cambió y no se re-desplegó). Remedio: re-corre el bootstrap/install-brain (o \`bash $BRAIN_DIR/brain/install-brain.sh\`):$stale"
+  · $n_st archivo(s) que la copia instalada tiene DESACTUALIZADOS/ausentes (la fuente se ve más nueva por mtime). Remedio normal: re-corre el bootstrap/install-brain (o \`bash $BRAIN_DIR/brain/install-brain.sh\`). ⚠️ OJO: si EDITASTE esa copia EN VIVO, un \`git pull\` en la fuente pudo re-sellar su mtime y hacerla ver 'más nueva' aunque TU edición sea la real — compara el CONTENIDO antes de re-desplegar o perderías tu cambio (pórtalo a la fuente primero):$stale"
+  fi
+  printf '%s\n' "$msg"
+  return 0
+}
+
+# ── drift_hooks_global — drift de la copia GLOBAL de hooks (~/.claude/hooks) vs la FUENTE única
+#    (brain/hooks), para TODO archivo de tier {global,both} del HOOKS-MANIFEST. Es el equivalente
+#    AUTOMÁTICO del `drift_scan hooks` del doctor verificar-cerebro (manual): antídoto al síntoma real
+#    (~/.claude/hooks/*.sh se editó a mano en dev → la copia viva DRIFTÓ de la fuente y NADA lo detectaba;
+#    "el global está congelado" con FPs vivos).
+#    ALCANCE = EXACTAMENTE lo que install-brain COPIA a ~/.claude/hooks (install-brain.sh, awk de la etapa (a)):
+#    todo {global,both} SIN filtrar kind → hooks + LIBS (analizar-comando-git, drift-cerebro-comun, juez-comun…)
+#    + scripts. NO se limita a kind=hook: una lib compartida driftada (p.ej. la lógica git de los guards) es
+#    justo el drift silencioso que este chequeo debe cazar. (El cableado sí filtra kind=hook, pero eso es OTRA
+#    etapa; el DRIFT de la copia espeja la COPIA, no el cableado.)
+#    WARN-ONLY (nunca reescribe la copia global: la dirección puede ser "edit en vivo sin portar" = mejora
+#    que se PERDERÍA con un overwrite ciego; el remedio es editar la FUENTE + re-correr install-brain).
+#    Imprime el mensaje humano si hay drift; NADA si está limpia. Devuelve 0 SIEMPRE (fail-open).
+#    PRECISIÓN: solo archivos del manifiesto {global,both}; solo compara los PRESENTES en la fuente (un hook
+#    puramente local en ~/.claude/hooks, sin contraparte fuente, NO es este drift → se ignora, cero FP).
+#    bash-3.2-safe.
+drift_hooks_global() {
+  local BRAIN_DIR SRC_HOOKS INST_HOOKS MAN
+  BRAIN_DIR="$(resolve_brain_dir)"
+  SRC_HOOKS="$BRAIN_DIR/brain/hooks"
+  INST_HOOKS="$HOME/.claude/hooks"
+  MAN="$SRC_HOOKS/MANIFEST"
+  [ -d "$SRC_HOOKS" ] || return 0          # sin fuente → fail-open
+  [ -d "$INST_HOOKS" ] || return 0         # sin copia instalada → nada que comparar
+  [ -f "$MAN" ] || return 0                # sin manifiesto de hooks → no sé qué es del brain → fail-open
+
+  local names editadas stale n_ed n_st h src inst
+  names=$(awk '$1!~/^#/ && NF>=3 && ($2=="global"||$2=="both"){print $1".sh"}' "$MAN")
+  editadas=""; stale=""; n_ed=0; n_st=0
+  while IFS= read -r h; do
+    [ -z "$h" ] && continue
+    src="$SRC_HOOKS/$h"
+    [ -f "$src" ] || continue
+    inst="$INST_HOOKS/$h"
+    [ -f "$inst" ] || { n_st=$((n_st+1)); stale="$stale hooks/$h(falta)"; continue; }
+    cmp -s "$src" "$inst" && continue
+    if [ "$inst" -nt "$src" ]; then n_ed=$((n_ed+1)); editadas="$editadas hooks/$h"
+    else n_st=$((n_st+1)); stale="$stale hooks/$h"; fi
+  done <<EOF
+$names
+EOF
+
+  [ "$n_ed" = 0 ] && [ "$n_st" = 0 ] && return 0   # limpia → silencio
+  local msg="🧠⚠️ DRIFT DE HOOKS (copia GLOBAL ~/.claude/hooks vs la fuente única del cerebro):"
+  if [ "$n_ed" -gt 0 ]; then
+    msg="$msg
+  · $n_ed archivo(s) EDITADOS EN VIVO (la copia instalada es MÁS NUEVA que la fuente → tu edición se PERDERÍA en el próximo install-brain). PÓRTALOS a la fuente $SRC_HOOKS y re-corre install-brain:$editadas"
+  fi
+  if [ "$n_st" -gt 0 ]; then
+    msg="$msg
+  · $n_st archivo(s) que la copia instalada tiene DESACTUALIZADOS/ausentes (la fuente se ve más nueva por mtime). Remedio normal: re-corre el bootstrap/install-brain (o \`bash $BRAIN_DIR/brain/install-brain.sh\`). ⚠️ OJO: si EDITASTE esa copia EN VIVO, un \`git pull\` en la fuente pudo re-sellar su mtime y hacerla ver 'más nueva' aunque TU edición sea la real — compara el CONTENIDO antes de re-desplegar o perderías tu cambio (pórtalo a la fuente primero):$stale"
   fi
   printf '%s\n' "$msg"
   return 0

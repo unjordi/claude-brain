@@ -84,6 +84,11 @@ Delega con `Task`/subagente. Persona y encargo (adáptalo al target, conserva la
 > la leyenda y las normas para que tenga el contexto mínimo.
 
 ## Reglas duras
+- **Se audita LA MÁQUINA, no el manual.** Si el target tiene maquinaria EJECUTABLE, el auditor la EJECUTA
+  (sandbox) y mide la CAPACIDAD de sus dependencias instaladas — no su descripción. Y **el entregable
+  prioriza MECANISMO sobre prosa**: lo que se pueda volver código/gate/test se entrega así. Detalle, con el
+  caso que lo destiló (3 rondas de auditoría que engordaron un manual mientras la máquina seguía sin
+  arrancar): [[auditar-coherencia-cerebro]] → «Regla de oro» y «El ENTREGABLE del auditor».
 - **Read-only de verdad.** El auditor no muta archivos ni commitea. Corre sin worktree de escritura;
   si necesitara reproducir algo que muta estado, lo aísla — pero por defecto solo LEE y razona.
 - **Consentimiento de costo.** Reclutar el agente pasa por el gate de delegación (`delegacion-gate`):

@@ -64,7 +64,13 @@ stale=0
 #     · rama <rama>") vs la rama actual. Otra rama → contexto de otra tarea → OBSOLETO. Misma rama →
 #     hilo vivo de ESTA línea de trabajo (aunque el archivo tenga horas).
 cur_branch=$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-hilo_branch=$(printf '%s\n' "$body" | grep -iE 'actualiz.*rama' | head -n1 | sed -E 's/.*[Rr]ama[[:space:]]+//' | awk '{print $1}')
+# Extracción del token tras "rama" ANCLADA AL SEPARADOR `·` del footer de metadatos (`… · rama <x> · …`),
+# no a un "rama" suelto. Cierra DOS bugs: (1) el `.*[Rr]ama` goloso anterior consumía hasta el "rama" de
+# una SUBCADENA (`feat/diagrama-x` → devolvía `-x`; FMEA A8: enterraba el hilo VIVO como "obsoleto"); (2) una
+# línea de PROSA con "de rama X" NO es metadatos → el ancla `·` la excluye (prosa no lleva `· rama`). Un
+# branch de git no tiene espacios. `tr` limpia backticks/markdown (`· rama \`<x>\``). El `·` va como literal
+# en el patrón (NO en bracket) → portable Mac/Linux; sin flag `I` de sed.
+hilo_branch=$(printf '%s\n' "$body" | grep -E '·[[:space:]]+[Rr]ama[[:space:]]' | head -n1 | sed -E 's/.*·[[:space:]]+[Rr]ama[[:space:]]+//' | awk '{print $1}' | tr -d '`*"')
 rama_coincide=0
 if [ -n "$hilo_branch" ] && [ -n "$cur_branch" ]; then
   if [ "$hilo_branch" = "$cur_branch" ]; then

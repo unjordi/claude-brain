@@ -106,22 +106,28 @@ digraph flujos {
     SPAWN [color="#7fb069",
            label="🟢 spawnea N Task con `isolation: worktree`\n(el árbol PRINCIPAL es SOLO del orquestador/humano)"];
 
-    // ── PreToolUse/Task: los 2 hooks de costo ──
+    // ── PreToolUse/Task: los 2 hooks de costo — PARALELOS (mismo spawn), resueltos por precedencia deny>ask>allow ──
     LIM   [shape=diamond, fillcolor="#2b2622", color="#d97757",
-           label="🔒🛑 limite-gasto  (PreToolUse/Task)\n¿ventana 5h AGOTADA (≥99%) Y overage SIN holgura?\n(lee state.json del daemon de cuota; rancio >30min → fail-open)"];
+           label="🔒🛑 limite-gasto  (PreToolUse/Task)\n¿ventana 5h AGOTADA (≥99%) Y overage SIN holgura?\n(lee state.json del daemon de cuota; rancio >30min → fail-open;\nsin jq / sin snapshot → fail-open, no frena)"];
     LIM_D [fillcolor="#3a2020", color="#c0392b", penwidth=2.5,
            label="🔴 DENY (freno duro): sin capacidad en NINGÚN lado —\nel agente moriría a medias. NO reintentes en automático.\nEspera el reset · mete saldo · hazlo TÚ sin delegar"];
 
     CLASI [shape=diamond, fillcolor="#2b2622", color="#d97757",
-           label="🔒💸 delegacion-gate  (PreToolUse/Task)\nclasificar_delegacion (lib comun = fuente única con el registrar):\nsubagent_type/model → agentes-costo.json → NIVEL de costo"];
+           label="🔒💸 delegacion-gate  (PreToolUse/Task, EN PARALELO con limite-gasto)\nclasificar_delegacion (lib comun = fuente única con el registrar):\nsubagent_type/model → agentes-costo.json → NIVEL de costo"];
     NIVEL [shape=diamond, fillcolor="#2b2622", color="#d97757",
-           label="¿NIVEL?\nlocal → gratis · Claude dentro de ventana 5h (<90%) → incluido\nClaude en overage / API de pago / desconocido → metered"];
+           label="¿NIVEL?\nlocal → gratis · Claude CON snapshot fresco (<30min) y <90% ventana → incluido\nClaude SIN snapshot fresco (rancio >30min o ausente) → metered\n(conservador, aunque la ventana tenga holgura)\nClaude en overage / API de pago / desconocido → metered"];
     YACON [shape=diamond, fillcolor="#2b2622", color="#d97757",
            label="¿ya consentido?\ngratis/incluido: 1× por COMPU (delegacion-consentimiento.json)\nmetered: 1× por WORKFLOW (session_id)"];
     ASK   [color="#e08e45",
-           label="🟠 ASK — pide tu OK (muestra el estado real de tu ventana 5h).\ncoalescer G3/H6: el 1er Task del lote toma un lock (mkdir ~10s);\nlos HERMANOS simultáneos pasan en silencio (solo gratis/incluido).\nun «no» → el Task no corre → no se registra"];
+           label="🟠 ASK — pide tu OK (muestra el estado real de tu ventana 5h).\ncoalescer G3/H6: el 1er Task del lote toma un lock (mkdir ~10s);\nlos HERMANOS simultáneos pasan en silencio (solo gratis/incluido)"];
     PASA  [color="#7fb069",
            label="🟢 pasa sin preguntar\n(consentimiento ya vigente para este nivel)"];
+    NIEGA [fillcolor="#232323", color="#8a8a8a", fontcolor="#cfc8c0",
+           label="el usuario NIEGA → el Task NO corre\n(delegacion-registrar/delegacion-reporte no disparan → no se registra consentimiento)\nel ítem queda para rehacer o para no delegarlo"];
+
+    // ── Confluencia: precedencia deny > ask > allow (limite-gasto y delegacion-gate corren en\n    //    paralelo sobre el MISMO Task; el CLI combina sus 2 decisiones antes de dejarlo correr) ──
+    PREC  [shape=diamond, fillcolor="#2b2622", color="#d97757",
+           label="el CLI combina limite-gasto + delegacion-gate\nprecedencia: deny > ask > allow"];
 
     // ── El agente corre AISLADO ──
     AISLA [color="#c0392b", penwidth=3,
@@ -138,14 +144,14 @@ digraph flujos {
     // ── El orquestador cierra el loop ──
     VERIF [shape=diamond, fillcolor="#2b2622", color="#d97757",
            label="🔬 el orquestador VERIFICA el linaje del commit (NO cree la prosa del reporte, C7):\n`git merge-base --is-ancestor <commit>^ <rama-objetivo>` ¿nació sobre la base correcta?"];
-    DESCARTA [fillcolor="#f5f5f5", color="#9e9e9e", fontcolor="#333", style="dashed,filled",
-              label="🚧 base equivocada (padre = main) → NO integres.\nDescarta la rama y rehaz el ítem sobre la base correcta"];
+    DESCARTA [fillcolor="#f5f5f5", color="#c0392b", fontcolor="#333", style="dashed,filled", penwidth=3,
+              label="🚧⚠ ESCRIBE git · base equivocada (padre = main) → NO integres.\nDescarta la rama (git branch -D / worktree remove) y rehaz el ítem sobre la base correcta"];
     INTEGRA [color="#c0392b", penwidth=3,
              label="⚠ ESCRIBE git · integra a la MINI (DevelopUnjordi/…) por CHERRY-PICK del delta\n(no `merge`, que arrastraría el árbol viejo). NUNCA saca la mini en un worktree propio:\nla POSEE el folder visible del dev → aísla en FEATURE, integra HACIA la mini"];
     ESTADO [color="#e08e45",
             label="🟠 auto-reporte SIN redundancia (2 archivos):\n① APPENDA `>>` una línea a bitacora.md (qué pasó · parallel-safe)\n② CURA el ítem en estado-proyecto.md (qué sigue · backlog vivo)\nTodoWrite = scratch de sesión, NO el backlog durable"];
-    LIMPIA [color="#e08e45",
-            label="🔔🧹 limpieza automática:\nlimpiar-worktrees.sh (borra los de ramas mergeadas, deja los vivos con su pendiente)\nlimpiar-ramas.sh (barre ramas locales ya integradas — squash rompe `git branch -d`)"];
+    LIMPIA [color="#c0392b", penwidth=3,
+            label="⚠ ESCRIBE git · el orquestador limpia (nudge de delegacion-reporte, NO automático):\nlimpiar-worktrees.sh (borra los de ramas mergeadas, deja los vivos con su pendiente)\nlimpiar-ramas.sh (barre ramas locales ya integradas por `git branch -d/-D`)\nbarrer-ramas (SessionStart/merge-MR) NO cubre este cierre por cherry-pick"];
     FIN   [color="#7fb069", penwidth=2,
            label="🟢 slice del agente CERRADO\n(estado al día · worktree limpio · sin niñería)"];
 
@@ -153,22 +159,27 @@ digraph flujos {
     BL -> PREREQ;
     PREREQ -> NOGIT [label="no"];
     PREREQ -> SPAWN [label="sí"];
-    SPAWN -> LIM;
+    SPAWN -> LIM   [label="mismo spawn de Task (PARALELO)"];
+    SPAWN -> CLASI [label="mismo spawn de Task (PARALELO)"];
     LIM -> LIM_D [label="AND: ambos agotados"];
-    LIM -> CLASI [label="hay capacidad"];
+    LIM -> PREC [style=dashed, label="no (hay capacidad en algún lado)\nfail-open → no frena"];
     CLASI -> NIVEL;
+    CLASI -> ASK [label="sin jq → fail-safe:\nno puede clasificar el costo, pide OK"];
     NIVEL -> YACON;
     YACON -> PASA [label="sí"];
     YACON -> ASK  [label="no"];
-    ASK -> AISLA  [label="usuario aprueba"];
-    PASA -> AISLA;
+    ASK -> PREC   [label="usuario aprueba"];
+    ASK -> NIEGA  [label="usuario niega"];
+    PASA -> PREC  [style=dashed, label="allow (gate)"];
+    LIM_D -> PREC [label="DENY: vence a cualquier ASK/allow\nsimultáneo (precedencia)"];
+    PREC -> AISLA [label="ningún DENY → procede"];
     AISLA -> TRABAJO;
     TRABAJO -> REG;
     TRABAJO -> REP [label="mismo PostToolUse/Task"];
     REG -> VERIF; REP -> VERIF;
     VERIF -> DESCARTA [label="padre = base\nequivocada"];
     VERIF -> INTEGRA  [label="linaje OK"];
-    DESCARTA -> BL [label="rehaz el ítem", style=dashed];
+    DESCARTA -> BL [label="rehaz el ítem"];
     INTEGRA -> ESTADO;
     ESTADO -> LIMPIA;
     LIMPIA -> FIN;

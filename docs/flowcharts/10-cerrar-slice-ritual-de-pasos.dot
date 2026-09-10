@@ -100,21 +100,39 @@ digraph flujos {
 
     P1 [color="#7fb069",
         label="1 · 🔍 Verifica (evidencia real, no tu memoria del chat)\nbuild + tests + lint según tu stack y CITA la salida real (0 errores);\nrevisa AGENTS.md si tocaste capas + QA de NO-REGRESIÓN visual"];
+    VERDE [shape=diamond, fillcolor="#2b2622", color="#d97757",
+           label="¿build + tests + lint EN VERDE?"];
+    P1_FIX [color="#e08e45",
+            label="🟠 arregla y re-verifica\nno avanza hasta CITAR 0 errores reales"];
+    MIGR [shape=diamond, fillcolor="#2b2622", color="#d97757",
+          label="¿es una MIGRACIÓN?"];
+    MIGR_W [color="#7fb069",
+            label="🟢 verificación POR PARIDAD (norma dura, no build+tests)\nrevisa el inventario de paridad + el módulo real de la app legada;\nmarca el ítem como migrado SOLO si pasó la verificación"];
     DESTR [shape=diamond, fillcolor="#2b2622", color="#d97757",
            label="¿el diff ELIMINA funcionalidad / entidades / tablas / mucho código?"];
     DESTR_W [color="#e08e45",
              label="🟠 PAUSA — es DESTRUCTIVO y NO transitivo (aunque un doc lo respalde):\npreséntalo como PÉRDIDA explícita y pide OK ANTES de ejecutar"];
+    DESTR_DENY [color="#e08e45",
+                label="🟠 sin OK: revierte o replantea el cambio destructivo\nno avanza a APIQ"];
     APIQ [shape=diamond, fillcolor="#2b2622", color="#d97757",
           label="¿cambio de API / DTO / repos / SQL?"];
     SMOKE [color="#7fb069",
            label="🟢 smoke E2E (en Docker) al endpoint/flujo tocado\n(build+unit NO ven bugs de runtime)"];
 
     P2 [color="#7fb069",
-        label="2 · 📝 Memoria + doc (en la MISMA tanda = doc=realidad)\nestado-proyecto → HECHO · bitácora APPENDA «>>» · dashboard GLOBAL «>>»\n(relee el encabezado que tocas, no solo la línea). Es el volcado del skill checkpoint.\n📜 → 🪞 doc=realidad"];
+        label="2 · 📝 Memoria + doc (en la MISMA tanda = doc=realidad)\nestado-proyecto → HECHO · bitácora APPENDA «>>» · dashboard GLOBAL «>>»\n(relee el encabezado que tocas, no solo la línea). Es el volcado del skill checkpoint.\nbarre al backlog los hallazgos/delegados NO atendidos, con severidad y origen — ningún hook lo cacha\n📜 → 🪞 doc=realidad"];
     P3 [shape=diamond, fillcolor="#2b2622", color="#d97757",
         label="3 · ✋ Confirma CON EL USUARIO\n¿el slice queda cerrado? el merge a develop NO va sin su OK expreso"];
-    P4 [color="#7fb069", penwidth=2,
-        label="⚠ ESCRIBE git · 4 · 🔗 Flujo de git (tras el OK)\nramita → MR/PR → develop CON --squash (resumen curado en prosa, no el pegote de commits).\nLo hacen cumplir git-branch-guard + merge-squash-guard + confirmar-merge-develop (ver 06)"];
+    P3_NO [color="#c62828", penwidth=3,
+           label="⚠ ESCRIBE git · 🔁 aún NO cierra: sigue iterando en la ramita\ncommit/push libres, sin MR — vuelve a 1 · Verifica cuando quede listo"];
+    P4 [color="#c62828", penwidth=3,
+        label="⚠ ESCRIBE git · 4 · 🔗 Flujo de git (tras el OK)\nramita → push → abre MR/PR a develop\nLo hacen cumplir git-branch-guard + secret-scan (commit/push; escape --no-verify / CLAUDE_SKIP_SECRET_SCAN=1 — ver 07)"];
+    PIPE [shape=diamond, fillcolor="#2b2622", color="#d97757",
+          label="¿pipeline VERDE?"];
+    P4_FIX [color="#c62828", penwidth=3,
+            label="⚠ ESCRIBE git · arregla y re-push a la ramita"];
+    P4_MERGE [color="#c62828", penwidth=3,
+              label="⚠ ESCRIBE git · merge --squash (resumen curado en prosa, no el pegote de commits)\nSIN --auto-merge/--auto (NO lo dejes en MWPS/armado: rompe confirmar-merge-develop)\nLo hacen cumplir merge-squash-guard + confirmar-merge-develop (ver 06)"];
     P5 [shape=diamond, fillcolor="#2b2622", color="#d97757",
         label="5 · 🌱 Cosecha\n¿la lección / herramienta es GENÉRICA (no atada a este proyecto)?"];
     P5_G [color="#7fb069",
@@ -124,17 +142,31 @@ digraph flujos {
 
     // Aristas
     START -> P1;
-    P1 -> DESTR;
+    P1 -> VERDE;
+    VERDE -> P1_FIX [label="no"];
+    P1_FIX -> P1;
+    VERDE -> MIGR [label="sí"];
+    MIGR -> MIGR_W [label="sí"];
+    MIGR_W -> DESTR;
+    MIGR -> DESTR [label="no"];
     DESTR -> DESTR_W [label="sí"];
     DESTR_W -> APIQ [label="tras OK"];
-    DESTR -> APIQ [label="no", style=dashed];
+    DESTR_W -> DESTR_DENY [label="sin OK"];
+    DESTR_DENY -> P1 [label="reintenta"];
+    DESTR -> APIQ [label="no"];
     APIQ -> SMOKE [label="sí"];
-    APIQ -> P2 [label="no", style=dashed];
+    APIQ -> P2 [label="no"];
     SMOKE -> P2;
     P2 -> P3;
     P3 -> P4 [label="sí (con OK)"];
-    P4 -> P5;
+    P3 -> P3_NO [label="no"];
+    P3_NO -> P1 [label="cuando quede listo"];
+    P4 -> PIPE;
+    PIPE -> P4_FIX [label="no"];
+    P4_FIX -> PIPE [label="re-push"];
+    PIPE -> P4_MERGE [label="sí"];
+    P4_MERGE -> P5;
     P5 -> P5_G [label="sí (genérica)"];
-    P5 -> P5_L [label="no (del proyecto)", style=dashed];
+    P5 -> P5_L [label="no (del proyecto)"];
   }
 }

@@ -99,18 +99,23 @@ digraph flujos {
     STOP [fillcolor="#232323", color="#8a8a8a", fontcolor="#cfc8c0",
           label="fin de turno (Stop)\nrecorta al TURNO ACTUAL (desde el último mensaje genuino del usuario);\ntoma el último texto del ASISTENTE + el texto del USUARIO del turno\n(stop_hook_active / sin transcript / sin jq → exit 0)"];
 
+    PISO [shape=diamond, fillcolor="#2b2622", color="#d97757",
+          label="PISO barato — _juez_dod_posible_claim($1)\n¿el mensaje del ASISTENTE trae ALGÚN léxico de cierre/apariencia?\n(list[oa]|termin|funcion|qued|a la par|de punta a punta|complet|arreglad|resuelt|\nentreg|deploy|done|ready|se ve|mockup|render|chrome|qa visual|pixel… | 🏁🎉✅🚀✨)\nGENEROSO a propósito: NO decide, solo salta la llamada de red en Stops OBVIAMENTE inocuos"];
+
     JUEZ [shape=diamond, fillcolor="#2b2622", color="#d97757",
           label="🔒✅ dod-verificar → _juez_dod  (Haiku vía juez-comun.sh)\nclasifica 3 EJES del turno → «CIERRE=.. MARCA=.. VISUAL=..» | UNAVAILABLE\n• CIERRE = el ASISTENTE afirma un entregable LISTO/terminado/funciona/quedó/a la par\n• MARCA  = el USUARIO (en SUS palabras) dio (1) confirmación funcional o (2) OK expreso de cierre\n• VISUAL = el ASISTENTE asevera APARIENCIA de una UI (se ve/como el mockup/en Chrome/la pantalla)"];
     UNAVAIL [color="#c9a227",
              label="🟡 UNAVAILABLE (sin token OAuth/red/timeout/respuesta ininteligible)\n→ exit 0 FAIL-OPEN: dod es un NAG, no un candado de seguridad (a diferencia de confirmar-merge, ver 06)"];
 
-    // CIERRE: co-ubicación / downgrade
-    COLOC [shape=diamond, fillcolor="#2b2622", color="#d97757",
-           label="regla de CO-UBICACIÓN del eje CIERRE:\n• claim + pregunta/«dime si reviso algo» colgada → SIGUE siendo CIERRE (la pregunta NO lo salva)\n• DOWNGRADE explícito («quedó, PERO lo dejo en preview / a tu revisión») → CIERRE=no (no dispara)"];
+    // CIERRE: co-ubicación / downgrade — NOTA sobre cómo el juez-LLM aplica el eje CIERRE dentro de
+    // su propio prompt (dod-verificar.sh:121-122); NO es un paso de decisión del hook entre JUEZ y VIS
+    // (por eso nota/rectángulo, no rombo: un rombo debe ramificar — CONVENCIONES §1).
+    COLOC [shape=note, fillcolor="#232323", color="#8a8a8a", fontcolor="#cfc8c0",
+           label="📝 nota — eje CIERRE, regla de CO-UBICACIÓN (vive DENTRO del prompt del juez-LLM,\nno es un paso del hook):\n• claim + pregunta/«dime si reviso algo» colgada → SIGUE siendo CIERRE (la pregunta NO lo salva)\n• DOWNGRADE explícito («quedó, PERO lo dejo en preview / a tu revisión») → CIERRE=no (no dispara)"];
 
     // VISUAL block
     VIS [shape=diamond, fillcolor="#2b2622", color="#d97757",
-         label="¿VISUAL=si Y MARCA≠si Y este turno NO hubo evidencia visual real?\n(evidencia = corrió tool de navegador —tool_use MCP chrome/playwright/puppeteer o la tool `computer`—\nO el USUARIO adjuntó una IMAGEN en el turno; detectado por ESTRUCTURA del transcript,\nNO por la palabra «screenshot» en prosa. VISUAL=no además si la apariencia está ATRIBUIDA a un reporte de subagente)"];
+         label="¿VISUAL=si Y MARCA≠si Y este turno NO hubo evidencia visual real?\n(evidencia = corrió tool de navegador —tool_use MCP chrome/playwright/puppeteer o la tool `computer`—\nO el ASISTENTE hizo un Read de una imagen RASTERIZADA (.png/.jpg/.jpeg/.gif/.webp/.bmp) en el turno\n(p.ej. render.png tras pdftoppm) — TAMBIÉN cuenta como mirar la pantalla —\nO el USUARIO adjuntó una IMAGEN en el turno; detectado por ESTRUCTURA del transcript,\nNO por la palabra «screenshot» en prosa. VISUAL=no además si la apariencia está ATRIBUIDA a un reporte de subagente)"];
     VIS_D [color="#c0392b", penwidth=2,
            label="🔴 BLOCK (B2) — QA visual A CIEGAS.\nAfirmaste cómo SE VE sin mirar la pantalla. Estatus honesto:\n«verificado técnicamente, SIN QA visual»; el QA visual lo hace el usuario o una captura real.\n(bloquea INDEPENDIENTE de si el turno tocó código)"];
 
@@ -131,15 +136,17 @@ digraph flujos {
             label="🟢 cierra — un «listo» de solo docs/config no exige verificación técnica"];
 
     // Aristas
-    STOP -> JUEZ;
-    JUEZ -> UNAVAIL [label="UNAVAILABLE", style=dashed];
-    JUEZ -> COLOC [label="veredicto de 3 ejes"];
-    COLOC -> VIS;
+    STOP -> PISO;
+    PISO -> NODISPARA [label="no (sin léxico) → CIERRE=no MARCA=no VISUAL=no\n(sin llamar al LLM)"];
+    PISO -> JUEZ [label="sí (hay léxico)"];
+    JUEZ -> UNAVAIL [label="UNAVAILABLE"];
+    JUEZ -> VIS [label="veredicto de 3 ejes"];
+    JUEZ -> COLOC [style=dashed, arrowhead=none, label="eje CIERRE: regla interna del prompt"];
     VIS -> VIS_D [label="sí (a ciegas)"];
-    VIS -> CIERREQ [label="no", style=dashed];
-    CIERREQ -> NODISPARA [label="no", style=dashed];
+    VIS -> CIERREQ [label="no"];
+    CIERREQ -> NODISPARA [label="no"];
     CIERREQ -> CODEQ [label="sí (afirma cierre)"];
-    CODEQ -> NOCODE [label="no (solo docs)", style=dashed];
+    CODEQ -> NOCODE [label="no (solo docs)"];
     CODEQ -> MARCAQ [label="sí (tocó código)"];
     MARCAQ -> CLOSE [label="sí (cita verificada)"];
     MARCAQ -> BLOCK [label="no"];

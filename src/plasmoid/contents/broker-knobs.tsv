@@ -1,0 +1,61 @@
+# Spec DECLARATIVO de los knobs del broker de terminal — FUENTE ÚNICA de las tres caras del widget.
+#
+# Por qué existe: cada front del widget (el plasmoid QML, el puerto web de odysseus, y mañana
+# macOS/Windows) tenía que repetir a mano la lista de variables, sus defaults y su semántica. El drift
+# real no es de layout: es que alguien agregue una env var en `ws.ts` y ninguna GUI se entere — pasó
+# justo con AXON_TERM_BROKER_WS_BACKPRESSURE_DEADLINE_MS, que entró con el endurecimiento de hoy.
+# Lo hace cumplir `probe-knobs-spec.sh`: grepea AXON_TERM_BROKER_* de los .ts y falla si alguna no
+# está aquí, así un knob nuevo NO puede entrar sin su entrada de GUI.
+#
+# Por qué TSV y no JSON: es el único formato que parsean sin dependencias los DOS consumidores —
+# bash (el único brazo que el plasmoid tiene para leer disco) y node (el que emite el artefacto web).
+# Un JSON obligaría a jq, que el entorno mínimo del plasmoid no garantiza.
+#
+# Columnas (separadas por TAB, nunca por espacios):
+#   env          nombre EXACTO de la variable de entorno
+#   grupo        endpoint | topes | websocket | http | proceso
+#   etiqueta     lo que ve el usuario
+#   tipo         entero | bytes | ms | ruta | texto
+#   default      el default REAL del código (no el que uno supondría); `-` = no lo hay
+#   min          mínimo aceptable, `-` si no aplica
+#   max          máximo aceptable, `-` si no aplica
+#   cero_apaga   si `1`, el valor 0 DESACTIVA el mecanismo (no es "cero de todo")
+#   reinicio     si `1`, el cambio no aplica hasta reiniciar el servicio
+#   gui          edita | lee
+#                `edita` = editable en el widget de ESCRITORIO, y solo-lectura en el puerto WEB
+#                          (escribir config del host desde una página del navegador está fuera de
+#                          la frontera que ese puerto se puso: ver su cabecera).
+#                `lee`   = solo-lectura en TODA GUI, y no por pereza:
+#                          · BIND — cualquier valor que no sea loopback EXPONE ejecución de comandos
+#                            arbitrarios a la red; un toggle de GUI no es el lugar para eso.
+#                          · PORT / SOCKET / HOME — son el CONTRATO con el cliente (axon en
+#                            contenedor); cambiarlos por su cuenta rompe al cliente en silencio.
+#                          Los cuatro se editan a mano en el .env, que es fricción a propósito.
+#   ayuda        una línea de qué hace
+#   advertencia  `-`, o el riesgo concreto de cambiarlo
+env	grupo	etiqueta	tipo	default	min	max	cero_apaga	reinicio	gui	ayuda	advertencia
+AXON_TERM_BROKER_PORT	endpoint	Puerto TCP	entero	8799	1	65535	0	1	lee	Listener TCP, para clientes NATIVOS del host.	-
+AXON_TERM_BROKER_BIND	endpoint	Interfaz de escucha	texto	127.0.0.1	-	-	0	1	lee	A qué interfaz se ata el listener TCP.	Cualquier cosa que no sea loopback EXPONE ejecución de comandos arbitrarios a la red. El broker no es una sandbox.
+AXON_TERM_BROKER_SOCKET	endpoint	Socket unix	ruta	$XDG_RUNTIME_DIR/axon/term-broker.sock	-	-	0	1	lee	Transporte del cliente CONTENERIZADO: un contenedor no alcanza un bind a loopback del host.	El literal `off` lo DESACTIVA, y entonces un cliente en contenedor deja de tener por dónde entrar.
+AXON_TERM_BROKER_HOME	proceso	Directorio inicial	ruta	$HOME	-	-	0	1	lee	cwd con el que arrancan las sesiones de shell.	-
+AXON_TERM_BROKER_MAX_SESSIONS	topes	Sesiones de shell	entero	32	1	4096	0	1	edita	Sesiones concurrentes de /run; al pasarlo, la siguiente recibe SESSION_LIMIT.	-
+AXON_TERM_BROKER_MAX_PTYS	topes	PTYs concurrentes	entero	32	1	4096	0	1	edita	Terminales interactivas concurrentes de /pty; al pasarlo, el upgrade recibe 503.	-
+AXON_TERM_BROKER_WS_HIGH_WATER	websocket	Umbral de contrapresión	bytes	1048576	4096	268435456	0	1	edita	Buffer pendiente a partir del cual se PAUSA al productor en vez de seguir acumulando.	-
+AXON_TERM_BROKER_WS_MAX_BUFFER	websocket	Válvula dura del buffer	bytes	8388608	65536	1073741824	0	1	edita	Buffer pendiente que cierra ESA conexión. Nunca tumba el broker.	Por debajo del umbral de contrapresión no tiene sentido: la válvula cortaría antes de que la pausa alcance a actuar.
+AXON_TERM_BROKER_WS_KEEPALIVE_MS	websocket	Ping de keepalive	ms	30000	1000	600000	1	1	edita	Cada cuánto se manda un ping para detectar una conexión muerta.	Con 0 queda APAGADO: una conexión muerta solo la reapa el RTO del kernel, que tarda minutos.
+AXON_TERM_BROKER_WS_BACKPRESSURE_DEADLINE_MS	websocket	Tope de tiempo en contrapresión	ms	60000	1000	600000	1	1	edita	Tiempo CONTINUO sobre el umbral sin drenar antes de cerrar la conexión por half-open.	Con 0 queda APAGADO: un cliente half-open retiene su slot, su PTY y su shell hasta que el kernel lo corte (~15 min).
+AXON_TERM_BROKER_HEADERS_TIMEOUT_MS	http	Tope para los headers	ms	15000	1000	120000	0	1	edita	Cuánto se espera a que un cliente complete los headers de su petición.	Subirlo mucho reabre la ventana de slowloris que este tope existe para cerrar.
+AXON_TERM_BROKER_REQUEST_TIMEOUT_MS	http	Tope de la petición	ms	30000	1000	600000	0	1	edita	Cuánto se espera a que una petición NO-upgradeada termine.	-
+#
+# ── GRUPOS ──────────────────────────────────────────────────────────────────────────────────────
+# El ORDEN y los TÍTULOS de los grupos: la última cara del spec que aún se repetía a mano (el QML y
+# el puerto web los tenían hardcodeados). Ahora salen de aquí y `list` los emite como `grupos`, así
+# ningún front vuelve a mantener su propia copia. Filas `@grupo<TAB>clave<TAB>título`, en el ORDEN de
+# despliegue (distinto a propósito del orden de aparición de los knobs de arriba). El loop de knobs
+# las salta; `probe-knobs-spec.sh` verifica que cada grupo usado por un knob esté declarado aquí y
+# viceversa (sin grupos fantasma).
+@grupo	endpoint	Endpoint y contrato con el cliente
+@grupo	topes	Topes de concurrencia
+@grupo	websocket	WebSocket: contrapresión y keepalive
+@grupo	http	Topes del HTTP
+@grupo	proceso	Proceso
