@@ -3847,6 +3847,7 @@ recordar-unificar-cerebro|unificar-cerebro
 cosechar-sesion|unificar-cerebro
 proteger-fuente-cerebro|verificar-cerebro
 aviso-drift-cerebro|verificar-cerebro
+auditar-coherencia-cerebro|auditar-proceso-algoritmo
 auditar-coherencia-cerebro|auditar-suficiencia-operativa
 auditar-coherencia-cerebro|consolidar-cerebro
 auditar-suficiencia-operativa|consolidar-cerebro
@@ -3855,6 +3856,10 @@ hud-stale|to-do
 drift-cerebro-comun|exportar-sesion-master
 drift-cerebro-comun|proteger-fuente-cerebro
 drift-cerebro-comun|verificar-cerebro"
+# auditar-coherencia-cerebro|auditar-proceso-algoritmo: FAMILIA declarada, no ciclo — proceso-algoritmo
+# es la METODOLOGÍA y apunta a secciones CONCRETAS de coherencia-cerebro (que es su modo-cerebro
+# empaquetado) donde vive el detalle; el contenido está en los dos lados, así que el lector no da vueltas.
+# Mismo caso que el par con auditar-suficiencia-operativa, ya en la lista.
 # Los 3 pares de arriba (OLA1): exportar-sesion-master, proteger-fuente-cerebro y verificar-cerebro
 # ahora SOURCEAN drift-cerebro-comun.sh para reusar su resolve_brain_dir() — es lib<->consumidor
 # (igual que delegacion-comun|delegacion-gate arriba), no una dependencia circular real.
@@ -5298,13 +5303,53 @@ HOME="$SMHOME" node -e 'require(process.argv[1]).writeAlias("zzz","nuevo")' "$SM
   && ok "sm5 alias: un JSON ilegible se RESPALDA antes de pisarlo (no se pierde en silencio)" \
   || bad "sm5 alias: un JSON ilegible se pisó sin respaldo"
 
+# ── sm6 · LOCK del mapa de alias. `sesiones-alias.json` lo comparten TODOS los masters de la máquina y
+#         escribirlo es read-modify-write: la escritura atómica evita un archivo a medias, no que dos
+#         escritores se borren las claves — en silencio y sin que nada lo asevere. Medido 2026-09-10:
+#         con una mudanza y un `databases-master` vivos, el riesgo es real y ASIMÉTRICO (pierde quien no
+#         está mirando). Se prueba CONTRA LA FALLA: con el lock tomado, escribir debe NEGARSE.
+SM6="$SMFIX/alias-lock/.claude"
+mkdir -p "$SM6"
+sm6(){ env CLAUDE_CONFIG_DIR="$SM6" node -e "$1" "$SMLIB"; }
+sm6 'const l=require(process.argv[1]);l.writeAlias("aaa","uno-master");l.writeAlias("bbb","dos-master")'
+[ "$(sm6 'process.stdout.write(JSON.stringify(require(process.argv[1]).sessionAliases()))')" = '{"aaa":"uno-master","bbb":"dos-master"}' ] \
+  && ok "sm6 alias-lock: dos escrituras secuenciales conservan las dos claves" \
+  || bad "sm6 alias-lock: una escritura normal perdió la clave previa"
+sm6 'require(process.argv[1]).takeAliasLock()'      # el lock queda TOMADO a propósito
+[ -d "$SM6/sesiones-alias.json.lock" ] \
+  && ok "sm6 alias-lock: takeAliasLock crea el directorio-lock (mkdir es la primitiva atómica)" \
+  || bad "sm6 alias-lock: takeAliasLock no dejó el lock"
+# CONTRA LA FALLA: con el lock ajeno tomado, writeAlias debe NEGARSE (false) y dejar el mapa intacto.
+# Se le pasa 1 intento para no esperar los ~20s del default — el efecto medido es el mismo.
+[ "$(sm6 'const l=require(process.argv[1]);process.stdout.write(String(l.writeAlias("ccc","tres-master",{intentos:1,esperaMs:1})))' 2>/dev/null)" = false ] \
+  && ok "sm6 alias-lock: con el lock ajeno tomado writeAlias devuelve false (no escribe a ciegas)" \
+  || bad "sm6 alias-lock: writeAlias escribió con el lock ajeno tomado"
+[ "$(sm6 'process.stdout.write(JSON.stringify(require(process.argv[1]).sessionAliases()))')" = '{"aaa":"uno-master","bbb":"dos-master"}' ] \
+  && ok "sm6 alias-lock: y el mapa quedó INTACTO — la clave ajena no se perdió (era el riesgo asimétrico)" \
+  || bad "sm6 alias-lock: el mapa cambió con el lock ajeno tomado"
+[ "$(sm6 'const l=require(process.argv[1]);process.stdout.write(String(l.takeAliasLock({intentos:1,esperaMs:1})))')" = false ] \
+  && ok "sm6 alias-lock: takeAliasLock devuelve false cuando el lock está tomado (no lo roba)" \
+  || bad "sm6 alias-lock: takeAliasLock robó un lock ajeno vivo"
+# un lock HUÉRFANO de un crash no puede bloquear el mapa para siempre: se recicla a los 5 min
+touch -t "$(date -d '-10 min' '+%Y%m%d%H%M' 2>/dev/null || date -v-10M '+%Y%m%d%H%M')" "$SM6/sesiones-alias.json.lock"
+sm6 'require(process.argv[1]).writeAlias("ddd","cuatro-master")' >/dev/null 2>&1
+sm6 'process.stdout.write(JSON.stringify(require(process.argv[1]).sessionAliases()))' | grep -q 'cuatro-master' \
+  && ok "sm6 alias-lock: el lock HUÉRFANO (>5m) se recicla (un crash no deja el mapa bloqueado)" \
+  || bad "sm6 alias-lock: un lock huérfano bloquea el mapa para siempre"
+
 rm -rf "$SMFIX"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "== (r2) skill↔bin: timestamp de PRIMER NIVEL, y que el SKILL no describa un bin/ que ya no existe =="
 R2LIB="$BINRM/session-lib.js"
-R2SK="$SCRIPT_DIR/skills/reubicar-master/SKILL.md"
+R2SK="$SCRIPT_DIR/skills/reubicar-master/SKILL.md"      # PROSA (lo que el skill AFIRMA)
+R2SH="$SCRIPT_DIR/skills/reubicar-master/reubicar-master.sh"   # CÓDIGO (la maquinaria de verdad)
+[ -x "$R2SH" ] && ok "(rm) el skill trae su ejecutable y es ejecutable: reubicar-master.sh" \
+                || bad "(rm) falta reubicar-master.sh ejecutable (la maquinaria volvió a ser markdown)"
+grep -qE '^\s*```bash' "$R2SK" && ! awk '/^```bash/{f=1} f&&/PRELUDIO_EOF|HANDOFF_EOF/{print;exit}' "$R2SK" | grep -q . \
+  && ok "(rm) el SKILL.md ya no lleva el preludio ni el generador embebidos (una sola fuente = el script)" \
+  || bad "(rm) el SKILL.md volvió a traer el preludio/generador en markdown: dos fuentes que van a driftar"
 R2FIX="$(mktemp -d "${TMPDIR:-/tmp}/brain-r2.XXXXXX")"
 R2HOME="$R2FIX/home"
 R2PROJ="$R2HOME/.claude/projects"
@@ -5344,10 +5389,10 @@ grep -q 'cygdrive\\/|mnt\\/' "$R2LIB" \
 # y el preludio del skill NO resuelve la ruta física con node: node.exe nativo recibiría /c/... con la
 # conversión de MSYS apagada y la resolvería contra la unidad actual ⇒ ENOENT en la PRIMERA derivada,
 # antes de llegar a la traducción cygpath -w que sí está bien construida.
-{ grep -q 'pwd -P' "$R2SK" && ! grep -q '_real(){  node -e' "$R2SK"; } \
+{ grep -q 'pwd -P' "$R2SH" && ! grep -q '_real(){  node -e' "$R2SH"; } \
   && ok "r2-2 win: _real() resuelve con cd+pwd -P (bash), no con node realpathSync sobre una ruta POSIX" \
   || bad "r2-2 win: _real() volvió a resolver con node (rompe en Git Bash antes de traducir con cygpath)"
-{ grep -qF 'OLD_SLUG="$(_slug "$SRC_CWD")"' "$R2SK" && grep -qF 'NEW_SLUG="$(_slug "$DST_CWD")"' "$R2SK"; } \
+{ grep -qF 'OLD_SLUG="$(_slug "$SRC_CWD")"' "$R2SH" && grep -qF 'NEW_SLUG="$(_slug "$DST_CWD")"' "$R2SH"; } \
   && ok "r2-2 win: los slugs de origen y destino salen de la forma NATIVA (_cwdform), no de la POSIX" \
   || bad "r2-2 win: algún slug se deriva de la ruta POSIX (en Windows apuntaría a un slug inexistente)"
 
@@ -5356,10 +5401,13 @@ grep -q 'cygdrive\\/|mnt\\/' "$R2LIB" \
 #          una edición futura que borre un paso —o lo degrade a comentario— rompe la suite, sin
 #          depender de que alguien corra el skill.
 R2GEN="$R2FIX/gen.sh"
-awk '/^cat >> "\$H" <<.HANDOFF_EOF.$/{d=1;next} /^HANDOFF_EOF$/{d=0} d' "$R2SK" > "$R2GEN"
+awk '/^cat >> "\$H" <<.HANDOFF_EOF.$/{d=1;next} /^HANDOFF_EOF$/{d=0} d' "$R2SH" > "$R2GEN"
 R2NOCOM="$R2FIX/gen.nocom"
 grep -vE '^[[:space:]]*#' "$R2GEN" > "$R2NOCOM"
-R2MARC="$(awk "/^for m in 'G-SELF-MOVE'/,/'PUNTO DE NO RETORNO'/" "$R2SK" | grep -oE "'[^']+'" | tr -d "'")"
+# la lista de marcadores sale del PROPIO candado del script (_MARCADORES + _MARCADOR_FRASE): si alguien
+# agrega un paso y su marcador, la suite lo exige sola.
+R2MARC="$(awk "/^_MARCADORES='/,/'\$/" "$R2SH" | sed "s/^_MARCADORES='//; s/'\$//" | tr ' ' '\n')
+$(sed -n "s/^_MARCADOR_FRASE='\(.*\)'\$/\1/p" "$R2SH")"
 r2mf=0; r2mn=0
 while IFS= read -r m; do
   [ -n "$m" ] || continue
@@ -5443,7 +5491,7 @@ esac
 
 # ── r2-5: el PRELUDIO se publica con rename. Es un archivo COMPARTIDO entre corridas: dos mudanzas
 #          casi simultáneas en la misma máquina lo sobre-escribían a la vez, sin lock.
-{ grep -qF 'PRELUDIO_TMP="$PRELUDIO.tmp.$$"' "$R2SK" && grep -qF 'mv -f "$PRELUDIO_TMP" "$PRELUDIO"' "$R2SK"; } \
+{ grep -qF 'PRELUDIO_TMP="$PRELUDIO.tmp.$$"' "$R2SH" && grep -qF 'mv -f "$PRELUDIO_TMP" "$PRELUDIO"' "$R2SH"; } \
   && ok "r2-5 preludio: se escribe a un temporal y se publica con mv (rename atómico), no con cat > directo" \
   || bad "r2-5 preludio: se escribe directo al archivo compartido (dos corridas concurrentes se pisan)"
 
@@ -5483,6 +5531,178 @@ CSL="$SCRIPT_DIR/skills/cerrar-slice/SKILL.md"
 { [ -f "$CSL" ] && grep -qF '❌' "$CSL" && grep -qF '✅' "$CSL" && grep -qiE 'se decidi|tras analiz' "$CSL" && grep -qiE 'habla del (PROCESO|CÓDIGO)|del CÓDIGO' "$CSL"; } \
   && ok "3c: cerrar-slice §4 trae el par de contra-ejemplos ❌proceso / ✅código" \
   || bad "3c: cerrar-slice §4 no trae los contra-ejemplos de editorialización"
+
+# ═════════════════════════════════════════════════════════════════════════════
+# (e2e) reubicar-master DE PUNTA A PUNTA en un $HOME falso: generar → verificar → dry → full → s7.
+# Es la prueba que NO existía: hasta el 2026-09-10 los pasos destructivos de este skill nunca se habían
+# EJECUTADO, solo grepeado. Un candado de presencia-de-texto certificó un handoff que no arrancaba;
+# esto lo corre de verdad contra un ecosistema simulado (transcript, masters.json, alias, repos git).
+# Todo vive bajo un mktemp que se borra al salir: no toca el ~/.claude real (y se ASERTA que no lo tocó).
+echo ""
+echo "== (e2e) reubicar-master: la mudanza COMPLETA sobre un \$HOME falso =="
+E2ESH="$SCRIPT_DIR/skills/reubicar-master/reubicar-master.sh"
+E2EBIN="$SCRIPT_DIR/../bin"
+if [ ! -x "$E2ESH" ] || [ ! -f "$E2EBIN/session-move.js" ] || ! command -v node >/dev/null 2>&1; then
+  bad "(e2e) no puedo correr la mudanza simulada (falta el script, session-move.js o node)"
+else
+E2EFIX="$(mktemp -d "${TMPDIR:-/tmp}/brain-e2e-rm.XXXXXX")"
+E2EHOME="$E2EFIX/home"
+E2EDRIVE="$E2EFIX/drive"
+E2ESRC="$E2EHOME/code/origen"
+E2EDST="$E2EHOME/code/destino"
+E2EID="deadbeef-e2e0-0000-0000-00000000e2e0"
+mkdir -p "$E2EHOME/.claude/projects" "$E2EDRIVE" "$E2ESRC" "$E2EDST/.claude/memory"
+for _r in "$E2ESRC" "$E2EDST"; do
+  git init -q "$_r"
+  git -C "$_r" symbolic-ref HEAD refs/heads/DevelopUnjordi
+  git -C "$_r" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+done
+printf '{"masters":[{"id":"%s","name":"viejo-master","target":"code/origen"}]}\n' "$E2EID" > "$E2EDRIVE/masters.json"
+# el slug sale de la ruta FÍSICA (pwd -P), la misma que deriva el script: con $TMPDIR bajo un symlink
+# (macOS /var→/private/var) la ruta cruda daría otro slug.
+E2ESRCP="$(cd "$E2ESRC" && pwd -P)"
+E2ESLUG="$(node -e 'process.stdout.write(require(process.argv[1]).slugFromCwd(process.argv[2]))' "$E2EBIN/session-lib.js" "$E2ESRCP")"
+mkdir -p "$E2EHOME/.claude/projects/$E2ESLUG"
+E2EJSONL="$E2EHOME/.claude/projects/$E2ESLUG/$E2EID.jsonl"
+printf '{"type":"user","timestamp":"2026-01-01T00:00:00.000Z","cwd":"%s","gitBranch":"DevelopUnjordi"}\n' "$E2ESRCP" > "$E2EJSONL"
+chmod 600 "$E2EJSONL"
+# G-LIVENESS exige el transcript FRÍO (>=15m): se envejece a 3h. GNU primero, BSD de respaldo.
+touch -t "$(date -d '-3 hours' '+%Y%m%d%H%M' 2>/dev/null || date -v-3H '+%Y%m%d%H%M')" "$E2EJSONL"
+
+E2EDSTP="$(cd "$E2EDST" && pwd -P)"
+E2ENSLUG="$(node -e 'process.stdout.write(require(process.argv[1]).slugFromCwd(process.argv[2]))' "$E2EBIN/session-lib.js" "$E2EDSTP")"
+
+e2e(){ env -u REUBICAR_MODO -u REUBICAR_LIVENESS_OK -u REUBICAR_QUIESCE_OK \
+        HOME="$E2EHOME" CLAUDE_CONFIG_DIR="$E2EHOME/.claude" CORTEX_BIN="$E2EBIN" \
+        CLAUDECODE= CLAUDE_CODE_ENTRYPOINT= "$@"; }
+E2EOUT="$E2EFIX/gen.log"
+if e2e bash "$E2ESH" --id "$E2EID" --dst-repo "$E2EDST" --master-name viejo-master \
+       --nombre-nuevo nuevo-master --src-repo "$E2ESRC" --drive "$E2EDRIVE" > "$E2EOUT" 2>&1; then
+  ok "(e2e) el script GENERA el handoff en un proceso (sin 'córrelo en la misma shell' que equivocar)"
+else
+  bad "(e2e) el script falló al generar: $(tail -3 "$E2EOUT" | tr '\n' ' ')"
+fi
+E2EH="$E2EDRIVE/handoff-$E2EID.sh"
+E2EPRE="$E2EHOME/.claude/reubicar-preludio.sh"
+[ -f "$E2EH" ] && [ -x "$E2EH" ] \
+  && ok "(e2e) el handoff quedó escrito y ejecutable" || bad "(e2e) no hay handoff ejecutable en $E2EH"
+# LA REGRESIÓN del 2026-09-10: el preludio EMBEBIDO. Sin él el handoff muere en 'DST_CWD: unbound
+# variable' — y aquel día pasó el candado de marcadores y se certificó como «handoff OK».
+if [ -f "$E2EH" ] && [ -f "$E2EPRE" ] && node -e '
+  const fs=require("fs"), nl=s=>s.replace(/\r/g,"");
+  process.exit(nl(fs.readFileSync(process.argv[1],"utf8")).indexOf(nl(fs.readFileSync(process.argv[2],"utf8")))>=0?0:1);
+' "$E2EH" "$E2EPRE"; then
+  ok "(e2e) el PRELUDIO quedó embebido TEXTUALMENTE en el handoff (regresión 2026-09-10)"
+else
+  bad "(e2e) el handoff NO trae el preludio embebido: volvería a morir en 'DST_CWD: unbound variable'"
+fi
+e2e bash "$E2ESH" verificar "$E2EH" >/dev/null 2>&1 \
+  && ok "(e2e) el subcomando 'verificar' acepta un handoff bueno" \
+  || bad "(e2e) 'verificar' RECHAZA un handoff que el propio script acaba de generar"
+# … y lo RECHAZA cuando le quitas el preludio: el candado mide CONTENIDO, no presencia de frases.
+if [ -f "$E2EH" ]; then
+  node -e 'const fs=require("fs");fs.writeFileSync(process.argv[3],fs.readFileSync(process.argv[1],"utf8").replace(fs.readFileSync(process.argv[2],"utf8"),""));' \
+    "$E2EH" "$E2EPRE" "$E2EFIX/roto.sh"
+  if bash -n "$E2EFIX/roto.sh" 2>/dev/null && ! e2e bash "$E2ESH" verificar "$E2EFIX/roto.sh" >/dev/null 2>&1; then
+    ok "(e2e) el candado RECHAZA un handoff sin preludio aunque su 'bash -n' esté impecable"
+  else
+    bad "(e2e) el candado ACEPTA un handoff sin preludio (el agujero del 2026-09-10 sigue abierto)"
+  fi
+fi
+# ── PREFLIGHT DE CAPACIDAD: un cortex INSTALADO más viejo que el skill se detecta ANTES, no a media
+#    mudanza. Medido el 2026-09-10: ~/.local/bin llevaba 3 días atrás y no tenía ni `--git-branch` ni
+#    `rewriteTranscriptStream`, las dos cosas que S4 invoca DESPUÉS del punto de no retorno.
+E2EBINVIEJO="$E2EFIX/bin-viejo"
+mkdir -p "$E2EBINVIEJO"
+cp "$E2EBIN/session-lib.js" "$E2EBIN/session-move.js" "$E2EBIN/session-export.js" "$E2EBINVIEJO/"
+# se le AMPUTA la capacidad, no se le cambia la fecha: el gate mide lo que el guion invoca
+sed -i.bak 's/--git-branch/--rama-vieja/g' "$E2EBINVIEJO/session-move.js" && rm -f "$E2EBINVIEJO/session-move.js.bak"
+E2ECAP="$E2EFIX/cap.log"
+if env -u REUBICAR_MODO HOME="$E2EHOME" CLAUDE_CONFIG_DIR="$E2EHOME/.claude" CORTEX_BIN="$E2EBINVIEJO"      bash "$E2ESH" --id "$E2EID" --dst-repo "$E2EDST" --master-name viejo-master --src-repo "$E2ESRC"      --drive "$E2EDRIVE" > "$E2ECAP" 2>&1; then
+  bad "(e2e) generó el handoff con un session-move.js SIN --git-branch (reventaría pasado el punto de no retorno)"
+else
+  grep -q 'MÁS VIEJA que este skill' "$E2ECAP"     && ok "(e2e) el preflight de CAPACIDAD aborta si el bin instalado no trae lo que el guion invoca"     || bad "(e2e) abortó, pero no por el preflight de capacidad: $(tail -2 "$E2ECAP" | tr '\n' ' ')"
+fi
+# el ID se interpola en rutas ⇒ se valida su forma, y los obligatorios no tienen default
+e2e bash "$E2ESH" --dst-repo "$E2EDST" --master-name x >/dev/null 2>&1 \
+  && bad "(e2e) el script generó sin --id" || ok "(e2e) sin --id no genera (exit != 0)"
+e2e bash "$E2ESH" --id 'mal/id' --dst-repo "$E2EDST" --master-name x >/dev/null 2>&1 \
+  && bad "(e2e) aceptó un --id con '/' (se interpola en rutas)" || ok "(e2e) rechaza un --id que no es [A-Za-z0-9._-]"
+# ── dry: los gates pasan y NADA se muta ──
+if [ -f "$E2EH" ]; then
+  E2EDRY="$E2EFIX/dry.log"
+  if e2e env REUBICAR_MODO=dry bash "$E2EH" > "$E2EDRY" 2>&1 && grep -q 'dry-run OK' "$E2EDRY"; then
+    ok "(e2e) MODO=dry corre limpio y declara el plan"
+  else
+    bad "(e2e) el dry-run falló: $(tail -2 "$E2EDRY" | tr '\n' ' ')"
+  fi
+  [ -f "$E2EJSONL" ] && ok "(e2e) el dry NO movió el transcript" || bad "(e2e) el dry mutó el transcript"
+  # ── G-QUIESCE afinado: mide lo que la mudanza PUEDE PISAR, no "cualquier sesión de Claude viva".
+  #    Antes bloqueaba por un master trabajando en OTRO repo, que no tiene forma de tocar esta mudanza:
+  #    el humano tenía que interrumpir su trabajo por un proxy. Ahora bloquea solo por los slugs de
+  #    origen/destino, y la relajación se sostiene en que masters.json y el mapa de alias van BAJO LOCK.
+  mkdir -p "$E2EHOME/.claude/projects/-slug-de-otro-repo"
+  printf '{"type":"user","cwd":"/otro"}\n' > "$E2EHOME/.claude/projects/-slug-de-otro-repo/aaaaaaaa-0000-0000-0000-0000000000aa.jsonl"
+  E2EQ="$E2EFIX/quiesce.log"
+  if e2e env REUBICAR_MODO=dry bash "$E2EH" > "$E2EQ" 2>&1 && grep -q 'OTROS slugs' "$E2EQ"; then
+    ok "(e2e) G-QUIESCE AVISA (no bloquea) por una sesión viva en un repo ajeno a la mudanza"
+  else
+    bad "(e2e) G-QUIESCE bloquea por una sesión que no puede tocar la mudanza: $(tail -2 "$E2EQ" | tr '\n' ' ')"
+  fi
+  e2e env REUBICAR_MODO=dry REUBICAR_QUIESCE_ESTRICTO=1 bash "$E2EH" >/dev/null 2>&1 \
+    && bad "(e2e) REUBICAR_QUIESCE_ESTRICTO=1 no restauró el todo-o-nada" \
+    || ok "(e2e) REUBICAR_QUIESCE_ESTRICTO=1 restaura el todo-o-nada (cero sesiones vivas)"
+  # … y en el slug DESTINO sí bloquea: ahí la colisión es real (el .jsonl del destino, el depósito T2)
+  mkdir -p "$E2EHOME/.claude/projects/$E2ENSLUG"
+  printf '{"type":"user","cwd":"/x"}\n' > "$E2EHOME/.claude/projects/$E2ENSLUG/bbbbbbbb-0000-0000-0000-0000000000bb.jsonl"
+  if e2e env REUBICAR_MODO=dry bash "$E2EH" > "$E2EQ" 2>&1; then
+    bad "(e2e) G-QUIESCE NO bloqueó con una sesión ajena viva en el slug DESTINO"
+  else
+    grep -q 'ORIGEN o de DESTINO' "$E2EQ" \
+      && ok "(e2e) G-QUIESCE BLOQUEA por una sesión ajena viva en el slug de origen/destino" \
+      || bad "(e2e) bloqueó, pero no por el slug relevante: $(tail -2 "$E2EQ" | tr '\n' ' ')"
+  fi
+  command rm -f "$E2EHOME/.claude/projects/$E2ENSLUG/bbbbbbbb-0000-0000-0000-0000000000bb.jsonl" \
+               "$E2EHOME/.claude/projects/-slug-de-otro-repo/aaaaaaaa-0000-0000-0000-0000000000aa.jsonl"
+  # ── full: los pasos DESTRUCTIVOS, con sus dos citas humanas ──
+  E2EFULL="$E2EFIX/full.log"
+  if e2e env REUBICAR_LIVENESS_OK=1 REUBICAR_QUIESCE_OK=1 bash "$E2EH" > "$E2EFULL" 2>&1 \
+     && grep -q 'Pasos DESTRUCTIVOS verificados' "$E2EFULL"; then
+    ok "(e2e) MODO=full ejecuta S3→S4→S5 y TODAS las postcondiciones aseveran en verde"
+  else
+    bad "(e2e) los pasos destructivos fallaron: $(tail -4 "$E2EFULL" | tr '\n' ' ')"
+  fi
+  [ -f "$E2EHOME/.claude/projects/$E2ENSLUG/$E2EID.jsonl" ] && [ ! -f "$E2EJSONL" ] \
+    && ok "(e2e) el transcript vive en el slug NUEVO y el viejo quedó barrido (quirúrgico)" \
+    || bad "(e2e) el transcript no quedó en el slug nuevo, o el viejo sobrevivió"
+  [ "$(jq -r --arg id "$E2EID" '.masters[]|select(.id==$id)|.name' "$E2EDRIVE/masters.json")" = nuevo-master ] \
+    && ok "(e2e) masters.json quedó con el nombre NUEVO (UPSERT por id, con lock)" \
+    || bad "(e2e) masters.json no refleja el renombre"
+  [ "$(HOME="$E2EHOME" CLAUDE_CONFIG_DIR="$E2EHOME/.claude" node -e 'const a=require(process.argv[1]).sessionAliases();process.stdout.write(a[process.argv[2]]||"")' "$E2EBIN/session-lib.js" "$E2EID")" = nuevo-master ] \
+    && ok "(e2e) el alias de la sesión quedó en el nombre NUEVO" || bad "(e2e) el alias no se actualizó"
+  # ── re-entrancia: el guion se re-corre sin romper (detecta el estado, no adivina) ──
+  e2e env REUBICAR_LIVENESS_OK=1 REUBICAR_QUIESCE_OK=1 bash "$E2EH" > "$E2EFIX/full2.log" 2>&1 \
+    && grep -q 'ya movido' "$E2EFIX/full2.log" \
+    && ok "(e2e) re-correr el full es idempotente (reanuda por ESTADO desde S4 paso 3)" \
+    || bad "(e2e) re-correr el full rompe o no detecta que ya se movió"
+  # ── s7: las invariantes siguen en pie después del QA (un resume MUTA) ──
+  e2e env REUBICAR_MODO=s7 REUBICAR_QUIESCE_OK=1 bash "$E2EH" > "$E2EFIX/s7.log" 2>&1 \
+    && grep -q 'S7 verificado' "$E2EFIX/s7.log" \
+    && ok "(e2e) MODO=s7 re-verifica las invariantes tras el QA" \
+    || bad "(e2e) el s7 falló: $(tail -2 "$E2EFIX/s7.log" | tr '\n' ' ')"
+  # ── las citas humanas son GATES REALES, no adorno ──
+  e2e bash "$E2EH" >/dev/null 2>&1 \
+    && bad "(e2e) el full corrió SIN las citas humanas de G-QUIESCE/G-LIVENESS" \
+    || ok "(e2e) sin las citas humanas el full se BLOQUEA (los gates no son decorativos)"
+fi
+# la prueba no debe haber tocado el ecosistema REAL de quien la corre
+if [ -f "$HOME/.claude/sesiones-alias.json" ] && grep -q "$E2EID" "$HOME/.claude/sesiones-alias.json" 2>/dev/null; then
+  bad "(e2e) ¡la prueba escribió el alias en el ~/.claude REAL! (HOME/CLAUDE_CONFIG_DIR no se respetaron)"
+else
+  ok "(e2e) el ~/.claude real quedó intacto (todo ocurrió en el \$HOME falso)"
+fi
+rm -rf "$E2EFIX"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
