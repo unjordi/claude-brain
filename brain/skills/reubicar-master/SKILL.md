@@ -943,13 +943,23 @@ resuelve explícitamente **quién borra el `.jsonl` de la máquina de ORIGEN** �
    preludio lo hace cumplir.
 1. **`<id>` vigente** de cada máquina (duplicados en `masters.json`; cruce registro∩disco en `G-ID`).
 2. **Frontera T1↔T3** — el skill propone el corte del §1; el humano confirma qué memorias son del-master
-   (viajan) vs de-la-plantilla (se quedan). NO baja alcance: mueve TODO lo del master. **Comando de
-   descubrimiento** (el inverso del grep de S0: lo que NO huele a plantilla, y lo que el origen tocó
-   recientemente):
+   (viajan) vs de-la-plantilla (se quedan). NO baja alcance: mueve TODO lo del master. **La evidencia la
+   pone el script**, que imprime por cada memoria del origen su propia `description`, si ya está en el
+   destino, si está versionada o gitignored, y cuándo se tocó por última vez:
    ```bash
-   grep -rilEv 'plantilladotnet|\.NET|blazor|dapper|EF Core|webapi|migracion-ef' "$SRC/memory"/*.md | sort
-   git -C "$SRC_REPO" log --format= --name-only -- .claude/memory | sort -u | head -40
+   reubicar-master.sh clasificar --src-repo "$SRC_REPO" --dst-repo "$DST_REPO"
    ```
+   **No propone el corte a propósito:** una columna "veredicto" invita a aceptarla sin leer, y el corte es
+   TUYO. Lo que sí hace es cerrar el modo de falla real — Claude inventando la frontera y siguiendo como
+   si el humano la hubiera dado.
+   > **Lo que había aquí antes y por qué se fue (medido 2026-09-10, mudanza real).** Un
+   > `grep -rilEv 'plantilladotnet|.NET|blazor|dapper|EF Core|webapi|migracion-ef'` sobre las memorias del
+   > origen, rotulado "comando de descubrimiento". Devolvió **44 de 43** archivos —incluido el propio
+   > `MEMORY.md`— porque *"no menciona blazor"* no es una señal de PROPIEDAD: casi ninguna memoria menciona
+   > el stack, ni las de otro proyecto ni las de trato personal. **Un descubrimiento que no descarta nada no
+   > descubre nada**, y en la corrida real empujó a inventar el corte de memoria. Era maquinaria viviendo en
+   > markdown y ningún test la tocaba: exactamente la clase que la regla de
+   > [[auditar-coherencia-cerebro]] («maquinaria en markdown = hallazgo de arquitectura») manda reportar.
 3. **Escape-hatch T3** (§1.1): ¿el master conserva acceso vivo a los skills .NET vía overlay gitignored?
    Default NO.
 4. **Set de reconstitución (S0)** — qué memorias del slug global "sí iban" al origen.

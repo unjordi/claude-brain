@@ -5491,6 +5491,15 @@ esac
 
 # ── r2-5: el PRELUDIO se publica con rename. Es un archivo COMPARTIDO entre corridas: dos mudanzas
 #          casi simultáneas en la misma máquina lo sobre-escribían a la vez, sin lock.
+# ── anti-regresión: el "descubrimiento" de §7 #2 NO vuelve a ser un grep invertido de palabras de stack.
+#    Devolvía 44 de 43 memorias (medido) y empujaba a inventar el corte que decide el humano.
+grep -qF 'grep -rilEv' "$R2SK" \
+  && bad "r2-6: §7 #2 volvió al grep invertido de palabras de stack (no descarta nada: 44 de 43)" \
+  || ok "r2-6: §7 #2 no usa el grep invertido de stack como descubrimiento"
+{ grep -qF 'clasificar --src-repo' "$R2SK" && grep -qF '= clasificar ]' "$R2SH"; } \
+  && ok "r2-6: §7 #2 apunta al subcomando 'clasificar' y el script lo implementa" \
+  || bad "r2-6: el skill pide 'clasificar' pero el script no lo trae (o al revés)"
+
 { grep -qF 'PRELUDIO_TMP="$PRELUDIO.tmp.$$"' "$R2SH" && grep -qF 'mv -f "$PRELUDIO_TMP" "$PRELUDIO"' "$R2SH"; } \
   && ok "r2-5 preludio: se escribe a un temporal y se publica con mv (rename atómico), no con cat > directo" \
   || bad "r2-5 preludio: se escribe directo al archivo compartido (dos corridas concurrentes se pisan)"
@@ -5623,6 +5632,59 @@ if env -u REUBICAR_MODO HOME="$E2EHOME" CLAUDE_CONFIG_DIR="$E2EHOME/.claude" COR
 else
   grep -q 'MÁS VIEJA que este skill' "$E2ECAP"     && ok "(e2e) el preflight de CAPACIDAD aborta si el bin instalado no trae lo que el guion invoca"     || bad "(e2e) abortó, pero no por el preflight de capacidad: $(tail -2 "$E2ECAP" | tr '\n' ' ')"
 fi
+# ── `clasificar`: la EVIDENCIA de la Decisión #2. Reemplazó a un `grep -rilEv` de palabras de stack que
+#    devolvía 44 de 43 memorias (medido 2026-09-10) — un descubrimiento que no descarta nada no descubre
+#    nada, y empujó a inventar el corte. Se prueba que las CUATRO señales aparecen y que NO hay veredicto.
+E2ECLAS="$E2EFIX/clasificar.log"
+mkdir -p "$E2ESRC/.claude/memory" "$E2EDST/.claude/memory"
+cat > "$E2ESRC/.claude/memory/con-descripcion.md" <<'MEMEOF'
+---
+name: con-descripcion
+description: "una memoria que dice de que es en sus propias palabras"
+---
+cuerpo
+MEMEOF
+printf '# Solo un encabezado
+' > "$E2ESRC/.claude/memory/solo-encabezado.md"
+printf 'linea suelta sin frontmatter ni encabezado
+' > "$E2ESRC/.claude/memory/sin-nada.md"
+printf 'secreto de identidad
+' > "$E2ESRC/.claude/memory/identidad.local.md"
+printf 'ya migrada
+' > "$E2ESRC/.claude/memory/ya-en-destino.md"
+printf 'ya migrada
+' > "$E2EDST/.claude/memory/ya-en-destino.md"
+git -C "$E2ESRC" add .claude/memory/con-descripcion.md >/dev/null 2>&1
+git -C "$E2ESRC" -c user.email=t@t -c user.name=t commit -q -m "mem" >/dev/null 2>&1
+if e2e bash "$E2ESH" clasificar --src-repo "$E2ESRC" --dst-repo "$E2EDST" > "$E2ECLAS" 2>&1; then
+  ok "(e2e) 'clasificar' corre sin necesitar id, Drive ni preludio"
+else
+  bad "(e2e) 'clasificar' falló: $(tail -2 "$E2ECLAS" | tr '\n' ' ')"
+fi
+grep -q 'una memoria que dice de que es' "$E2ECLAS" \
+  && ok "(e2e) clasificar: extrae el 'description' del frontmatter (la memoria hablando de sí misma)" \
+  || bad "(e2e) clasificar: no extrajo el description del frontmatter"
+grep -q 'Solo un encabezado' "$E2ECLAS" \
+  && ok "(e2e) clasificar: sin frontmatter cae al encabezado" || bad "(e2e) clasificar: no cayó al encabezado"
+grep -q 'linea suelta sin frontmatter' "$E2ECLAS" \
+  && ok "(e2e) clasificar: sin description NI encabezado muestra la primera línea útil (no un 'ábrela')" \
+  || bad "(e2e) clasificar: no mostró la primera línea útil"
+grep -qE '^identidad\.local\.md.*SENSIBLE' "$E2ECLAS" \
+  && ok "(e2e) clasificar: marca el sufijo .local como canal SENSIBLE (T2 por convención)" \
+  || bad "(e2e) clasificar: no marcó el .local como sensible"
+grep -qE '^ya-en-destino\.md +[0-9]+ +YA' "$E2ECLAS" \
+  && ok "(e2e) clasificar: distingue lo que YA está en el destino (§1.0.1: nada que mover)" \
+  || bad "(e2e) clasificar: no marcó la que ya está en el destino"
+{ grep -qE '^con-descripcion\.md.* git ' "$E2ECLAS" && grep -qE '^identidad\.local\.md.* ign ' "$E2ECLAS"; } \
+  && ok "(e2e) clasificar: distingue versionada (git) de gitignored (ign) — el aviso del duplicado que drifta" \
+  || bad "(e2e) clasificar: no distingue el canal git/ign en el origen"
+grep -qiE 'ninguna columna decide por sí sola|es la Decisión #2' "$E2ECLAS" \
+  && ok "(e2e) clasificar: NO emite veredicto — declara que el corte es del humano" \
+  || bad "(e2e) clasificar: perdió la leyenda que le devuelve la decisión al humano"
+grep -qiE 'veredicto:|T1$|=> T1|⇒ T1' "$E2ECLAS" \
+  && bad "(e2e) clasificar: emitió un veredicto por memoria (invita a aceptar el corte sin leerlo)" \
+  || ok "(e2e) clasificar: cero columna de veredicto por memoria"
+command rm -f "$E2ESRC/.claude/memory"/*.md "$E2EDST/.claude/memory/ya-en-destino.md"
 # el ID se interpola en rutas ⇒ se valida su forma, y los obligatorios no tienen default
 e2e bash "$E2ESH" --dst-repo "$E2EDST" --master-name x >/dev/null 2>&1 \
   && bad "(e2e) el script generó sin --id" || ok "(e2e) sin --id no genera (exit != 0)"
