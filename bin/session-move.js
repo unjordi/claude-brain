@@ -9,8 +9,14 @@
  *     dejaría este solo en 644).
  *   - Las estadísticas de tokens se re-atribuyen SOLAS: el fetch agrega por directorio de slug, así
  *     que al cambiar de dir el consumo cuenta para el proyecto destino en el próximo tick (no se toca
- *     nada aparte). No hay "memorias por-sesión" en este Claude Code (la memoria es por-repo), así que
- *     no hay más artefactos que mover.
+ *     nada aparte).
+ *   - El SIDECAR de la sesión (`<sessionId>/` junto al `.jsonl`: `subagents/*.jsonl` de cada sub-agente
+ *     lanzado por Task, `tool-results/`, `workflows/`) SÍ viaja, con la MISMA disciplina que el
+ *     transcript: se copia a un temporal, se verifica por CARDINALIDAD (mismo nº de archivos a ambos
+ *     lados) y solo entonces se publica (rename) y se borra el origen. El harness lo deriva de
+ *     (slug ACTUAL, sessionId) — no vive dentro del `.jsonl` — así que dejarlo atrás deja al master
+ *     despertando con su fan-out huérfano (medido: hasta 163 transcripts de subagente, ~109 MB, en un
+ *     master real). Si no existe, es un no-op VERIFICADO (se reporta `sidecar.moved:false`), no silencio.
  *   - El `cwd` interno de cada línea del transcript se REESCRIBE al cwd destino (salvo --keep-cwd), para
  *     que `claude --resume <id>` reanude coherente DENTRO del proyecto destino y no en la ruta vieja.
  *   - El `gitBranch` HISTÓRICO no se toca (falsificaría el registro). Con --git-branch <rama> se
@@ -142,7 +148,13 @@ async function main() {
       + '. El origen y el respaldo (' + backup + ') están intactos.');
   }
 
-  // 3) VERIFICAR el temporal contra el origen antes de destruir nada: mismo nº de renglones no vacíos.
+  // 3) VERIFICAR el temporal contra el origen antes de destruir nada. DOS invariantes, no uno:
+  //    (a) mismo nº de renglones no vacíos — detecta un truncado a media escritura.
+  //    (b) mismo nº de renglones con un `cwd` de primer nivel — detecta un CONTENIDO corrompido que (a)
+  //        no ve: (a) es cardinalidad (cuenta renglones), (b) es una propiedad de CONTENIDO de cada uno
+  //        (transformLine nunca debe quitar el campo `cwd`, solo reescribir su valor). Un candado que
+  //        solo mide (a) pasa en verde ante cualquier corrupción futura de `transformLine` que preserve
+  //        el conteo de líneas (ver H5).
   // Un `.part` truncado por un corte a media escritura se queda aquí y jamás llega a ser el destino.
   let check;
   try { check = lib.scanTranscriptFile(partFile); } catch (e) { check = null; }
@@ -151,12 +163,57 @@ async function main() {
     fail('la copia del destino no cuadra con el origen (' + r.lines + ' renglones leídos vs '
       + (check ? check.lines : '?') + ' escritos); no muevo nada. Origen y respaldo (' + backup + ') intactos.');
   }
+  if (check.cwdLines !== r.cwdLines) {
+    try { fs.unlinkSync(partFile); } catch (_) {}
+    fail('el nº de renglones con "cwd" no cuadra (origen: ' + r.cwdLines + ', destino: ' + check.cwdLines
+      + ') aunque el nº total de renglones sí (' + r.lines + '); la reescritura pudo haber corrompido'
+      + ' contenido sin cambiar el conteo. No muevo nada. Origen y respaldo (' + backup + ') intactos.');
+  }
   fs.chmodSync(partFile, srcStat.mode & 0o7777);   // el modo del ORIGEN, no el del umask
 
   // 4) publicar (rename = atómico dentro del mismo dir) y borrar el origen. Hasta este rename, un corte
   // deja el origen vivo y el destino inexistente; después, el destino COMPLETO y el origen vivo.
   fs.renameSync(partFile, toFile);
   fs.unlinkSync(found.file);
+
+  // 5) mover el SIDECAR (<id>/: subagents/, tool-results/, workflows/), si existe. Mismo dir que el
+  // slug (no dentro de `toDir` como si fuera un archivo suelto): copia a un `.part` del MISMO dir,
+  // verifica por CARDINALIDAD (nº de archivos) y SOLO ENTONCES publica (rename) y borra el origen. Un
+  // corte a media copia deja el `.part` (housekeeping, no consumido por nadie) y el sidecar de origen
+  // intacto — el transcript YA se movió (paso 4), así que esto NUNCA revierte el move: se reporta el
+  // fallo y el operador termina el sidecar a mano.
+  const sideSrc = path.join(path.dirname(found.file), id);
+  const sideDst = path.join(toDir, id);
+  let sidecar = { moved: false, files: 0 };
+  if (fs.existsSync(sideSrc)) {
+    if (!fs.statSync(sideSrc).isDirectory()) {
+      fail('el sidecar ' + sideSrc + ' existe pero NO es un directorio (algo más lo creó); no lo toco.'
+        + ' El transcript YA se movió a ' + toFile + '. Resuelve el sidecar a mano.');
+    }
+    if (fs.existsSync(sideDst)) {
+      fail('el destino ya tiene un sidecar de sesión (' + sideDst + '); no lo piso. El transcript YA se'
+        + ' movió a ' + toFile + '. Reconcilia ' + sideSrc + ' → ' + sideDst + ' a mano.');
+    }
+    const sidePart = sideDst + '.part.' + process.pid;
+    try { fs.rmSync(sidePart, { recursive: true, force: true }); } catch (_) {}
+    const nSrc = lib.listFilesRecursive(sideSrc).length;
+    let nCopiado = 0;
+    try { nCopiado = lib.copyDirRecursive(sideSrc, sidePart); } catch (e) {
+      try { fs.rmSync(sidePart, { recursive: true, force: true }); } catch (_) {}
+      fail('falló al copiar el sidecar (' + sideSrc + ' → ' + sidePart + '): ' + String(e.message || e)
+        + '. El transcript YA se movió a ' + toFile + '; el sidecar de origen sigue intacto en ' + sideSrc + '.');
+    }
+    const nPart = lib.listFilesRecursive(sidePart).length;
+    if (nCopiado !== nSrc || nPart !== nSrc) {
+      try { fs.rmSync(sidePart, { recursive: true, force: true }); } catch (_) {}
+      fail('el sidecar tiene ' + nSrc + ' archivos en el origen y la copia dio ' + nPart + '; no publico'
+        + ' ni borro nada. El transcript YA se movió a ' + toFile + '; el sidecar de origen sigue intacto'
+        + ' en ' + sideSrc + '.');
+    }
+    fs.renameSync(sidePart, sideDst);                 // publicación atómica (mismo dir que toDir)
+    fs.rmSync(sideSrc, { recursive: true, force: true }); // el origen SOLO se borra tras publicar
+    sidecar = { moved: true, files: nSrc, from: sideSrc, to: sideDst };
+  }
 
   process.stdout.write(JSON.stringify({
     ok: true, id, fromSlug, toSlug, toCwd: destCwd, toFile, backup,
@@ -166,6 +223,7 @@ async function main() {
     mode: '0' + (srcStat.mode & 0o7777).toString(8),
     truncatedLastLine: r.truncated,
     collisions: (found.collisions || []).map(c => c.slug),
+    sidecar,
   }) + '\n');
 }
 
