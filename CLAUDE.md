@@ -19,14 +19,15 @@ Lo que necesitas saber para trabajar aquí:
 │   ├─ 🖋️ LA FIRMA — capacidades de operar el cerebro (cada una → su artefacto real)
 │   │     1. Instalar el brain en global (bootstrap) ...... → install.sh · bootstrap.sh · brain/install-brain.sh
 │   │     2. Sincronizar el cerebro a un repo/clon ........ → brain/sincronizar-cerebro.sh (diff-aware, --prune-orphans)
-│   │     3. Sembrar la mini-develop de un dev ............ → brain/sembrar-mini-develop.sh
-│   │     4. Respaldar/exportar las sesiones master ....... → hook exportar-sesion-master + bin/claude-session
-│   │     5. Agregar/editar un hook del cerebro .......... → agregar-hook-cerebro
-│   │     6. Trabajar el widget de cuota (KDE/mac/win) ... → cortex-widget · cambiar-icono · publicar-widget
-│   │     7. Auditar + consolidar un cerebro ............. → consolidar-cerebro + (auditar-suficiencia-operativa
+│   │     3. Crear un repo GitLab nuevo + proteger ramas .. → brain/nuevo-repo.sh · brain/proteger-ramas.sh
+│   │     4. Sembrar la mini-develop de un dev ............ → brain/sembrar-mini-develop.sh
+│   │     5. Respaldar/exportar las sesiones master ....... → hook exportar-sesion-master + bin/claude-session
+│   │     6. Agregar/editar un hook del cerebro .......... → agregar-hook-cerebro
+│   │     7. Trabajar el widget de cuota (KDE/mac/win) ... → cortex-widget · cambiar-icono · publicar-widget
+│   │     8. Auditar + consolidar un cerebro ............. → consolidar-cerebro + (auditar-suficiencia-operativa
 │   │                                                        + auditar-coherencia-cerebro) + auditar-proceso-algoritmo
-│   │     8. Verificar la paridad del árbol (anti-drift) . → docs/flowcharts/verificar-arbol-sync.sh · brain/test-brain.sh
-│   │     9. El ÁRBOL — LO QUE EL BRAIN INSTALA ......... → MEMORY.md (🔒 hooks · 🔔 automáticos · 📜 normas · 💡 skills)
+│   │     9. Verificar la paridad del árbol (anti-drift) . → docs/flowcharts/verificar-arbol-sync.sh · brain/test-brain.sh
+│   │    10. El ÁRBOL — LO QUE EL BRAIN INSTALA ......... → MEMORY.md (🔒 hooks · 🔔 automáticos · 📜 normas · 💡 skills)
 │   │    Meta: un cerebro que se AUTO-CURA y viaja IDÉNTICO a cada clon/máquina.
 │   │
 │   └─ 🛡️ Reglas duras (detalle completo ↓ en la sección ##)
