@@ -23,6 +23,29 @@ metadata:
 
 ## 🔜 Pendientes (backlog vivo)
 
+- **[MEDIO] F3 del plan de continuidad unificada (`scratchpad/PLAN-checkpoint-mudanza-unificados.md`,
+  2026-09-11) — el INVENTARIO ÚNICO de artefactos de continuidad y `G-CONTINUIDAD`.** Planteado y NO
+  construido. Qué es: un CATÁLOGO (dato, no código) de cada artefacto con su LLAVE (`sessionId` / `slug` /
+  `cwd` / `repo` / `repo×stream`) y su disposición OBLIGATORIA — `VIAJA` · `SOBREVIVE-SOLO` ·
+  `VOLATIL-LOCAL` · `PERDIDA-DECLARADA`, **sin quinta categoría** —, del que DERIVEN: la lista §1.0.2 del
+  skill `reubicar-master` (hoy escrita a mano: no puede seguir siendo correcta más de una versión del
+  harness, que inventa clases nuevas — `workflows/` es reciente), el gate de la mudanza (`G-SIDECAR` pasa
+  a ser UNA FILA del genérico) y la cobertura de `.gitignore`. Invariante clave: un artefacto que el
+  harness invente y nadie clasifique sale **HUÉRFANO** y BLOQUEA, en vez de descubrirse el día que falta.
+  Por qué importa: es la raíz común de los tres agujeros ya pagados uno por uno — el sidecar (#402), el
+  hilo (#402 + esta tanda) y el andamio (nació en #403 y #402 no sabía que existía).
+- **[BAJO] F4 del mismo plan — UNA pasada y UN hook de `PreCompact`.** Planteado y NO construido. Hoy el
+  bucle de streaming está escrito TRES veces (`scanTranscriptFile`, `rewriteTranscriptStream` y el
+  `extraer()` del extractor) y un solo evento `PreCompact` dispara CUATRO recorridos completos del mismo
+  transcript (el `grep` del customTitle + el export gzip + `metaBarata` + `extraer`), con dos hooks que
+  toman locks distintos sobre el mismo archivo. El arreglo: colectores enchufables sobre `session-lib.js`
+  (una pasada, N acumuladores) + un orquestador único del evento. Riesgo BAJO pero NO nulo: toca la lib
+  que el camino destructivo de la mudanza usa DESPUÉS del punto de no retorno ⇒ entra con el preflight de
+  CAPACIDAD del preludio apuntando a los símbolos nuevos, o no entra.
+- **[BAJO] F5 del mismo plan — el JUICIO externo (`claude -p --resume <sid> --fork-session`).** NO
+  construido y NO autorizado: cuesta dinero y pasa por `delegacion-gate`. Va al final por diseño; con F1
+  ya cerrado, el andamio mecánico ya tiene lector, que era el prerrequisito real.
+
 - **[MEDIO, PLAUSIBLE] M-7 del dictamen de barrido de ramas (`scratchpad/AUDITOR-barrido-ramas.md`,
   2026-09-11) — caps silenciosos en la consulta al foro de `_bz_intentar_gh`/`_bz_intentar_glab`
   (`ramas-zombie.sh`): `gh … --limit 300` y `glab … --per-page 300`. Dos problemas sin cerrar: (1) un
