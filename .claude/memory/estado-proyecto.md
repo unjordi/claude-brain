@@ -295,3 +295,40 @@ metadata:
 - [ ] powerscripts: quitar guards por-repo (es PERSONAL → hereda del global).
 - [ ] fluxcore (registros_bats_y_buses): sincronizar brain por el flujo + mini + marca.
 - [ ] REDISEÑO del auto-sync (aviso-drift) — el mayor hueco del cerebro (ver diseno-rediseno-auto-sync-46).
+
+### Andamio del checkpoint — 6 hallazgos de QA sobre el render real (2026-09-11)
+
+Medidos corriendo `bin/checkpoint-mecanico.js` sobre el transcript VIVO de la sesión que acababa de
+integrar #407 (39 986 líneas, 202 MB, 14 compactaciones). Los tres defectos que motivaron #407 quedaron
+cerrados y verificados: ventana viva (707 de 39 986 líneas), citas verbatim en vez del conteo, y el
+colector ya no es ciego a las escrituras por Bash (68 por Write/Edit vs 354 por heredoc en la ventana
+completa). Lo que sigue apareció AL MEDIR el resultado, y sale del mismo molde: el colector mide la forma
+que espera, no la que se usa.
+
+- **A-1 · ALTO — `RESUELTO HOY` salió VACÍO habiendo commits.** El detector es
+  `/git commit[^\n]*?-m\s+(["'])…/`: solo ve `-m "…"`. Todo commit hecho con `-F -` y heredoc —la forma
+  que OBLIGA la norma de resumen en prosa curada— es invisible. En el tramo medido hubo 3 commits locales
+  y 4 merges squash, y la sección reportó 0. Es exactamente la ceguera que #407 corrigió para las
+  escrituras, sin aplicarla a los commits, y pega en la sección ANTI-FANTASMA: su razón de ser es que una
+  decisión ya tomada no resucite como pendiente tras compactar.
+- **A-2 · ALTO — 3 de 7 "mensajes del usuario" son plomería del harness.** Se colaron el
+  `<local-command-caveat>`, el stdout del `/compact` con códigos ANSI y un `<task-notification>` entero
+  (~8 líneas de las 7 entradas). El último es el grave: una notificación de agente es explícitamente NO
+  input del usuario, y el andamio la presenta bajo el rótulo "VERBATIM, para citar con `[user: …]`" —
+  induce justo la atribución falsa que la norma de procedencia existe para impedir, y ahora con evidencia
+  mecánica que la respalda. Filtrar por prefijos conocidos (`<local-command-*`, `<task-notification>`,
+  `<command-name>`, `## Context Usage`) y por el `/compact` pelón.
+- **A-3 · MEDIO — `--self` es inusable desde el hilo principal.** Su candado anti-subagente exige
+  `CLAUDE_CODE_CHILD_SESSION !== '1'`, pero esa variable viene en `1` TAMBIÉN en el Bash del hilo
+  principal (medido en esta máquina, CLI 2.1.x). El candado es correcto en intención y falla cerrado,
+  pero hoy bloquea el 100% de los usos legítimos. Hace falta otra señal para distinguir padre de hijo.
+- **A-4 · MEDIO — "Comandos más frecuentes" no aporta nada al rehidratar.** 8 de las 10 entradas eran
+  `cd`, `ls` y `grep`. Agrupa por los dos primeros tokens, así que lo que gana es la navegación, no el
+  trabajo. Debería filtrar los comandos de navegación/inspección, o agrupar por verbo significativo.
+- **A-5 · BAJO — las escrituras las dominan los temporales.** 7 de 10 eran `/tmp/suite-*.log` y archivos
+  de paso. Conviene despriorizar `/tmp` y el scratchpad frente a lo que vive en un repo.
+- **A-6 · BAJO — rutas guardadas sin expandir.** Apareció `$RHREC3/.claude/memory/…` literal: al
+  rehidratar no lleva a ningún lado. Descartar (o marcar) las rutas con `$` sin resolver.
+
+Los tres primeros cambian lo que el andamio AFIRMA (omite commits, atribuye al usuario lo que no dijo,
+no corre); los tres últimos son ruido que le baja la densidad.
