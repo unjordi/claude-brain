@@ -23,6 +23,29 @@ metadata:
 
 ## 🔜 Pendientes (backlog vivo)
 
+- **[MEDIO, PLAUSIBLE] M-7 del dictamen de barrido de ramas (`scratchpad/AUDITOR-barrido-ramas.md`,
+  2026-09-11) — caps silenciosos en la consulta al foro de `_bz_intentar_gh`/`_bz_intentar_glab`
+  (`ramas-zombie.sh`): `gh … --limit 300` y `glab … --per-page 300`. Dos problemas sin cerrar: (1) un
+  repo con >300 PRs/MRs mergeados deja los viejos fuera del cache y (d) "no encuentra" el PR/MR de una
+  rama vieja → la conserva sin decir que TRUNCÓ la consulta; (2) el `per_page` de la API de GitLab topa
+  en 100, así que el 300 pedido no da lo que promete. El auditor NO lo pudo cerrar sin pegarle a un foro
+  real (por eso quedó PLAUSIBLE, no CONFIRMADO) — exige rediseño (paginar hasta encontrar la rama, o
+  consultar `gh pr list --head <rama>`/`glab mr list` filtrado POR rama en vez de bajar un bulto) y
+  verificación contra un repo con volumen real de PRs/MRs cerrados. Dejado explícitamente FUERA de esta
+  ronda (fix/barrido-ramas-criticos) — no se improvisó.
+- **[BAJO, hallazgo colateral, sin tocar] Tests con `ok`/`bad` dentro de un subshell `( … )` no cuentan
+  para el veredicto de la suite.** Descubierto al verificar "falla sin el fix" de los tests nuevos de
+  `fix/barrido-ramas-criticos`: `test-brain.sh` corre con `set -u` y cuenta PASS/FAIL en variables
+  GLOBALES (`$PASS`/`$FAIL`); los bloques que hacen `( . "$HOOKS/ramas-zombie.sh"; … ok …; … bad … )`
+  imprimen la línea `PASS:`/`FAIL:` (stdout es compartido) pero el incremento de `$PASS`/`$FAIL` ocurre
+  DENTRO del subshell y se pierde al salir — esas aserciones son decorativas, nunca pueden hacer fallar
+  la suite. Confirmado en **`b3d`** (línea ~1969, dos bloques) y **`b3e`** (línea ~1984). El propio
+  comentario de `b3g` (línea ~2043) ya documenta el antídoto correcto ("se sourcea en ESTE scope, no en
+  subshell, para que ok/bad cuenten"), así que el patrón correcto YA existe en el archivo — solo falta
+  aplicarlo a b3d/b3e. Fuera de alcance de esta ronda (no es de los 19 hallazgos del dictamen de ramas);
+  encontrado por accidente al blindar los tests nuevos con esta MISMA verificación. Fix: quitar los
+  paréntesis en esos dos bloques (igual que se hizo para los tests nuevos b3h/b3j/b3o de esta ronda).
+
 - **Broker de terminal trasladado a cortex (#26i, primera pieza) — CÓDIGO LISTO Y AUDITADO EN RAMA;
   FALTA LA MIGRACIÓN EN VIVO (unjordi presente).** Rama `feat/term-broker`. Quedó en el repo:
   `src/term-broker/` (5 `.ts` vendorizados de axon **`341fb53`** + `SHA256SUMS` + 2 probes),

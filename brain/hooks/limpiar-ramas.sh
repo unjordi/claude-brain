@@ -6,9 +6,15 @@
 # NO borra ramas locales → nadie las barría y se acumulaban (un caso real: 60+ en un repo).
 #   uso: limpiar-ramas.sh [--dry-run] [--no-fetch]   (desde cualquier lugar del repo)
 #
-# SEGURO: reusa la MISMA lógica "zombie" que limpiar-worktrees (lib ramas-zombie.sh) — conserva ante
-# CUALQUIER duda (rama nunca pusheada, con commits únicos, o squash multi-commit no-emparejable). NUNCA
-# toca la rama actual, la base de integración, develop/main, las mini-develop (Develop*) ni keep/*.
+# SEGURO: reusa la MISMA lógica "zombie" (bz_es_zombie) y "protegida" (bz_protegida) que limpiar-worktrees
+# — lib ramas-zombie.sh — conserva ante CUALQUIER duda (rama nunca pusheada, con commits únicos, o squash
+# multi-commit no-emparejable ni confirmable por el host). NUNCA toca la rama actual, la base de
+# integración, develop/main, las mini-develop (Develop*) ni keep/*.
+#
+# A-1 (auditoría 2026-09-11, "no silent caps"): el resumen antes solo contaba borradas/conservadas y las
+# protegidas desaparecían sin dejar rastro (`continue` antes de contar) — invitaba a leer N+M como el
+# universo cuando en realidad podía haber más ramas protegidas fuera de la vista. Ahora se examinan TODAS
+# y las omitidas se cuentan y NOMBRAN con su motivo en el resumen final.
 set -u
 DRY=0; FETCH=1
 for a in "$@"; do
@@ -27,20 +33,13 @@ ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "limpiar-ramas: no e
 [ "$FETCH" = 1 ] && git -C "$ROOT" fetch --all --prune -q 2>/dev/null
 
 base="$(bz_resolver_base "$ROOT")"
+bz_aviso="$(bz_aviso_base "$ROOT")"
+[ -n "$bz_aviso" ] && echo "  (aviso: $bz_aviso — Base: $base)"   # M-2
 actual="$(git -C "$ROOT" symbolic-ref --short -q HEAD 2>/dev/null || true)"
 # Ramas checked-out en CUALQUIER worktree: git rehúsa `branch -D` sobre ellas (protección propia de git).
 # Se protegen explícitamente para que el reporte no diga "borraría" algo que nunca se borraría — sobre todo
 # ahora que la señal (d) 'PR mergeado' caza ramas integradas que siguen checked-out en el worktree del dev.
 wt_ramas="$(git -C "$ROOT" worktree list --porcelain 2>/dev/null | sed -n 's#^branch refs/heads/##p')"
-
-# Ramas NUNCA candidatas a borrar, pase lo que pase (bases, checked-out en un worktree, y guardadas a propósito).
-protegida() {  # $1 = rama
-  case "$1" in
-    "$base"|"$actual"|develop|main|Develop*|keep/*) return 0 ;;
-  esac
-  [ -n "$wt_ramas" ] && printf '%s\n' "$wt_ramas" | grep -qxF "$1" && return 0
-  return 1
-}
 
 # Remoto configurado (upstream) de una rama; vacío si no tiene → cae a 'origin'. Se consulta ANTES del
 # `branch -D` (tras borrar la rama local su @{upstream} ya no resuelve).
@@ -50,22 +49,37 @@ rama_remoto() {  # $1 = rama → nombre del remoto
   printf 'origin'
 }
 
+# _join SEP CUR NUEVO → concatena sin arrays (bash 3.2 + `set -u` no toleran "${arr[@]}" vacío en algunas
+# versiones) — usado para las listas de nombres del resumen final.
+_join() { [ -z "$2" ] && printf '%s' "$3" || printf '%s%s%s' "$2" "$1" "$3"; }
+
 # 1a — LIMPIEZA COMPLETA: tras borrar el zombie LOCAL, si su rama REMOTA AÚN cuelga, bórrala también. Un
-# MR squash-mergeado SIN --delete-branch/--remove-source-branch deja la remota huérfana; las señales (a)/(c)/(d)
-# de bz_es_zombie declaran zombie CON la remota todavía presente → aquí se cierra ese hueco. SOLO se ejecuta
-# dentro de la rama zombie (ya probada integrada, NO trabajo-vivo): una rama CONSERVADA jamás llega aquí, así
-# que nunca se toca la remota de trabajo sin integrar. FAIL-OPEN total: sin red/permiso → ls-remote o push
-# fallan → skip + log, NUNCA aborta el barrido.
-barrer_remota() {  # $1 = rama zombie   $2 = nombre del remoto (capturado ANTES del branch -D)
-  local br="$1" remoto="$2"
+# MR squash-mergeado SIN --delete-branch/--remove-source-branch deja la remota huérfana; las señales
+# a/e/d/c de bz_es_zombie declaran zombie CON la remota todavía presente → aquí se cierra ese hueco.
+#
+# C-1 (auditoría 2026-09-11, PÉRDIDA DE DATOS): antes se decidía con `ls-remote --exit-code` — que solo
+# pregunta si la remota EXISTE, no QUÉ TIENE. Si la remota va adelante del tip local (un colega siguió
+# trabajando en esa rama tras el squash, o simplemente estás atrasado), el push --delete borraba SU
+# trabajo. Ahora se exige CONTAINMENT: el SHA remoto debe ser ANCESTRO del tip LOCAL (capturado ANTES del
+# `branch -D`, cuando la rama local todavía resuelve). Si no se puede confirmar (objeto ausente, sin red,
+# remota adelantada) → NO se borra, y se dice por qué.
+barrer_remota() {  # $1 = rama zombie   $2 = nombre del remoto   $3 = SHA del tip LOCAL (antes de -D)
+  local br="$1" remoto="$2" local_sha="$3" rout rc rsha
   [ -n "$remoto" ] || return 0
-  if [ "$DRY" = 1 ]; then
-    git -C "$ROOT" ls-remote --exit-code --heads "$remoto" "$br" >/dev/null 2>&1 \
-      && echo "  [dry] remota aún cuelga → borraría: $remoto/$br"
+  rout="$(git -C "$ROOT" ls-remote --heads "$remoto" "$br" 2>/dev/null)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "  (remota $remoto/$br: no se pudo consultar — ¿sin red/permiso? NO se borra)"
     return 0
   fi
-  # ls-remote --exit-code: 0 si la remota EXISTE (hay que borrarla); ≠0 si ya no está o no hay red → skip.
-  git -C "$ROOT" ls-remote --exit-code --heads "$remoto" "$br" >/dev/null 2>&1 || return 0
+  rsha="$(printf '%s' "$rout" | awk '{print $1; exit}')"
+  [ -n "$rsha" ] || return 0   # la remota ya no existe → nada que hacer
+  if [ -z "$local_sha" ] \
+     || ! git -C "$ROOT" cat-file -e "${rsha}^{commit}" 2>/dev/null \
+     || ! git -C "$ROOT" merge-base --is-ancestor "$rsha" "$local_sha" 2>/dev/null; then
+    echo "  (remota $remoto/$br va ADELANTE del tip local o no se pudo verificar → NO se borra)"
+    return 0
+  fi
+  if [ "$DRY" = 1 ]; then echo "  [dry] remota contenida en el tip local → borraría: $remoto/$br"; return 0; fi
   if git -C "$ROOT" push "$remoto" --delete "$br" >/dev/null 2>&1; then
     echo "  remota borrada: $remoto/$br"
   else
@@ -73,22 +87,47 @@ barrer_remota() {  # $1 = rama zombie   $2 = nombre del remoto (capturado ANTES 
   fi
 }
 
-borradas=0; conservadas=0
+borradas=0; conservadas=0; total=0
+omit_ba=0; omit_ba_n=""; omit_cv=0; omit_cv_n=""; omit_wt=0; omit_wt_n=""
 while IFS= read -r br; do
   [ -z "$br" ] && continue
-  protegida "$br" && continue
+  total=$((total+1))
+  if bz_protegida "$br" "$base" "$actual" "$wt_ramas"; then
+    case "$BZ_PROT_RAZON" in
+      base_actual) omit_ba=$((omit_ba+1)); omit_ba_n="$(_join ', ' "$omit_ba_n" "$br")" ;;
+      convencion)  omit_cv=$((omit_cv+1)); omit_cv_n="$(_join ', ' "$omit_cv_n" "$br")" ;;
+      worktree)    omit_wt=$((omit_wt+1)); omit_wt_n="$(_join ', ' "$omit_wt_n" "$br")" ;;
+    esac
+    continue
+  fi
   if bz_es_zombie "$ROOT" "$br" "$base"; then
-    remoto_pre="$(rama_remoto "$br")"   # capturar el upstream ANTES del branch -D (después ya no resuelve)
-    if [ "$DRY" = 1 ]; then echo "  [dry] integrada → borraría: $br"; borradas=$((borradas+1)); barrer_remota "$br" "$remoto_pre"
+    remoto_pre="$(rama_remoto "$br")"
+    local_sha="$(git -C "$ROOT" rev-parse "$br" 2>/dev/null || true)"
+    if [ "$DRY" = 1 ]; then
+      echo "  [dry] integrada → borraría: $br"; borradas=$((borradas+1)); barrer_remota "$br" "$remoto_pre" "$local_sha"
     else
       if git -C "$ROOT" branch -D "$br" >/dev/null 2>&1; then
         borradas=$((borradas+1)); echo "  borrada: $br"
-        barrer_remota "$br" "$remoto_pre"
+        barrer_remota "$br" "$remoto_pre" "$local_sha"
       fi
     fi
   else
-    conservadas=$((conservadas+1)); echo "  CONSERVADA (trabajo sin integrar): $br"
+    if [ "$BZ_RAZON" = indeterminado ]; then
+      conservadas=$((conservadas+1))
+      echo "  INDETERMINADA (no pude consultar el foro: gh/glab no disponible o host no reconocido — se conserva): $br"
+    else
+      conservadas=$((conservadas+1)); echo "  CONSERVADA (trabajo sin integrar): $br"
+    fi
   fi
 done < <(git -C "$ROOT" for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)
 
-echo "limpiar-ramas: $borradas integrada(s)$([ "$DRY" = 1 ] && echo ' (dry-run, no borradas)'), $conservadas con trabajo conservada(s). Base: $base."
+omit_total=$((omit_ba+omit_cv+omit_wt))
+detalle=""
+[ "$omit_ba" -gt 0 ] && detalle="$(_join '; ' "$detalle" "$omit_ba base/actual: $omit_ba_n")"
+[ "$omit_cv" -gt 0 ] && detalle="$(_join '; ' "$detalle" "$omit_cv protegida(s) por convención: $omit_cv_n")"
+[ "$omit_wt" -gt 0 ] && detalle="$(_join '; ' "$detalle" "$omit_wt retenida(s) por worktree: $omit_wt_n")"
+
+resumen="limpiar-ramas: examinadas $total de $total → $borradas integrada(s)$([ "$DRY" = 1 ] && echo ' (dry-run, no borradas)'), $conservadas con trabajo conservada(s)"
+[ "$omit_total" -gt 0 ] && resumen="$resumen, $omit_total omitida(s) ($detalle)"
+resumen="$resumen. Base: $base."
+echo "$resumen"
