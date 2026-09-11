@@ -3975,6 +3975,116 @@ node -e '
 rm -rf "$M2DIR"
 
 echo ""
+echo "== (m2c) checkpoint-mecanico.js: hallazgos de QA sobre el render real (2026-09-11) =="
+# 6 hallazgos medidos corriendo el extractor sobre el transcript VIVO de una sesión real (A-1..A-6). Cada
+# uno CONTRA LA FALLA del detector viejo, verificado con el propio código real que los disparó.
+
+# A-1: el detector viejo (`/git commit[^\n]*?-m\s+(["'])…/`) solo veía `-m "…"` — invisible para la forma
+# que la norma del equipo OBLIGA (`-F -` + heredoc, mensajes multilínea) y para `-F <archivo>`.
+node -e '
+  const {extraerCommits} = require(process.argv[1]);
+  const stdin = "git commit -q -F - <<'"'"'MSG'"'"'\nfix(x): el arreglo con prosa curada\n\ncuerpo largo\nMSG";
+  const r1 = extraerCommits(stdin);
+  if (r1.length !== 1 || r1[0] !== "fix(x): el arreglo con prosa curada") { console.error("F-STDIN: " + JSON.stringify(r1)); process.exit(1); }
+  const r2 = extraerCommits("git commit -F /tmp/msg.txt");
+  if (r2.length !== 1 || !/no recuperable/.test(r2[0]) || !r2[0].includes("/tmp/msg.txt")) { console.error("F-FILE: " + JSON.stringify(r2)); process.exit(1); }
+  if (!r2[0].includes("no se inventa")) { console.error("F-FILE sin marca honesta: " + JSON.stringify(r2)); process.exit(1); }
+  const r3 = extraerCommits("git commit -m \"chore(y): commit con -m normal\"");
+  if (r3.length !== 1 || r3[0] !== "chore(y): commit con -m normal") { console.error("DASH-M: " + JSON.stringify(r3)); process.exit(1); }
+' "$CKPT_MEC" \
+  && ok "m2c CONTRA LA FALLA (A-1): \`-F -\`+heredoc y \`-F <archivo>\` se detectan (el viejo solo veía \`-m\`); \`-m\` normal sigue andando" \
+  || bad "m2c CONTRA LA FALLA (A-1): el detector de commits no cubre -F -/-F archivo, o rompió -m"
+
+# A-1: la integración de este equipo es por squash-merge desde el foro (gh/glab), no solo git-commit; el
+# detector viejo no la veía en absoluto.
+node -e '
+  const {extraerCommits} = require(process.argv[1]);
+  const gh = "gh pr merge 405 --repo unjordi/cortex --squash --delete-branch \\\n  --subject \"fix(gitignore): el andamio (#405)\" \\\n  --body \"cuerpo largo\n multilínea\" 2>&1 | tail -3";
+  const r1 = extraerCommits(gh);
+  if (r1.length !== 1 || r1[0] !== "fix(gitignore): el andamio (#405)") { console.error("GH: " + JSON.stringify(r1)); process.exit(1); }
+  const glab = "glab mr merge 12 --squash --squash-message \"feat(x): título del squash\"";
+  const r2 = extraerCommits(glab);
+  if (r2.length !== 1 || r2[0] !== "feat(x): título del squash") { console.error("GLAB: " + JSON.stringify(r2)); process.exit(1); }
+' "$CKPT_MEC" \
+  && ok "m2c CONTRA LA FALLA (A-1b): \`gh pr merge --subject\` (con line-continuation) y \`glab mr merge --squash-message\` cuentan como resuelto" \
+  || bad "m2c CONTRA LA FALLA (A-1b): no detecta la integración por squash del foro"
+
+# A-1 regresión: la prosa que MENCIONA un patrón de commit (documentación, o código de una fixture vieja
+# citado dentro de un heredoc que solo ESCRIBE un archivo) no debe leerse como un commit real — MEDIDO
+# 2026-09-11: la prosa de un commit real que explicaba el bug del detector viejo ("solo ve `-m \"…\"`")
+# se leía a sí misma como un commit con mensaje "…", y un heredoc que escribía una fixture vieja a disco
+# aportaba un commit fantasma con el CÓDIGO PYTHON como mensaje.
+node -e '
+  const {extraerCommits} = require(process.argv[1]);
+  const prosa = "cat >> notas.md <<'"'"'MD'"'"'\nEl detector viejo `-m \"…\"` fallaba. Explicación: solo ve `-m \"…\"`.\nMD";
+  const r1 = extraerCommits(prosa);
+  if (r1.length !== 0) { console.error("PROSA coló un commit fantasma: " + JSON.stringify(r1)); process.exit(1); }
+  const fixture = "cat > viejo.py <<'"'"'PY'"'"'\nL.append(bash(\"git commit -m \\\"texto de fixture\\\"\", ts))\nPY";
+  const r2 = extraerCommits(fixture);
+  if (r2.length !== 0) { console.error("FIXTURE EMBEBIDA coló un commit fantasma: " + JSON.stringify(r2)); process.exit(1); }
+' "$CKPT_MEC" \
+  && ok "m2c CONTRA LA FALLA (A-1 regresión): prosa/código citado que solo MENCIONA \"git commit\" no cuenta como un commit real (exige arrancar tras un separador de shell)" \
+  || bad "m2c CONTRA LA FALLA (A-1 regresión): coló un commit fantasma desde prosa o una fixture embebida"
+
+# A-2: el rótulo de la sección invita a citar "VERBATIM" — plomería del harness (caveat/stdout de un
+# comando local, notificación de agente, /compact pelón) NO debe colarse como si la hubiera escrito el
+# usuario; un mensaje real y corto SÍ debe sobrevivir (no es un filtro por longitud).
+node -e '
+  const {isNoisyUserText} = require(process.argv[1]);
+  const ruido = [
+    "<local-command-caveat>Caveat: ...</local-command-caveat>",
+    "<local-command-stdout>\x1b[2mCompacted\x1b[22m</local-command-stdout>",
+    "<task-notification><task-id>abc</task-id><status>failed</status></task-notification>",
+    "## Context Usage\n\n**Tokens:** 877.9k / 1m (88%)",
+    "/compact",
+    "<command-name>/to-do</command-name>",
+    "<system-reminder>algo inyectado</system-reminder>",
+  ];
+  for (const t of ruido) if (!isNoisyUserText(t)) { console.error("NO FILTRÓ: " + JSON.stringify(t)); process.exit(1); }
+  const reales = ["haz los merges en ese orden", "adelante", "Córrelo sobre tu transcript"];
+  for (const t of reales) if (isNoisyUserText(t)) { console.error("FILTRÓ UNO REAL: " + JSON.stringify(t)); process.exit(1); }
+' "$CKPT_MEC" \
+  && ok "m2c CONTRA LA FALLA (A-2): filtra la plomería del harness (local-command/task-notification/system-reminder/Context Usage//compact) y conserva citas reales cortas" \
+  || bad "m2c CONTRA LA FALLA (A-2): coló plomería del harness como cita del usuario, o mató una cita real"
+
+# A-4: agrupar por los 2 primeros tokens hace que cd/ls/grep (exploración) ganen por VOLUMEN sobre el
+# comando que dice qué se hizo; topComandos debe priorizar señal sobre navegación sin OCULTAR esta última.
+node -e '
+  const {topComandos} = require(process.argv[1]);
+  const m = new Map([["cd /repo", 30], ["grep -n foo", 15], ["bash brain/test-brain.sh", 1]]);
+  const t = topComandos(m, 2).map(x => x.item);
+  if (t[0] !== "bash brain/test-brain.sh") { console.error("NAV GANÓ EL TOP: " + JSON.stringify(t)); process.exit(1); }
+  const t3 = topComandos(m, 3).map(x => x.item);
+  if (!t3.includes("cd /repo")) { console.error("LA NAV DESAPARECIÓ DEL TODO: " + JSON.stringify(t3)); process.exit(1); }
+' "$CKPT_MEC" \
+  && ok "m2c CONTRA LA FALLA (A-4): el trabajo real sube sobre la navegación de alto volumen, sin ocultarla del todo" \
+  || bad "m2c CONTRA LA FALLA (A-4): la navegación sigue monopolizando (o desapareciendo del) el top de comandos"
+
+# A-5: /tmp acumula basura desechable (logs de suite, archivos de paso) en volumen mucho mayor que las
+# escrituras al repo (bitácora, docs); topBashEscrituras debe priorizar el repo sin censurar /tmp.
+node -e '
+  const {topBashEscrituras} = require(process.argv[1]);
+  const m = new Map([["/tmp/suite-1.log", 9], ["/tmp/suite-2.log", 7], [".claude/memory/bitacora.md", 1]]);
+  const t = topBashEscrituras(m, 2).map(x => x.item);
+  if (t[0] !== ".claude/memory/bitacora.md") { console.error("TMP GANÓ EL TOP: " + JSON.stringify(t)); process.exit(1); }
+' "$CKPT_MEC" \
+  && ok "m2c CONTRA LA FALLA (A-5): una escritura al repo sube sobre el volumen de /tmp" \
+  || bad "m2c CONTRA LA FALLA (A-5): /tmp sigue desplazando al repo en las escrituras por bash"
+
+# A-6: una variable de shell SIN EXPANDIR (`$VAR/…`) pasa el filtro de "parece ruta" (tiene `/` y
+# extensión) pero la ruta real es DESCONOCIDA — reproducido tal cual se midió: la escritura vive DENTRO
+# del cuerpo de un heredoc de python que arma un comando bash con la variable embebida (no un `> $VAR`
+# suelto, que ya filtraba por la falta de "parece archivo").
+node -e '
+  const {destinosDeEscrituraBash} = require(process.argv[1]);
+  const cmd = "python3 - <<'"'"'PY'"'"'\nimport subprocess\nsubprocess.run(\"echo x > $RHREC3/.claude/memory/hilo-mental-actual.andamio.md\", shell=True)\nPY";
+  const out = destinosDeEscrituraBash(cmd);
+  if (out.some(d => d.includes("$"))) { console.error("VARIABLE SIN EXPANDIR COLÓ: " + JSON.stringify(out)); process.exit(1); }
+' "$CKPT_MEC" \
+  && ok "m2c CONTRA LA FALLA (A-6): reproducido con una variable embebida DENTRO de un heredoc de python (como en el render real) y descartado, no inventado" \
+  || bad "m2c CONTRA LA FALLA (A-6): una ruta con \$VAR sin expandir se coló en las escrituras por bash"
+
+echo ""
 echo "== (m2b) checkpoint-mecanico.sh: hook de PreCompact — detached, lock por-sid, escritura atómica =="
 grep -qF 'nohup' "$SCRIPT_DIR/hooks/checkpoint-mecanico.sh" \
   && ok "m2b: el hook corre DETACHED (nohup) — no bloquea el evento PreCompact con un transcript grande" \
@@ -4145,12 +4255,27 @@ touch -t 202601010000 "$F1S/.claude/memory/hilo-mental-actual.andamio.md"
 printf '%s' "$(f1self 2>&1)" | jq -e '.ensure == "regenerado"' >/dev/null 2>&1 \
   && ok "f1f: con el andamio ATRÁS del transcript, --ensure lo regenera" \
   || bad "f1f: --ensure no regeneró un andamio stale"
-# CONTRA LA FALLA (fail-CLOSED): dentro de un SUBAGENTE, CLAUDE_CODE_SESSION_ID es el sid del PADRE
-# (MEDIDO 2026-09-11). Regenerar ahí produciría el andamio de OTRA sesión: un artefacto que certifica
-# lo que no verificó. Debe NEGARSE, no adivinar.
-f1self 1 >/dev/null 2>&1 \
-  && bad "f1f CONTRA LA FALLA: --self corrió dentro de un SUBAGENTE (habría escrito el andamio del PADRE)" \
-  || ok "f1f CONTRA LA FALLA: --self FALLA CERRADO con CLAUDE_CODE_CHILD_SESSION=1 (el sid del entorno es el del padre)"
+# A-3 (2026-09-11): el candado usaba CLAUDE_CODE_CHILD_SESSION==='1' para fallar cerrado "dentro de un
+# subagente". MEDIDO: esa variable vale '1' TAMBIÉN en el Bash del hilo PRINCIPAL (CLI 2.1.x, macOS) —
+# no distingue nada, y bloqueaba el 100% de los usos legítimos. Ahora NO bloquea por esa señal.
+touch -t 202601010000 "$F1S/.claude/memory/hilo-mental-actual.andamio.md"
+F1SOUT3="$(f1self 1 2>&1)"; F1SRC3=$?
+[ "$F1SRC3" -eq 0 ] && printf '%s' "$F1SOUT3" | jq -e '.ensure == "regenerado"' >/dev/null 2>&1 \
+  && ok "f1f CONTRA LA FALLA (A-3): --self YA NO rechaza CLAUDE_CODE_CHILD_SESSION=1 (esa señal se mide también en el hilo principal, no distingue nada)" \
+  || bad "f1f CONTRA LA FALLA (A-3): --self siguió bloqueando con CLAUDE_CODE_CHILD_SESSION=1; rc=$F1SRC3: $(printf '%s' "$F1SOUT3" | tail -2 | tr '\n' ' ')"
+# La verificación POSITIVA que lo reemplaza: un sidecar de sub-agente MÁS FRESCO que el transcript
+# resuelto se AVISA (stderr, no bloquea) — mejor un andamio con la duda anotada que ninguno.
+F1SIDECAR="$F1D/cfg/projects/$F1SLUG/$F1SID/subagents"; mkdir -p "$F1SIDECAR"
+printf '%s\n' '{"type":"assistant"}' > "$F1SIDECAR/agent-fresco.jsonl"
+touch -t 202601010000 "$F1S/.claude/memory/hilo-mental-actual.andamio.md"
+F1SERR="$(f1self 2>&1 >/dev/null)"
+printf '%s' "$F1SERR" | grep -qi 'sub-agente' \
+  && ok "f1f: con un sidecar de sub-agente MÁS FRESCO que el transcript resuelto, --self AVISA por stderr (verificación positiva, no un env var que no distingue)" \
+  || bad "f1f: no avisó habiendo un sidecar de sub-agente más fresco"
+printf '%s' "$F1SERR" | grep -q 'SUBAGENTE' \
+  && bad "f1f: el aviso repite el token en MAYÚSCULAS del bloqueo viejo (falso positivo del oráculo de QA que mide justamente eso)" \
+  || ok "f1f: el aviso no reintroduce el token en mayúsculas del bloqueo viejo"
+rm -rf "$F1SIDECAR"
 ( cd "$F1S" && env CLAUDE_CONFIG_DIR="$F1D/cfg" CLAUDE_CODE_SESSION_ID= \
   node "$SCRIPT_DIR/../bin/checkpoint-mecanico.js" --self --ensure ) >/dev/null 2>&1 \
   && bad "f1f: --self corrió sin CLAUDE_CODE_SESSION_ID (¿contra qué transcript?)" \
