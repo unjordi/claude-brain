@@ -5093,6 +5093,34 @@ grep -qiE 'LISTO = QA|QA del humano|QA FUNCIONAL' "$SKILL" && grep -qiE 'preview
   && ok "g12 LISTO: el SKILL cierra con QA funcional del humano + MR en preview (sin auto-merge)" \
   || bad "g12 LISTO: el SKILL declara cierre sin QA del humano o permite auto-merge"
 
+# ── g13: SIDECAR (H1) — subagents/tool-results/workflows viajan CON el .jsonl, en un sandbox aislado
+#         del session-move.js real (no solo dentro del e2e completo, más abajo). Medido en un master
+#         real: hasta 163 transcripts de subagente (~109 MB), citados 76 veces desde su propio transcript.
+SCID="ee550000-0000-0000-0000-000000000013"
+printf '{"type":"user","cwd":"%s"}\n' "$SRCREPO" > "$PROJ/$OLD_SLUG/$SCID.jsonl"
+mkdir -p "$PROJ/$OLD_SLUG/$SCID/subagents" "$PROJ/$OLD_SLUG/$SCID/tool-results" "$PROJ/$OLD_SLUG/$SCID/workflows"
+echo '{"agent":1}' > "$PROJ/$OLD_SLUG/$SCID/subagents/agent-1.jsonl"
+echo '{"meta":1}'  > "$PROJ/$OLD_SLUG/$SCID/subagents/agent-1.meta.json"
+echo '{"tr":1}'    > "$PROJ/$OLD_SLUG/$SCID/tool-results/tr1.json"
+echo '{"wf":1}'    > "$PROJ/$OLD_SLUG/$SCID/workflows/wf1.json"
+RUNMOVE "$SCID" --to-cwd "$DSTREPO" >/dev/null 2>&1
+{ [ -f "$PROJ/$NEW_SLUG/$SCID/subagents/agent-1.jsonl" ] && [ -f "$PROJ/$NEW_SLUG/$SCID/subagents/agent-1.meta.json" ] \
+    && [ -f "$PROJ/$NEW_SLUG/$SCID/tool-results/tr1.json" ] && [ -f "$PROJ/$NEW_SLUG/$SCID/workflows/wf1.json" ] \
+    && [ ! -e "$PROJ/$OLD_SLUG/$SCID" ]; } \
+  && ok "g13 sidecar: subagents/tool-results/workflows viajan íntegros al slug NUEVO (origen barrido)" \
+  || bad "g13 sidecar: el sidecar quedó huérfano en el slug viejo, o no llegó completo al nuevo"
+# el no-op VERIFICADO: sin sidecar de origen, el move reporta moved:false (no silencio, no falla)
+SCID2="ee550000-0000-0000-0000-000000000014"
+printf '{"type":"user","cwd":"%s"}\n' "$SRCREPO" > "$PROJ/$OLD_SLUG/$SCID2.jsonl"
+out13="$(RUNMOVE "$SCID2" --to-cwd "$DSTREPO" 2>&1)"
+printf '%s' "$out13" | grep -q '"sidecar":{"moved":false' \
+  && ok "g13 sidecar: sin sidecar de origen, el move reporta 'moved:false' (no-op VERIFICADO, no silencio)" \
+  || bad "g13 sidecar: no reportó el no-op del sidecar: $out13"
+# H1 (honestidad): el comentario que afirmaba 'no hay más artefactos que mover' era medible y falso
+grep -qF 'no hay más artefactos que mover' "$BINRM/session-move.js" \
+  && bad "g13 sidecar: session-move.js sigue afirmando que no hay más artefactos que mover (falso, medido)" \
+  || ok "g13 sidecar: el comentario falso de session-move.js (H1) se corrigió"
+
 rm -rf "$RMFIX"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -5212,6 +5240,40 @@ CSO="$SCRIPT_DIR/skills/orquestar-fanout/SKILL.md"
     && [ -f "$CSO" ] && grep -qF 'lo DELEGADO a un artefacto tampoco es el backlog' "$CSO"; } \
   && ok "s5 mecanismo: cerrar-slice ancla el barrido de lo delegado al backlog (+ corolario en orquestar-fanout)" \
   || bad "s5 mecanismo: falta el paso anti-§9 en cerrar-slice/orquestar-fanout (el hueco del §9 quedaría abierto)"
+
+# ── s6: H5 — cwdLines es el invariante que DISCRIMINA una corrupción de CONTENIDO que la cardinalidad
+#         (nº de renglones) sola no ve. rewriteTranscriptStream cuenta, DEL ORIGEN, los renglones con un
+#         `cwd` de primer nivel; scanTranscriptFile mide lo MISMO en el destino ya escrito.
+S6SRC="$SIFIX/s6-src.jsonl"
+printf '{"type":"user","cwd":"/a"}\n{"type":"assistant","cwd":"/a"}\n{"type":"user","no_cwd_here":1}\n' > "$S6SRC"
+S6DST="$SIFIX/s6-dst.jsonl"
+node -e '
+  const lib=require(process.argv[1]), fs=require("fs");
+  lib.rewriteTranscriptStream(fs.createReadStream(process.argv[2]), process.argv[3], {toCwd:"/b"})
+    .then(r=>{ fs.writeFileSync(process.argv[4], JSON.stringify(r)); })
+    .catch(e=>{ console.error(e); process.exit(1); });
+' "$LIB" "$S6SRC" "$S6DST" "$S6DST.meta.json"
+r_cwdlines="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).cwdLines)' "$S6DST.meta.json")"
+[ "$r_cwdlines" -eq 2 ] \
+  && ok "s6 cwdLines: rewriteTranscriptStream cuenta 2 renglones con cwd del ORIGEN (de 3 renglones totales)" \
+  || bad "s6 cwdLines: r.cwdLines=$r_cwdlines, esperaba 2"
+# CONTRA LA FALLA: corrompo el DESTINO ya escrito quitándole el 'cwd' a un renglón, SIN cambiar el
+# número de renglones — el modo de falla exacto que un candado solo-por-cardinalidad no vería.
+node -e '
+  const fs=require("fs");
+  const lines=fs.readFileSync(process.argv[1],"utf8").split("\n");
+  const o=JSON.parse(lines[0]); delete o.cwd; lines[0]=JSON.stringify(o);
+  fs.writeFileSync(process.argv[1], lines.join("\n"));
+' "$S6DST"
+check_lines="$(node -e 'console.log(require(process.argv[1]).scanTranscriptFile(process.argv[2]).lines)' "$LIB" "$S6DST")"
+check_cwdlines="$(node -e 'console.log(require(process.argv[1]).scanTranscriptFile(process.argv[2]).cwdLines)' "$LIB" "$S6DST")"
+{ [ "$check_lines" -eq 3 ] && [ "$check_cwdlines" -eq 1 ]; } \
+  && ok "s6 cwdLines CONTRA LA FALLA: la corrupción preserva 'lines' (3=3, invisible por cardinalidad) pero cambia 'cwdLines' (2→1, detectada)" \
+  || bad "s6 cwdLines: no se reprodujo el escenario (lines=$check_lines cwdLines=$check_cwdlines)"
+# y que session-move.js REALMENTE use este invariante (no solo 'lines') antes de publicar
+grep -qF 'check.cwdLines !== r.cwdLines' "$BINRM/session-move.js" \
+  && ok "s6 cwdLines: session-move.js aborta si cwdLines no cuadra, no solo si 'lines' no cuadra (H5 fijo)" \
+  || bad "s6 cwdLines: session-move.js no verifica cwdLines (regresión de H5)"
 
 rm -rf "$SIFIX"
 
@@ -5583,6 +5645,15 @@ chmod 600 "$E2EJSONL"
 # G-LIVENESS exige el transcript FRÍO (>=15m): se envejece a 3h. GNU primero, BSD de respaldo.
 touch -t "$(date -d '-3 hours' '+%Y%m%d%H%M' 2>/dev/null || date -v-3H '+%Y%m%d%H%M')" "$E2EJSONL"
 
+# H1 (SIDECAR): el mismo master real citaba 76 ids de subagente propios y 24 rutas a su sidecar — se
+# siembra AQUÍ, en la mudanza REAL de punta a punta, para que el G-SIDECAR de _postcondiciones y el
+# session-move.js real se ejerciten juntos (no solo en el sandbox aislado del `g13` de arriba).
+E2ESIDE="$(dirname "$E2EJSONL")/$E2EID"
+mkdir -p "$E2ESIDE/subagents" "$E2ESIDE/tool-results" "$E2ESIDE/workflows"
+echo '{"agent":1}' > "$E2ESIDE/subagents/agent-1.jsonl"
+echo '{"tr":1}'    > "$E2ESIDE/tool-results/tr1.json"
+echo '{"wf":1}'    > "$E2ESIDE/workflows/wf1.json"
+
 E2EDSTP="$(cd "$E2EDST" && pwd -P)"
 E2ENSLUG="$(node -e 'process.stdout.write(require(process.argv[1]).slugFromCwd(process.argv[2]))' "$E2EBIN/session-lib.js" "$E2EDSTP")"
 
@@ -5596,6 +5667,48 @@ if e2e bash "$E2ESH" --id "$E2EID" --dst-repo "$E2EDST" --master-name viejo-mast
 else
   bad "(e2e) el script falló al generar: $(tail -3 "$E2EOUT" | tr '\n' ' ')"
 fi
+
+# ── M1/M2/H4: T2_LOCAL trae el hilo por DEFAULT, --t2-local SUMA (no reemplaza), --t2-local-solo SÍ
+#    reemplaza, y --salida se RESPETA. Cada variante genera a su PROPIO --salida (nunca toca $E2EH). ──
+_t2arr(){ node -e '
+  const fs=require("fs"); const s=fs.readFileSync(process.argv[1],"utf8");
+  const m=s.match(/^T2_LOCAL=\(([^)]*)\)/m); if(!m){console.log("");process.exit(0);}
+  console.log(m[1].trim());
+' "$1"; }
+E2ET2A="$E2EFIX/handoff-t2-default.sh"
+e2e bash "$E2ESH" --id "$E2EID" --dst-repo "$E2EDST" --master-name viejo-master --src-repo "$E2ESRC" \
+    --drive "$E2EDRIVE" --salida "$E2ET2A" >/dev/null 2>&1
+t2a="$(_t2arr "$E2ET2A")"
+{ [ -f "$E2ET2A" ] && printf '%s' "$t2a" | grep -q 'hilo-mental-actual.md' \
+    && printf '%s' "$t2a" | grep -q 'conocimiento-propio.local.md'; } \
+  && ok "(e2e) M1: hilo-mental-actual.md viaja en el T2_LOCAL por DEFAULT (junto a identidad/autorizaciones)" \
+  || bad "(e2e) M1: el default de T2_LOCAL no trae el hilo: [$t2a]"
+[ -f "$E2ET2A" ] && [ ! -e "$E2EDRIVE/handoff-$E2EID.sh.t2-default-no-deberia-existir" ] \
+  && ok "(e2e) H4: --salida SÍ se respeta (el handoff salió donde se pidió, no en el Drive por default)" \
+  || bad "(e2e) H4: --salida no funcionó"
+
+E2ET2B="$E2EFIX/handoff-t2-suma.sh"
+e2e bash "$E2ESH" --id "$E2EID" --dst-repo "$E2EDST" --master-name viejo-master --src-repo "$E2ESRC" \
+    --drive "$E2EDRIVE" --salida "$E2ET2B" --t2-local extra-del-operador.local.md >/dev/null 2>&1
+t2b="$(_t2arr "$E2ET2B")"
+{ printf '%s' "$t2b" | grep -q 'conocimiento-propio.local.md' \
+    && printf '%s' "$t2b" | grep -q 'autorizaciones-vigentes.local.md' \
+    && printf '%s' "$t2b" | grep -q 'hilo-mental-actual.md' \
+    && printf '%s' "$t2b" | grep -q 'extra-del-operador.local.md'; } \
+  && ok "(e2e) M2 CONTRA LA FALLA: --t2-local SUMA al default (identidad+autorizaciones+hilo+el nuevo, los 4)" \
+  || bad "(e2e) M2: --t2-local siguió reemplazando el default (footgun sin arreglar): [$t2b]"
+
+E2ET2C="$E2EFIX/handoff-t2-solo.sh"
+e2e bash "$E2ESH" --id "$E2EID" --dst-repo "$E2EDST" --master-name viejo-master --src-repo "$E2ESRC" \
+    --drive "$E2EDRIVE" --salida "$E2ET2C" --t2-local-solo solo-esto.local.md >/dev/null 2>&1
+t2c="$(_t2arr "$E2ET2C")"
+{ printf '%s' "$t2c" | grep -q 'solo-esto.local.md' \
+    && ! printf '%s' "$t2c" | grep -q 'conocimiento-propio.local.md' \
+    && ! printf '%s' "$t2c" | grep -q 'hilo-mental-actual.md'; } \
+  && ok "(e2e) --t2-local-solo SÍ reemplaza el default (el escape hatch explícito que M2 pedía)" \
+  || bad "(e2e) --t2-local-solo no reemplazó el default: [$t2c]"
+rm -f "$E2ET2A" "$E2ET2B" "$E2ET2C"
+
 E2EH="$E2EDRIVE/handoff-$E2EID.sh"
 E2EPRE="$E2EHOME/.claude/reubicar-preludio.sh"
 [ -f "$E2EH" ] && [ -x "$E2EH" ] \
@@ -5792,6 +5905,15 @@ if [ -f "$E2EH" ]; then
   [ -f "$E2EHOME/.claude/projects/$E2ENSLUG/$E2EID.jsonl" ] && [ ! -f "$E2EJSONL" ] \
     && ok "(e2e) el transcript vive en el slug NUEVO y el viejo quedó barrido (quirúrgico)" \
     || bad "(e2e) el transcript no quedó en el slug nuevo, o el viejo sobrevivió"
+  # ── H1 SIDECAR, de punta a punta: viajó con el .jsonl real y G-SIDECAR lo confirmó en verde ──
+  E2ESIDEDST="$E2EHOME/.claude/projects/$E2ENSLUG/$E2EID"
+  { [ -f "$E2ESIDEDST/subagents/agent-1.jsonl" ] && [ -f "$E2ESIDEDST/tool-results/tr1.json" ] \
+      && [ -f "$E2ESIDEDST/workflows/wf1.json" ] && [ ! -e "$E2ESIDE" ]; } \
+    && ok "(e2e) H1: el sidecar (subagents/tool-results/workflows) viajó con el .jsonl en la mudanza REAL" \
+    || bad "(e2e) H1: el sidecar quedó huérfano o incompleto en la mudanza real"
+  grep -q 'G-SIDECAR' "$E2EFULL" \
+    && ok "(e2e) G-SIDECAR corrió como postcondición del full (no es opcional)" \
+    || bad "(e2e) G-SIDECAR no apareció en el log del full"
   [ "$(jq -r --arg id "$E2EID" '.masters[]|select(.id==$id)|.name' "$E2EDRIVE/masters.json")" = nuevo-master ] \
     && ok "(e2e) masters.json quedó con el nombre NUEVO (UPSERT por id, con lock)" \
     || bad "(e2e) masters.json no refleja el renombre"
@@ -5807,6 +5929,19 @@ if [ -f "$E2EH" ]; then
     && grep -q 'S7 verificado' "$E2EFIX/s7.log" \
     && ok "(e2e) MODO=s7 re-verifica las invariantes tras el QA" \
     || bad "(e2e) el s7 falló: $(tail -2 "$E2EFIX/s7.log" | tr '\n' ' ')"
+  # ── G-SIDECAR CONTRA LA FALLA: si algo deja un sidecar huérfano en el slug VIEJO (p. ej. una
+  #    regresión futura de session-move.js), la POSTCONDICIÓN debe abortar — no depender SOLO de que
+  #    session-move.js se porte bien. Se fabrica el orfanato a mano y se re-corre s7.
+  mkdir -p "$E2ESIDE/subagents"; echo '{"huerfano":1}' > "$E2ESIDE/subagents/agent-huerfano.jsonl"
+  E2ESIDLOG="$E2EFIX/s7-sidecar-huerfano.log"
+  if e2e env REUBICAR_MODO=s7 REUBICAR_QUIESCE_OK=1 bash "$E2EH" > "$E2ESIDLOG" 2>&1; then
+    bad "(e2e) G-SIDECAR CONTRA LA FALLA: con un sidecar huérfano en el slug viejo, s7 debía ABORTAR y no lo hizo"
+  else
+    grep -q 'G-SIDECAR' "$E2ESIDLOG" \
+      && ok "(e2e) G-SIDECAR CONTRA LA FALLA: un sidecar huérfano en el slug viejo hace ABORTAR a s7" \
+      || bad "(e2e) s7 abortó, pero no por G-SIDECAR: $(tail -2 "$E2ESIDLOG" | tr '\n' ' ')"
+  fi
+  rm -rf "$E2ESIDE"   # limpio el orfanato fabricado: no debe interferir con el resto de la suite
   # ── las citas humanas son GATES REALES, no adorno ──
   e2e bash "$E2EH" >/dev/null 2>&1 \
     && bad "(e2e) el full corrió SIN las citas humanas de G-QUIESCE/G-LIVENESS" \

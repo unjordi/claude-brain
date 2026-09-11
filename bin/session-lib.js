@@ -159,6 +159,49 @@ function transformLine(piece, toCwd) {
   return { out: piece, cwdChanged: false };
 }
 
+// ── SIDECAR de sesión (~/.claude/projects/<slug>/<sessionId>/: subagents/, tool-results/, workflows/) ──
+// El harness lo deriva de (slug ACTUAL, sessionId) — NO vive dentro del .jsonl, así que mover solo el
+// transcript lo deja huérfano en el slug viejo (medido: hasta 163 transcripts de subagente, ~109 MB).
+// Estos tres helpers le dan al SIDECAR la MISMA disciplina que `rewriteTranscriptStream` le da al
+// transcript: copia a un temporal, verifica por CARDINALIDAD (mismo nº de archivos a ambos lados) y
+// SOLO ENTONCES publica+borra — nunca un `mv`/`rename` directo del directorio, que en un filesystem
+// cruzado (o interrumpido a medio `readdir`) podría dejar el origen a medias sin que nada lo note.
+
+// Todas las rutas de ARCHIVO bajo `dir`, recursivo, en un orden DETERMINISTA (sort) — no confiar en el
+// orden arbitrario de `readdirSync` para comparar "mismo contenido" entre dos corridas.
+function listFilesRecursive(dir) {
+  const out = [];
+  (function walk(d, rel) {
+    let entries;
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch (_) { return; }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const e of entries) {
+      const abs = path.join(d, e.name);
+      const r = rel ? rel + '/' + e.name : e.name;
+      if (e.isDirectory()) walk(abs, r);
+      else if (e.isFile()) out.push(r);
+    }
+  })(dir, '');
+  return out;
+}
+
+// Copia un árbol COMPLETO archivo por archivo (preserva el modo de cada uno). No usa `fs.cpSync` a
+// propósito: así el llamador puede VERIFICAR con la MISMA lista (`listFilesRecursive`) en vez de confiar
+// en que la copia nativa se llevó todo. Devuelve el nº de archivos copiados.
+function copyDirRecursive(srcDir, dstDir) {
+  const files = listFilesRecursive(srcDir);
+  for (const rel of files) {
+    const s = path.join(srcDir, rel), d = path.join(dstDir, rel);
+    fs.mkdirSync(path.dirname(d), { recursive: true });
+    fs.copyFileSync(s, d);
+    try { fs.chmodSync(d, fs.statSync(s).mode & 0o7777); } catch (_) { /* housekeeping: no aborta la copia */ }
+  }
+  return files.length;
+}
+
+// Borra un árbol completo (equivalente portable a `rm -rf`; `recursive+force` existe desde Node 14.14).
+function removeDirRecursive(dir) { fs.rmSync(dir, { recursive: true, force: true }); }
+
 // Localiza el <id>.jsonl bajo projects/<algún-slug>/. Devuelve {slug, file, activity, collisions} o null.
 // TIE-BREAK DETERMINISTA: si el mismo id existe en >1 slug (p. ej. un move a medias que dejó copia en
 // origen y destino), `readdirSync` los lista en orden de FS ARBITRARIO → devolver "el primero que tope"
@@ -268,20 +311,23 @@ function titlesFromText(srcText) {
 }
 
 // Barre un transcript de DISCO en streaming (memoria acotada, sin techo de tamaño) y devuelve los
-// metadatos que la maquinaria necesita: {bytes, lines, ts, firstCwd, customTitle, aiTitle, truncated}.
-//   - `lines` = renglones no vacíos; `ts` = el `timestamp` más reciente; `truncated` = el archivo NO
-//     termina en '\n' (última línea a medio escribir, caso NORMAL de una sesión viva).
+// metadatos que la maquinaria necesita: {bytes, lines, cwdLines, ts, firstCwd, customTitle, aiTitle, truncated}.
+//   - `lines` = renglones no vacíos; `cwdLines` = renglones con un campo `cwd` string de PRIMER NIVEL
+//     (independiente de su VALOR — es el invariante que discrimina un contenido corrupto que la
+//     cardinalidad sola no ve, ver session-move.js); `ts` = el `timestamp` más reciente; `truncated` =
+//     el archivo NO termina en '\n' (última línea a medio escribir, caso NORMAL de una sesión viva).
 //   - opts.tailBytes > 0 ⇒ lee SOLO la cola: barato y O(1), suficiente para `ts` (el transcript es
-//     append-only) pero deja `lines`/`firstCwd`/títulos en null.
-// El `timestamp` se lee con `topLevelString` (la clave de PRIMER NIVEL, no la misma clave dentro de un
-// sub-objeto: un `toolUseResult` con el timestamp de una API no es actividad de la sesión) — un solo
-// recorrido del renglón, sin el JSON.parse por línea que haría inviable barrer cientos de MB. `cwd` y
-// los títulos sí se parsean, pero solo en los pocos renglones que los mencionan.
+//     append-only) pero deja `lines`/`cwdLines`/`firstCwd`/títulos en null (una cuenta PARCIAL de la
+//     cola sería peor que ninguna: se leería como si fuera del archivo completo).
+// El `timestamp` y el `cwd` se leen con `topLevelString` (la clave de PRIMER NIVEL, no la misma clave
+// dentro de un sub-objeto: un `toolUseResult` con el timestamp/cwd de una API no es actividad de la
+// sesión) — un solo recorrido del renglón, sin el JSON.parse por línea que haría inviable barrer cientos
+// de MB. `firstCwd` y los títulos sí se parsean completo, pero solo en los pocos renglones que los mencionan.
 function scanTranscriptFile(file, opts) {
   const tailBytes = (opts && opts.tailBytes > 0) ? opts.tailBytes : 0;
   const st = fs.statSync(file);
   const res = {
-    bytes: st.size, lines: tailBytes ? null : 0, ts: null,
+    bytes: st.size, lines: tailBytes ? null : 0, cwdLines: tailBytes ? null : 0, ts: null,
     firstCwd: null, customTitle: null, aiTitle: null, truncated: false,
   };
   if (st.size === 0) return res;
@@ -295,6 +341,7 @@ function scanTranscriptFile(file, opts) {
     if (skipFirst) { skipFirst = false; return; }   // la cola arranca a media línea: ese trozo se descarta
     if (!piece.trim()) return;
     if (res.lines !== null) res.lines++;
+    if (res.cwdLines !== null && topLevelString(piece, 'cwd') !== null) res.cwdLines++;
     const raw = topLevelString(piece, 'timestamp');
     if (raw !== null) { const t = Date.parse(raw); if (!Number.isNaN(t) && (res.ts === null || t > res.ts)) res.ts = t; }
     if (tailBytes) return;
@@ -339,7 +386,11 @@ function scanTranscriptFile(file, opts) {
 //     (cwd, gitBranch) que el harness hereda al reanudar—, sin tocar las ramas HISTÓRICAS. Para eso
 //     retiene en RAM la COLA del archivo (tope `holdBytes`, 8 MiB por default); si el último evento con
 //     cwd quedara fuera de esa cola, no se toca nada y `gitBranchRewritten` vuelve en 0.
-// Devuelve una promesa con {lines, cwdRewritten, gitBranchRewritten, bytesOut, truncated}.
+// Devuelve una promesa con {lines, cwdLines, cwdRewritten, gitBranchRewritten, bytesOut, truncated}.
+// `cwdLines` cuenta, DEL ORIGEN (antes de transformar), los renglones con un `cwd` de primer nivel —
+// independiente de si `transformLine` lo cambió. Es el número que `session-move.js` compara contra el
+// `cwdLines` que `scanTranscriptFile` mide del DESTINO ya escrito: un candado que solo cuenta renglones
+// totales no discrimina un renglón cuyo CONTENIDO se corrompió sin cambiar el conteo (ver H5).
 // Hace fsync antes de cerrar, y ante error cierra el fd y BORRA `dstFile` (nunca deja un destino a
 // medias). El llamador escribe a un temporal y luego hace rename.
 function rewriteTranscriptStream(readable, dstFile, opts) {
@@ -354,7 +405,7 @@ function rewriteTranscriptStream(readable, dstFile, opts) {
     let out = [], outLen = 0, bytesOut = 0;
     let pending = '', first = true, lastNewline = false;
     let hold = [], holdLen = 0;
-    let lines = 0, cwdRewritten = 0, gitBranchRewritten = 0;
+    let lines = 0, cwdLines = 0, cwdRewritten = 0, gitBranchRewritten = 0;
     let done = false, opaque = false;
 
     // Vuelca el buffer de salida al fd. Va por Buffer y con REINTENTO del resto: un `writeSync` puede
@@ -379,6 +430,9 @@ function rewriteTranscriptStream(readable, dstFile, opts) {
     };
     const take = (piece) => {
       if (piece.trim()) lines++;
+      // cuenta del ORIGEN, ANTES de transformar: cheap (misma técnica que scanTranscriptFile, sin
+      // JSON.parse) y no depende de si transformLine reescribió el valor.
+      if (topLevelString(piece, 'cwd') !== null) cwdLines++;
       const t = transformLine(piece, toCwd);
       if (t.cwdChanged) cwdRewritten++;
       push(t.out);
@@ -443,7 +497,7 @@ function rewriteTranscriptStream(readable, dstFile, opts) {
         fs.fsyncSync(fd);
         fs.closeSync(fd);
         done = true;
-        resolve({ lines, cwdRewritten, gitBranchRewritten, bytesOut, truncated: !lastNewline });
+        resolve({ lines, cwdLines, cwdRewritten, gitBranchRewritten, bytesOut, truncated: !lastNewline });
       } catch (e) { abort(e); }
     });
   });
@@ -556,6 +610,7 @@ module.exports = {
   slugFromCwd, normalizeCwd, cwdExists, slugForRepo,
   findSession, rewriteCwd, transformLine, topLevelString,
   readTranscriptText, scanTranscriptFile, rewriteTranscriptStream,
+  listFilesRecursive, copyDirRecursive, removeDirRecursive,
   firstCwd, lastActivity, titleFromTranscript, titlesFromText,
   sessionAliases, writeAlias,
   aliasLockPath, takeAliasLock, releaseAliasLock,
