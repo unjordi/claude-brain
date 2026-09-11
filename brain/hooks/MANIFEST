@@ -59,6 +59,7 @@ rehidratar-hilo          global  hook
 aviso-contexto           global  hook
 aviso-drift-cerebro      global  hook
 exportar-sesion-master   global  hook
+checkpoint-mecanico      global  hook
 barrer-ramas             global  hook
 delegacion-gate          global  hook
 delegacion-registrar     global  hook

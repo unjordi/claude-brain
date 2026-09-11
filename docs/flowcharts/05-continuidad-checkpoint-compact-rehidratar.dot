@@ -112,8 +112,8 @@ digraph flujos {
     // ── El compact ──
     COMPACT [shape=diamond, fillcolor="#2b2622", color="#d97757",
              label="COMPACTACIÓN\n/compact manual (proactivo) · o AUTO-COMPACT sorpresa (contexto lleno, sin aviso, SIN checkpoint previo)"];
-    NOPRE [color="#c9a227",
-           label="🟡 SIN hook de PreCompact (por decisión, no olvido):\nPreCompact no tiene canal para inyectar contexto ni pedir acción → inútil ahí\n(la versión vieja rompía la validación del CLI). El hilo lo salva checkpoint+rehidratar"];
+    NOPRE [color="#7fb069", penwidth=2,
+           label="🟢 checkpoint-mecanico  (PreCompact · GLOBAL, M2/X2 auditoría 2026-09-11)\nPreCompact SIGUE sin canal para inyectar contexto ni pedirte un turno (eso no cambió) —\npero SÍ puede lanzar trabajo EXTERNO detached (mismo patrón que exportar-sesion-master):\nbin/checkpoint-mecanico.js lee el transcript en streaming (memoria acotada) y escribe\n.claude/memory/hilo-mental-actual.andamio.md — árbol de archivos tocados, commits,\ncitas TEXTUALES del usuario y métricas — CERO tokens de modelo. El checkpoint skill lo FUSIONA."];
     CLAUDEMD [color="#e08e45",
               label="📜 `# Compact instructions` del CLAUDE.md (el CLI RE-LEE el heading al compactar)\n🟠 guía el RESUMEN: preserva el HILO íntegro, la tarea activa y las DECISIONES ABIERTAS\n(NO las cierres al resumir) — complementa, no sustituye, al checkpoint"];
 
@@ -154,7 +154,7 @@ digraph flujos {
     DUMP -> COMPACT [label="checkpoint COMPLETO\nya volcado"];
     DUMP -> WORK [label="ligero: punto de retorno\nsigue la corrida (NO compacta)", style=dashed];
     WORK -> COMPACT [label="🟡 AUTO-COMPACT sorpresa:\nsin checkpoint previo (caso peligroso\nque el sistema entero defiende)", color="#c9a227", fontcolor="#c9a227"];
-    COMPACT -> NOPRE [label="PreCompact\nNO ayuda"];
+    COMPACT -> NOPRE [label="PreCompact\nandamio mecánico"];
     COMPACT -> CLAUDEMD [label="al compactar el CLI\nre-lee el heading"];
     CLAUDEMD -> SS;
     NOPRE -> SS;
