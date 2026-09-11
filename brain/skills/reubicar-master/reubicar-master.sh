@@ -29,8 +29,17 @@ umask 077
 _uso(){ cat <<'USO'
 reubicar-master.sh — genera el handoff ejecutable de una mudanza de brain-master.
 
-  GENERAR   reubicar-master.sh --id <uuid> --dst-repo <ruta> --master-name <nombre> [opciones]
-  VERIFICAR reubicar-master.sh verificar <handoff.sh>
+  GENERAR    reubicar-master.sh --id <uuid> --dst-repo <ruta> --master-name <nombre> [opciones]
+  VERIFICAR  reubicar-master.sh verificar <handoff.sh>
+  PARIDAD    reubicar-master.sh paridad --dst-repo <ruta> [--t1 <mem>]... [--t2-local <arch>]...
+             [--bundle <tgz>] [--dst-protegido <subdir>] [--src-repo <ruta>]
+             G-PARITY: que lo del master este PRESENTE Y CORRECTO en el destino. T4 bifurca por la marca
+             `.claude/repo-compartido` (un repo PERSONAL no lleva guards por-repo, por norma dura), y con
+             `--bundle` distingue "falta" de "esta en el bundle, lo deposita S5".
+  CLASIFICAR reubicar-master.sh clasificar --src-repo <ruta> --dst-repo <ruta>
+             La EVIDENCIA para la Decisión #2 (frontera T1↔T3): por cada memoria del origen, su propia
+             `description`, si ya está en el destino, si está trackeada, cuándo se tocó, y si es `.local`
+             (canal sensible). NO propone el corte: eso lo decide el humano.
 
 Obligatorios (§7 del SKILL: se preguntan al humano en RUNTIME, no se asumen):
   --id <uuid>              el <id> VIGENTE de la sesión (Decisión #1 / G-ID: masters.json tiene
@@ -216,6 +225,217 @@ _verificar_handoff(){
     "$( [ -n "$P" ] && [ -f "$P" ] && echo 'EMBEBIDO (textual)' || echo 'presente (por símbolos: sin el preludio a mano NO se pudo comparar textualmente)' )" \
     "$(printf '%s\n' $_MARCADORES | grep -c . || true)"
 }
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# SUBCOMANDO `paridad` — G-PARITY EJECUTABLE (era otro bloque de markdown que el operador corría a mano)
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# Mide lo que el invariante NO-LOBOTOMÍA enuncia: que lo clasificado del-master esté PRESENTE Y CORRECTO
+# EN EL DESTINO. No mide `SRC == DST`: para la clase que §1.0.1 declara normal —el cerebro del master
+# nunca vivió en el origen— un `diff` contra un archivo ausente falla siempre y el gate bloquearía un
+# destino COMPLETO.
+#
+# Dos correcciones que salieron de CORRERLO de verdad el 2026-09-10, y que la versión en markdown traía:
+#
+#  (a) T4 NO puede exigir `.claude/settings.json` en TODO destino. La norma dura del cerebro dice
+#      «repo PERSONAL: memoria/skills SÍ, guards por-repo NUNCA» (sus guards salen del install GLOBAL +
+#      la cláusula de dedupe; una copia por-repo solo puede driftar). `cortex` no trae la marca
+#      `.claude/repo-compartido` ⇒ es PERSONAL y correctamente NO tiene `settings.json` — y el gate lo
+#      declaraba «lobotomía del cableado», empujando a crear justo la copia que la norma prohíbe. Dos
+#      piezas correctas por separado que se contradecían juntas. Ahora BIFURCA por la marca: la exige en
+#      COMPARTIDO (donde el brain por-repo es el CORREO de quien clona sin brain global) y en PERSONAL
+#      verifica que el install GLOBAL exista, que es de donde salen los candados.
+#
+#  (b) Las filas de T2 solo son evaluables DESPUÉS de S5, que es quien deposita el bundle. Corrido antes
+#      —lo natural, porque el flujo lo pone tras S1/S2— reportaba «FALTA EN EL DESTINO» sobre archivos que
+#      estaban en el bundle esperando su turno: lee como fallo cuando es el estado correcto. Con
+#      `--bundle` distingue «falta» de «está en el bundle, lo deposita S5».
+if [ "${1:-}" = paridad ]; then
+  shift
+  _p_src="$HOME/code/plantilladotnet"; _p_dst=""; _p_prot=""; _p_bundle=""
+  _p_t1=(); _p_t2=(); _p_t2root="CLAUDE.local.md"; _p_t2_dado=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --src-repo)      _p_src="${2:-}"; shift 2 ;;
+      --dst-repo)      _p_dst="${2:-}"; shift 2 ;;
+      --dst-protegido) _p_prot="${2:-}"; shift 2 ;;
+      --bundle)        _p_bundle="${2:-}"; shift 2 ;;
+      --t2-root)       _p_t2root="${2:-}"; shift 2 ;;
+      --t1)            _p_t1[${#_p_t1[@]}]="${2:-}"; shift 2 ;;
+      --t2-local)
+        [ "$_p_t2_dado" -eq 1 ] || { _p_t2=(); _p_t2_dado=1; }
+        _p_t2[${#_p_t2[@]}]="${2:-}"; shift 2 ;;
+      -h|--help)       _uso; exit 0 ;;
+      *) printf 'paridad: opción desconocida: %s\n' "$1" >&2; exit 2 ;;
+    esac
+  done
+  [ -n "$_p_dst" ] || { printf 'paridad: falta --dst-repo\n' >&2; exit 2; }
+  [ "$_p_t2_dado" -eq 1 ] || _p_t2=(conocimiento-propio.local.md autorizaciones-vigentes.local.md)
+  _p_srcm="$_p_src/.claude/memory"; _p_dstm="$_p_dst/.claude/memory"
+  _p_fail=0
+  _p_size(){ stat -c %s "$1" 2>/dev/null || stat -f %z "$1" 2>/dev/null || echo '?'; }
+
+  # ¿el archivo viaja en el bundle de S2? Se lista UNA vez: un `tar -tz` por archivo serían N pasadas.
+  _p_enbundle=""
+  [ -n "$_p_bundle" ] && [ -f "$_p_bundle" ] && _p_enbundle="$(tar -tzf "$_p_bundle" 2>/dev/null | sed 's#^\./##')"
+  _p_en_bundle(){ [ -n "$_p_enbundle" ] && printf '%s\n' "$_p_enbundle" | grep -qxF -- "$1"; }
+
+  # _p_fila <ruta-origen> <ruta-destino> <etiqueta> <es-t2:0|1>
+  _p_fila(){
+    if   [ -e "$1" ] && [ -e "$2" ]; then
+      if diff -q "$1" "$2" >/dev/null 2>&1; then printf '  ok    %s (idéntica en ambos)\n' "$3"
+      else printf '  ROTA  %s — existe en ambos y DIFIERE (%s vs %s bytes) => reconciliacion HUMANA, no se pisa\n' \
+             "$3" "$(_p_size "$1")" "$(_p_size "$2")"; _p_fail=1; fi
+    elif [ -e "$2" ]; then printf '  ok    %s (no venia del origen, ya esta en el destino)\n' "$3"
+    elif [ -e "$1" ]; then
+      if [ "$4" = 1 ] && _p_en_bundle "$3"; then
+        printf '  pend  %s — en el bundle de S2; lo deposita S5 (no es un fallo AUN)\n' "$3"
+      else
+        printf '  FALTA %s en el destino\n' "$3"; _p_fail=1
+      fi
+    else printf '  ambos %s — no esta en origen ni en destino: bien clasificada? (Decision #2)\n' "$3"; fi
+  }
+
+  # La RAMA del destino importa y el skill no lo decia: T1 vive en la ramita de S1, asi que medir con el
+  # destino parado en otra rama reporta un FALTA que es el arbol rotando, no una perdida. Se declara.
+  _p_rama="$(git -C "$_p_dst" branch --show-current 2>/dev/null || echo '(sin git)')"
+  printf '%s\n' "-- G-PARITY · presente y correcto EN EL DESTINO (no 'igual al origen')"
+  printf '%s\n' "   destino: $_p_dst  ·  rama: ${_p_rama:-(detached)}"
+  case "$_p_rama" in
+    docs/reubicar-*) : ;;
+    *) printf '%s\n' "   aviso: el destino NO esta en la ramita de S1 (docs/reubicar-*). Si T1 sale FALTA, revisa" \
+              "          primero la rama: el working tree ROTA y las copias de S1 viven en esa ramita." ;;
+  esac
+  for m in ${_p_t1[@]+"${_p_t1[@]}"}; do _p_fila "$_p_srcm/$m" "$_p_dstm/$m" "$m" 0; done
+  for m in ${_p_t2[@]+"${_p_t2[@]}"}; do _p_fila "$_p_srcm/$m" "$_p_dstm/$m" "$m" 1; done
+  _p_fila "$_p_src/$_p_t2root" "$_p_dst/$_p_t2root" "$_p_t2root" 1
+
+  # ── T4 · CABLEADO. BIFURCA por la marca `.claude/repo-compartido` (norma dura del cerebro) ──────
+  if [ -e "$_p_dst/.claude/repo-compartido" ]; then
+    if [ -f "$_p_dst/.claude/settings.json" ]; then
+      printf '  ok    T4: destino COMPARTIDO y trae su .claude/settings.json (el CORREO de quien clona sin brain global)\n'
+    else
+      printf '  FALTA T4: el destino se declara COMPARTIDO (.claude/repo-compartido) y NO trae .claude/settings.json\n'
+      printf '            => un colega que clone quedaria SIN los guards creyendo que los tiene. Propagalo con sincronizar-cerebro.sh\n'
+      _p_fail=1
+    fi
+  else
+    printf '  ok    T4: destino PERSONAL (sin marca repo-compartido) => por norma NO lleva guards por-repo;\n'
+    printf '            sus candados salen del install GLOBAL, y exigir settings.json aqui crearia el drift que la norma prohibe.\n'
+    if [ -f "$HOME/.claude/settings.json" ]; then
+      printf '  ok    T4: y el install GLOBAL existe (%s hook(s) cableado(s))\n' \
+        "$(jq '[.hooks // {} | .[] | .[]? | .hooks // [] | .[]] | length' "$HOME/.claude/settings.json" 2>/dev/null || echo '?')"
+    else
+      printf '  FALTA T4: no hay ~/.claude/settings.json => en un destino PERSONAL el master despertaria SIN candados.\n'
+      printf '            => corre el bootstrap del cerebro en esta maquina.\n'; _p_fail=1
+    fi
+  fi
+  [ -f "$_p_dst/.claude/settings.local.json" ] \
+    && printf '  ok    T4: settings.local.json presente (el outputStyle propio del master)\n' \
+    || printf '  aviso T4: sin settings.local.json => el master despertara SIN su outputStyle (per-maquina, gitignored: se re-crea a mano)\n'
+  if [ -n "$_p_prot" ]; then
+    [ -d "$_p_dst/$_p_prot" ] && printf '  ok    el subdir PROTEGIDO %s esta en su sitio\n' "$_p_prot" \
+      || { printf '  FALTA el subdir protegido %s en %s (destino equivocado?)\n' "$_p_prot" "$_p_dst"; _p_fail=1; }
+  fi
+  printf '\n'
+  if [ "$_p_fail" -eq 0 ]; then echo "OK G-PARITY en verde"; exit 0
+  else echo "BLOQUEA G-PARITY hasta resolver lo marcado (las filas 'pend' NO cuentan: las cierra S5)"; exit 1; fi
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# SUBCOMANDO `clasificar` — la EVIDENCIA para la Decisión #2, no un veredicto
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# Reemplaza al "comando de descubrimiento" que §7 #2 traía antes: un `grep -rilEv` de seis palabras de
+# stack (`plantilladotnet|.NET|blazor|dapper|EF Core|webapi|migracion-ef`) sobre las memorias del origen.
+# MEDIDO el 2026-09-10 en la mudanza real: devolvió **44 de 43** archivos — incluido el propio MEMORY.md —
+# porque "no menciona blazor" no es una señal de PROPIEDAD: casi ninguna memoria menciona el stack, ni las
+# de otro proyecto ni las de trato personal. Un descubrimiento que no descarta nada no descubre nada, y
+# empujaba al operador a inventar el corte de memoria (que es exactamente lo que pasó).
+#
+# Las señales que SÍ hablan de propiedad, y que este subcomando pone en una tabla:
+#   · el `description:` que la memoria trae de sí misma (dice de QUÉ es, en sus palabras);
+#   · si YA existe en el destino (si está, no hay nada que mover — §1.0.1);
+#   · si está TRACKEADA en el origen (si se copia sin retirarla, quedan dos copias versionadas que driftan);
+#   · cuándo la tocó el último commit (una memoria del master se toca cuando se trabaja el cerebro);
+#   · el sufijo `.local.md`, que por convención del cerebro es el canal SENSIBLE (T2), no una opinión.
+#
+# NO propone el corte a propósito. La frontera T1↔T3 es la Decisión #2 del humano (§7), y una columna
+# "veredicto" invitaría a aceptarla sin leer — el modo de falla que este subcomando existe para cerrar.
+if [ "${1:-}" = clasificar ]; then
+  shift
+  _c_src="$HOME/code/plantilladotnet"; _c_dst=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --src-repo) _c_src="${2:-}"; shift 2 ;;
+      --dst-repo) _c_dst="${2:-}"; shift 2 ;;
+      -h|--help)  _uso; exit 0 ;;
+      *) printf 'clasificar: opción desconocida: %s\n' "$1" >&2; exit 2 ;;
+    esac
+  done
+  [ -n "$_c_dst" ] || { printf 'clasificar: falta --dst-repo (el destino se necesita para la columna "destino")\n' >&2; exit 2; }
+  _c_srcm="$_c_src/.claude/memory"; _c_dstm="$_c_dst/.claude/memory"
+  [ -d "$_c_srcm" ] || { printf 'clasificar: no hay %s\n' "$_c_srcm" >&2; exit 2; }
+
+  _c_size(){ stat -c %s "$1" 2>/dev/null || stat -f %z "$1" 2>/dev/null || echo '?'; }
+
+  # La descripción que la memoria da de SÍ MISMA: el `description:` del frontmatter (una línea o un
+  # bloque `>-`/`|` con continuaciones indentadas), y si no lo trae, su primer encabezado o su primer `>`.
+  _c_desc(){
+    awk '
+      NR==1 && $0=="---" { fm=1; next }
+      fm && /^---[[:space:]]*$/ { fm=0; next }
+      fm && /^description:/ {
+        sub(/^description:[[:space:]]*/, ""); gsub(/^[>|]-?[[:space:]]*$/, "")
+        d=$0; cont=1; next
+      }
+      fm && cont && /^[[:space:]]+/ { sub(/^[[:space:]]+/, " "); d=d $0; next }
+      fm && cont { cont=0 }
+      !fm && d=="" && /^# / { sub(/^# /, ""); d=$0 }
+      !fm && d=="" && /^> / { sub(/^> /, ""); d=$0 }
+      END { gsub(/^[["]|[]"]$/, "", d); gsub(/[[:space:]]+/, " ", d); print d }
+    ' "$1" 2>/dev/null | cut -c1-118
+  }
+
+  printf '%s\n' "── EVIDENCIA para la Decisión #2 · origen: $_c_srcm"
+  printf '%s\n' "   destino: $_c_dstm"
+  printf '\n%-46s %8s  %-7s %-6s %-10s\n' "memoria" "bytes" "destino" "canal" "ult.commit"
+  printf '%s\n' "$(printf '%.0s─' $(seq 1 88))"
+  _c_n=0; _c_ya=0; _c_local=0
+  for _c_f in "$_c_srcm"/*.md; do
+    [ -f "$_c_f" ] || continue
+    _c_b="$(basename "$_c_f")"; _c_n=$((_c_n+1))
+    # ASCII a propósito: `printf '%-7s'` cuenta BYTES, así que un acento desalinea la tabla entera.
+    _c_en_dst=$([ -f "$_c_dstm/$_c_b" ] && { _c_ya=$((_c_ya+1)); echo "YA"; } || echo "-")
+    _c_trk=$(git -C "$_c_src" ls-files --error-unmatch -- ".claude/memory/$_c_b" >/dev/null 2>&1 && echo "git" || echo "ign")
+    _c_last=$(git -C "$_c_src" log -1 --format=%ad --date=short -- ".claude/memory/$_c_b" 2>/dev/null)
+    case "$_c_b" in *.local.md) _c_local=$((_c_local+1)); _c_mark=' ⟵ .local ⇒ canal SENSIBLE (T2 por convención)' ;; *) _c_mark='' ;; esac
+    printf '%-46s %8s  %-7s %-6s %-10s%s\n' "$_c_b" "$(_c_size "$_c_f")" \
+      "$_c_en_dst" "$_c_trk" "${_c_last:-(sin commit)}" "$_c_mark"
+    _c_d="$(_c_desc "$_c_f")"
+    if [ -z "$_c_d" ]; then   # ni frontmatter ni encabezado: la primera línea útil informa más que "ábrela"
+      _c_d="$(grep -vE '^[[:space:]]*$|^---[[:space:]]*$' "$_c_f" 2>/dev/null | head -1 | cut -c1-118)"
+      [ -n "$_c_d" ] && _c_d="(sin description) $_c_d" || _c_d="(vacía)"
+    fi
+    printf '    %s\n' "$_c_d"
+  done
+  printf '\n%s\n' "$_c_n memoria(s) · $_c_ya ya en el destino · $_c_local con sufijo .local"
+  cat <<'LEYENDA'
+
+CÓMO LEERLO (ninguna columna decide por sí sola — la frontera T1↔T3 es la Decisión #2, del humano):
+  · destino=YA    → ya está allá: nada que mover (§1.0.1). Si además DIFIERE, S1/S5 PARAN y piden
+                    reconciliación humana; no se pisa.
+  · canal=git     → está VERSIONADA en el origen: copiarla al destino sin retirarla de allá deja DOS
+                    copias versionadas, que driftan. Retirarla del origen es DESTRUCTIVO para el origen ⇒ decisión del humano.
+  · canal=ign     → gitignored en el origen. Con sufijo `.local` es el canal SENSIBLE por convención del cerebro: viaja por bundle gitignored (T2), NUNCA
+                    versionado, y da igual que el destino sea privado (un privado puede volverse público).
+  · ult.commit    → cuándo se tocó por última vez: el cerebro del master se toca al trabajar el cerebro.
+  · TRATO/preferencia personal → NO es T1/T2/T3. Por norma del cerebro vive en el
+                    `como-trabajar-con-<user>.md` GLOBAL per-máquina, que no viaja por git. Si una memoria
+                    es una preferencia tuya y no conocimiento del proyecto, su destino es ESE archivo.
+
+Con el corte confirmado, pásalo al generador:  --t1 <memoria>  (repetible)
+LEYENDA
+  exit 0
+fi
 
 # ── subcomando `verificar` (re-verifica un handoff ya escrito: viajó por Drive/Windows, o lo generó
 #    otra máquina). Se despacha ANTES del parseo de flags: no necesita ni parámetros ni Drive. ──────

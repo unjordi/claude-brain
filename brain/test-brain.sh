@@ -5491,6 +5491,20 @@ esac
 
 # ── r2-5: el PRELUDIO se publica con rename. Es un archivo COMPARTIDO entre corridas: dos mudanzas
 #          casi simultáneas en la misma máquina lo sobre-escribían a la vez, sin lock.
+# ── anti-regresión: el "descubrimiento" de §7 #2 NO vuelve a ser un grep invertido de palabras de stack.
+#    Devolvía 44 de 43 memorias (medido) y empujaba a inventar el corte que decide el humano.
+#    Se mide en los BLOQUES EJECUTABLES (```bash), no en el texto: la prosa que explica POR QUÉ se retiró
+#    lo cita a propósito, y esa explicación es justo lo que el skill existe para conservar. Misma
+#    distinción que el candado del handoff hace entre línea ejecutable y comentario.
+R2FENCES="$R2FIX/skill-bash.txt"
+awk '/^```bash$/{d=1;next} /^```$/{d=0} d' "$R2SK" > "$R2FENCES"
+grep -qF 'grep -rilEv' "$R2FENCES" \
+  && bad "r2-6: §7 #2 volvió a PRESCRIBIR el grep invertido de palabras de stack (no descarta nada: 44 de 43)" \
+  || ok "r2-6: ningún bloque ejecutable del SKILL prescribe el grep invertido de stack"
+{ grep -qF 'clasificar --src-repo' "$R2SK" && grep -qF '= clasificar ]' "$R2SH"; } \
+  && ok "r2-6: §7 #2 apunta al subcomando 'clasificar' y el script lo implementa" \
+  || bad "r2-6: el skill pide 'clasificar' pero el script no lo trae (o al revés)"
+
 { grep -qF 'PRELUDIO_TMP="$PRELUDIO.tmp.$$"' "$R2SH" && grep -qF 'mv -f "$PRELUDIO_TMP" "$PRELUDIO"' "$R2SH"; } \
   && ok "r2-5 preludio: se escribe a un temporal y se publica con mv (rename atómico), no con cat > directo" \
   || bad "r2-5 preludio: se escribe directo al archivo compartido (dos corridas concurrentes se pisan)"
@@ -5623,6 +5637,109 @@ if env -u REUBICAR_MODO HOME="$E2EHOME" CLAUDE_CONFIG_DIR="$E2EHOME/.claude" COR
 else
   grep -q 'MÁS VIEJA que este skill' "$E2ECAP"     && ok "(e2e) el preflight de CAPACIDAD aborta si el bin instalado no trae lo que el guion invoca"     || bad "(e2e) abortó, pero no por el preflight de capacidad: $(tail -2 "$E2ECAP" | tr '\n' ' ')"
 fi
+# ── `clasificar`: la EVIDENCIA de la Decisión #2. Reemplazó a un `grep -rilEv` de palabras de stack que
+#    devolvía 44 de 43 memorias (medido 2026-09-10) — un descubrimiento que no descarta nada no descubre
+#    nada, y empujó a inventar el corte. Se prueba que las CUATRO señales aparecen y que NO hay veredicto.
+E2ECLAS="$E2EFIX/clasificar.log"
+mkdir -p "$E2ESRC/.claude/memory" "$E2EDST/.claude/memory"
+cat > "$E2ESRC/.claude/memory/con-descripcion.md" <<'MEMEOF'
+---
+name: con-descripcion
+description: "una memoria que dice de que es en sus propias palabras"
+---
+cuerpo
+MEMEOF
+printf '# Solo un encabezado
+' > "$E2ESRC/.claude/memory/solo-encabezado.md"
+printf 'linea suelta sin frontmatter ni encabezado
+' > "$E2ESRC/.claude/memory/sin-nada.md"
+printf 'secreto de identidad
+' > "$E2ESRC/.claude/memory/identidad.local.md"
+printf 'ya migrada
+' > "$E2ESRC/.claude/memory/ya-en-destino.md"
+printf 'ya migrada
+' > "$E2EDST/.claude/memory/ya-en-destino.md"
+git -C "$E2ESRC" add .claude/memory/con-descripcion.md >/dev/null 2>&1
+git -C "$E2ESRC" -c user.email=t@t -c user.name=t commit -q -m "mem" >/dev/null 2>&1
+if e2e bash "$E2ESH" clasificar --src-repo "$E2ESRC" --dst-repo "$E2EDST" > "$E2ECLAS" 2>&1; then
+  ok "(e2e) 'clasificar' corre sin necesitar id, Drive ni preludio"
+else
+  bad "(e2e) 'clasificar' falló: $(tail -2 "$E2ECLAS" | tr '\n' ' ')"
+fi
+grep -q 'una memoria que dice de que es' "$E2ECLAS" \
+  && ok "(e2e) clasificar: extrae el 'description' del frontmatter (la memoria hablando de sí misma)" \
+  || bad "(e2e) clasificar: no extrajo el description del frontmatter"
+grep -q 'Solo un encabezado' "$E2ECLAS" \
+  && ok "(e2e) clasificar: sin frontmatter cae al encabezado" || bad "(e2e) clasificar: no cayó al encabezado"
+grep -q 'linea suelta sin frontmatter' "$E2ECLAS" \
+  && ok "(e2e) clasificar: sin description NI encabezado muestra la primera línea útil (no un 'ábrela')" \
+  || bad "(e2e) clasificar: no mostró la primera línea útil"
+grep -qE '^identidad\.local\.md.*SENSIBLE' "$E2ECLAS" \
+  && ok "(e2e) clasificar: marca el sufijo .local como canal SENSIBLE (T2 por convención)" \
+  || bad "(e2e) clasificar: no marcó el .local como sensible"
+grep -qE '^ya-en-destino\.md +[0-9]+ +YA' "$E2ECLAS" \
+  && ok "(e2e) clasificar: distingue lo que YA está en el destino (§1.0.1: nada que mover)" \
+  || bad "(e2e) clasificar: no marcó la que ya está en el destino"
+{ grep -qE '^con-descripcion\.md.* git ' "$E2ECLAS" && grep -qE '^identidad\.local\.md.* ign ' "$E2ECLAS"; } \
+  && ok "(e2e) clasificar: distingue versionada (git) de gitignored (ign) — el aviso del duplicado que drifta" \
+  || bad "(e2e) clasificar: no distingue el canal git/ign en el origen"
+grep -qiE 'ninguna columna decide por sí sola|es la Decisión #2' "$E2ECLAS" \
+  && ok "(e2e) clasificar: NO emite veredicto — declara que el corte es del humano" \
+  || bad "(e2e) clasificar: perdió la leyenda que le devuelve la decisión al humano"
+grep -qiE 'veredicto:|T1$|=> T1|⇒ T1' "$E2ECLAS" \
+  && bad "(e2e) clasificar: emitió un veredicto por memoria (invita a aceptar el corte sin leerlo)" \
+  || ok "(e2e) clasificar: cero columna de veredicto por memoria"
+command rm -f "$E2ESRC/.claude/memory"/*.md "$E2EDST/.claude/memory/ya-en-destino.md"
+# ── `paridad` (G-PARITY ejecutable). Era otro bloque de markdown, y al CORRERLO aparecieron dos defectos
+#    que la lectura no vio: (a) exigía `.claude/settings.json` en TODO destino, contradiciendo la norma dura
+#    «repo PERSONAL: guards por-repo NUNCA» ⇒ bloqueaba un destino correcto y empujaba a crear el drift que
+#    la norma prohíbe; (b) reportaba «FALTA» sobre T2 que estaba en el bundle esperando a S5.
+E2EPAR="$E2EFIX/paridad.log"
+printf '{"hooks":{}}\n' > "$E2EHOME/.claude/settings.json"    # simula el install GLOBAL de la máquina
+printf 'contenido igual\n' > "$E2ESRC/.claude/memory/t1-migrada.md"
+printf 'contenido igual\n' > "$E2EDST/.claude/memory/t1-migrada.md"
+printf 'solo en el origen\n' > "$E2ESRC/.claude/memory/t1-pendiente.md"
+printf 'sensible\n' > "$E2ESRC/.claude/memory/secreta.local.md"
+E2EBUNDLE="$E2EFIX/bundle.tgz"
+tar -C "$E2ESRC/.claude/memory" -czf "$E2EBUNDLE" secreta.local.md
+# (1) destino PERSONAL (sin marca) + T1 presente + T2 en el bundle ⇒ VERDE
+if e2e bash "$E2ESH" paridad --src-repo "$E2ESRC" --dst-repo "$E2EDST" --bundle "$E2EBUNDLE" \
+     --t1 t1-migrada.md --t2-local secreta.local.md > "$E2EPAR" 2>&1; then
+  ok "(e2e) paridad: destino PERSONAL sin settings.json pasa VERDE (la norma prohíbe guards por-repo ahí)"
+else
+  bad "(e2e) paridad: bloqueó un destino PERSONAL correcto: $(grep -E 'FALTA' "$E2EPAR" | head -2 | tr '\n' ' ')"
+fi
+grep -q 'destino PERSONAL' "$E2EPAR" \
+  && ok "(e2e) paridad: T4 DICE por qué no exige settings.json en un destino personal" \
+  || bad "(e2e) paridad: T4 no explica la bifurcación personal/compartido"
+grep -qE '^  pend  secreta\.local\.md' "$E2EPAR" \
+  && ok "(e2e) paridad: un T2 que viaja en el bundle es 'pend' (lo deposita S5), no un fallo" \
+  || bad "(e2e) paridad: cuenta como FALTA un T2 que está en el bundle esperando a S5"
+# (2) la MISMA situación declarada COMPARTIDA y sin settings.json ⇒ BLOQUEA (ahí el correo sí hace falta)
+touch "$E2EDST/.claude/repo-compartido"
+if e2e bash "$E2ESH" paridad --src-repo "$E2ESRC" --dst-repo "$E2EDST" --bundle "$E2EBUNDLE" \
+     --t1 t1-migrada.md --t2-local secreta.local.md > "$E2EPAR" 2>&1; then
+  bad "(e2e) paridad: un destino COMPARTIDO sin settings.json pasó (un colega clonaría SIN guards)"
+else
+  grep -q 'se declara COMPARTIDO' "$E2EPAR" \
+    && ok "(e2e) paridad: un destino COMPARTIDO sin settings.json BLOQUEA (el correo de guards falta)" \
+    || bad "(e2e) paridad: bloqueó, pero no por la marca de repo compartido"
+fi
+command rm -f "$E2EDST/.claude/repo-compartido"
+# (3) un T1 que sigue solo en el origen ⇒ FALTA de verdad
+if e2e bash "$E2ESH" paridad --src-repo "$E2ESRC" --dst-repo "$E2EDST" \
+     --t1 t1-pendiente.md --t2-local secreta.local.md > "$E2EPAR" 2>&1; then
+  bad "(e2e) paridad: dio verde con un T1 ausente del destino"
+else
+  grep -qE '^  FALTA t1-pendiente\.md' "$E2EPAR" \
+    && ok "(e2e) paridad: un T1 ausente del destino sí es FALTA (sin bundle que lo excuse)" \
+    || bad "(e2e) paridad: no reportó el T1 ausente"
+fi
+grep -q 'rama:' "$E2EPAR" \
+  && ok "(e2e) paridad: declara la RAMA del destino (un FALTA puede ser el working tree rotando)" \
+  || bad "(e2e) paridad: no declara la rama del destino"
+command rm -f "$E2ESRC/.claude/memory"/*.md "$E2EDST/.claude/memory/t1-migrada.md"
+
 # el ID se interpola en rutas ⇒ se valida su forma, y los obligatorios no tienen default
 e2e bash "$E2ESH" --dst-repo "$E2EDST" --master-name x >/dev/null 2>&1 \
   && bad "(e2e) el script generó sin --id" || ok "(e2e) sin --id no genera (exit != 0)"
