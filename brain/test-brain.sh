@@ -1909,8 +1909,12 @@ lrout="$(cd "$LRREPO" && CLAUDE_INTEGRACION_BASE=miDevelop bash "$HOOKS/limpiar-
 printf '%s' "$lrout" | grep -q 'borraría: feat/hecha'      && ok "b3c: rama squash-integrada → se barrería"                  || bad "b3c: no marcó feat/hecha para borrar; got: $lrout"
 printf '%s' "$lrout" | grep -q 'CONSERVADA.*feat/viva'     && ok "b3c: rama con trabajo sin integrar → conservada"            || bad "b3c: no conservó feat/viva; got: $lrout"
 printf '%s\n' "$lrout" | grep -v '^limpiar-ramas:' | grep -q 'miDevelop' && bad "b3c: tocó la base/rama actual miDevelop; got: $lrout" || ok "b3c: la base/rama actual (miDevelop) NO se lista para borrar ni conservar"
-printf '%s' "$lrout" | grep -q 'keep/respaldo' && bad "b3c: keep/respaldo NO debe tocarse (protegida)" || ok "b3c: keep/* protegida (no se lista)"
-printf '%s' "$lrout" | grep -q 'feat/en-wt' && bad "b3c: feat/en-wt está checked-out en un worktree → NO debe listarse (branch -D la rehúsa); got: $lrout" || ok "b3c: rama checked-out en un worktree → protegida (no se lista)"
+# A-1 (auditoría 2026-09-11): keep/respaldo y feat/en-wt NUNCA deben tratarse como candidatas a
+# borrar/conservar — pero SÍ deben nombrarse en el resumen de omitidas (transparencia, "no silent caps").
+printf '%s' "$lrout" | grep -qE '(borrar[ií]a|borrada|CONSERVADA[^$]*):? keep/respaldo' && bad "b3c: keep/respaldo tratada como candidata a borrar/conservar (protegida)" || ok "b3c: keep/* protegida (no se trata como candidata)"
+printf '%s' "$lrout" | grep -q 'protegida(s) por convención:.*keep/respaldo' && ok "b3c: keep/* aparece NOMBRADA en el resumen de omitidas (A-1, no silent caps)" || bad "b3c: keep/respaldo no aparece en el resumen de omitidas; got: $lrout"
+printf '%s' "$lrout" | grep -qE '(borrar[ií]a|borrada|CONSERVADA[^$]*):? feat/en-wt' && bad "b3c: feat/en-wt está checked-out en un worktree → NO debe tratarse como candidata (branch -D la rehúsa); got: $lrout" || ok "b3c: rama checked-out en un worktree → protegida (no se trata como candidata)"
+printf '%s' "$lrout" | grep -q 'retenida(s) por worktree:.*feat/en-wt' && ok "b3c: feat/en-wt aparece NOMBRADA en el resumen de omitidas (A-1)" || bad "b3c: feat/en-wt no aparece en el resumen de omitidas; got: $lrout"
 git -C "$LRREPO" merge-base --is-ancestor feat/en-wt miDevelop 2>/dev/null && ok "b3c(teeth): feat/en-wt ES ancestro de base (zombie real) → solo la protección de worktree la salva" || bad "b3c(teeth): feat/en-wt no era ancestro (test mal armado)"
 # teeth: sin la protección, keep/respaldo sería zombie (ancestro de base) — confirma que la protección es la que lo salva
 git -C "$LRREPO" merge-base --is-ancestor keep/respaldo miDevelop 2>/dev/null && ok "b3c(teeth): keep/respaldo ES ancestro de base (zombie real) → solo la protección lo conserva" || bad "b3c(teeth): keep/respaldo no era ancestro (test mal armado)"
@@ -2073,6 +2077,240 @@ bz_es_zombie "$DZREPO" feat/multi develop \
   || ok "b3g: commit post-merge (más allá del head mergeado) → CONSERVA pese al PR mergeado"
 unset CLAUDE_BZ_PRCACHE
 rm -rf "$DZROOT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (b3h) bz_es_zombie: señal (e) 'Rama: <rama>' en el squash — determinista, LOCAL, SIN red ni gh/glab (A-3) =="
+# Hallazgo de mayor valor de la auditoría 2026-09-11: (d) es la ÚNICA señal que cazaba el squash
+# multi-commit y depende de gh/glab (ausentes del PATH de launchd). La convención de equipo pone
+# "Rama: <nombre>" en el mensaje de cada squash → (e) prueba la integración sin ningún binario externo.
+EEROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-ee.XXXXXX")"; EEREPO="$EEROOT/repo"; mkdir -p "$EEREPO"
+git -C "$EEREPO" init -q >/dev/null 2>&1
+git -C "$EEREPO" symbolic-ref HEAD refs/heads/develop >/dev/null 2>&1
+git -C "$EEREPO" config user.email t@t >/dev/null 2>&1; git -C "$EEREPO" config user.name tester >/dev/null 2>&1
+printf 'base\n' > "$EEREPO/base.txt"; git -C "$EEREPO" add base.txt >/dev/null 2>&1; git -C "$EEREPO" commit -qm base >/dev/null 2>&1
+git -C "$EEREPO" checkout -q -b feat/multi develop >/dev/null 2>&1
+for n in 1 2 3; do printf 'x\n' > "$EEREPO/f$n.txt"; git -C "$EEREPO" add "f$n.txt" >/dev/null 2>&1; git -C "$EEREPO" commit -qm "c$n" >/dev/null 2>&1; done
+git -C "$EEREPO" checkout -q develop >/dev/null 2>&1
+git -C "$EEREPO" merge --squash feat/multi >/dev/null 2>&1
+git -C "$EEREPO" commit -qm "$(printf 'squash feat/multi\n\nRama: feat/multi\n')" >/dev/null 2>&1
+git -C "$EEREPO" checkout -q -b feat/otra-sin-convencion develop >/dev/null 2>&1
+printf 'algo\n' > "$EEREPO/otra.txt"; git -C "$EEREPO" add otra.txt >/dev/null 2>&1; git -C "$EEREPO" commit -qm "trabajo aparte, NO integrado (ni por ancestro ni por 'Rama:')" >/dev/null 2>&1
+git -C "$EEREPO" checkout -q develop >/dev/null 2>&1
+. "$HOOKS/ramas-zombie.sh"
+git -C "$EEREPO" cherry develop feat/multi 2>/dev/null | grep -q '^+' \
+  && ok "b3h(teeth): squash multi-commit → git cherry con '+' (sin (e)/(d) se conservaría)" \
+  || bad "b3h(teeth): test mal armado"
+PATH=/usr/bin:/bin bz_es_zombie "$EEREPO" feat/multi develop \
+  && ok "b3h: (e) 'Rama:' en el log de la base → ZOMBIE, SIN red y SIN gh/glab (PATH mínimo de launchd)" \
+  || bad "b3h: (e) no podó el squash multi-commit con la línea 'Rama:' presente"
+[ "$BZ_RAZON" = e ] && ok "b3h: BZ_RAZON=e (señal local, no d/host)" || bad "b3h: BZ_RAZON inesperado; got: $BZ_RAZON"
+bz_es_zombie "$EEREPO" feat/otra-sin-convencion develop \
+  && bad "b3h: SAFETY — podó una rama SIN la línea 'Rama:' (falso positivo del grep)" \
+  || ok "b3h: SAFETY — rama sin 'Rama: <ella>' en el log NO se poda por (e)"
+rm -rf "$EEROOT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (b3i) limpiar-ramas: A-3 — sin gh/glab en el PATH y sin la línea 'Rama:', el squash multi-commit reporta INDETERMINADA, nunca 'trabajo sin integrar' a secas =="
+DIROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-di.XXXXXX")"; DIREPO="$DIROOT/repo"; mkdir -p "$DIREPO"
+git -C "$DIREPO" init -q >/dev/null 2>&1
+git -C "$DIREPO" symbolic-ref HEAD refs/heads/develop >/dev/null 2>&1
+git -C "$DIREPO" config user.email t@t >/dev/null 2>&1; git -C "$DIREPO" config user.name tester >/dev/null 2>&1
+git -C "$DIREPO" remote add origin https://gitlab.com/fake/repo.git >/dev/null 2>&1
+printf 'base\n' > "$DIREPO/base.txt"; git -C "$DIREPO" add base.txt >/dev/null 2>&1; git -C "$DIREPO" commit -qm base >/dev/null 2>&1
+git -C "$DIREPO" checkout -q -b feat/multi develop >/dev/null 2>&1
+for n in 1 2 3; do printf 'x\n' > "$DIREPO/f$n.txt"; git -C "$DIREPO" add "f$n.txt" >/dev/null 2>&1; git -C "$DIREPO" commit -qm "c$n" >/dev/null 2>&1; done
+DI_OID="$(git -C "$DIREPO" rev-parse feat/multi)"
+git -C "$DIREPO" checkout -q develop >/dev/null 2>&1
+git -C "$DIREPO" merge --squash feat/multi >/dev/null 2>&1; git -C "$DIREPO" commit -qm "squash sin convencion" >/dev/null 2>&1
+DICACHE="$DIROOT/prcache"; printf 'feat/multi\t%s\n' "$DI_OID" > "$DICACHE"
+diout="$(cd "$DIREPO" && PATH=/usr/bin:/bin bash "$HOOKS/limpiar-ramas.sh" --dry-run --no-fetch 2>&1)"
+printf '%s' "$diout" | grep -q 'INDETERMINADA' && ok "b3i: PATH de launchd (sin gh/glab) → reporta INDETERMINADA" || bad "b3i: no reportó INDETERMINADA; got: $diout"
+printf '%s' "$diout" | grep -q 'CONSERVADA (trabajo sin integrar): feat/multi' && bad "b3i: afirmó 'trabajo sin integrar' cuando NO SE PUDO comprobar (mentira de A-3)" || ok "b3i: NO afirma 'trabajo sin integrar' a secas (ya no miente)"
+diout2="$(cd "$DIREPO" && PATH=/usr/bin:/bin CLAUDE_BZ_PRCACHE="$DICACHE" bash "$HOOKS/limpiar-ramas.sh" --dry-run --no-fetch 2>&1)"
+printf '%s' "$diout2" | grep -q 'borraría: feat/multi' && ok "b3i: con el PR-cache inyectado (equivalente a tener gh/glab) → integrada, se poda" || bad "b3i: con PR-cache inyectado no podó feat/multi; got: $diout2"
+rm -rf "$DIROOT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (b3j) limpiar-ramas: C-1 — NUNCA borra la rama REMOTA si va ADELANTE del tip local (colega con commits nuevos) =="
+C1ROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-c1.XXXXXX")"; C1BARE="$C1ROOT/remote.git"; C1A="$C1ROOT/clonA"; C1B="$C1ROOT/clonB"
+git init -q --bare "$C1BARE" >/dev/null 2>&1
+git init -q "$C1A" >/dev/null 2>&1
+git -C "$C1A" symbolic-ref HEAD refs/heads/miDevelop >/dev/null 2>&1
+git -C "$C1A" config user.email t@t >/dev/null 2>&1; git -C "$C1A" config user.name tester >/dev/null 2>&1
+git -C "$C1A" remote add origin "$C1BARE" >/dev/null 2>&1
+printf 'base\n' > "$C1A/base.txt"; git -C "$C1A" add base.txt >/dev/null 2>&1; git -C "$C1A" commit -qm base >/dev/null 2>&1
+git -C "$C1A" push -q -u origin miDevelop >/dev/null 2>&1
+git -C "$C1A" checkout -q -b feat/compartida miDevelop >/dev/null 2>&1
+printf 'x\n' > "$C1A/f.txt"; git -C "$C1A" add f.txt >/dev/null 2>&1; git -C "$C1A" commit -qm "base compartida" >/dev/null 2>&1
+git -C "$C1A" push -q -u origin feat/compartida >/dev/null 2>&1
+git clone -q "$C1BARE" "$C1B" >/dev/null 2>&1
+git -C "$C1B" checkout -q feat/compartida >/dev/null 2>&1
+git -C "$C1B" config user.email col@t >/dev/null 2>&1; git -C "$C1B" config user.name colega >/dev/null 2>&1
+printf 'ORO DEL COLEGA\n' > "$C1B/oro.txt"; git -C "$C1B" add oro.txt >/dev/null 2>&1; git -C "$C1B" commit -qm "trabajo nuevo del colega" >/dev/null 2>&1
+git -C "$C1B" push -q origin feat/compartida >/dev/null 2>&1
+git -C "$C1A" checkout -q miDevelop >/dev/null 2>&1
+git -C "$C1A" merge --squash feat/compartida >/dev/null 2>&1; git -C "$C1A" commit -qm "squash feat/compartida" >/dev/null 2>&1
+. "$HOOKS/ramas-zombie.sh"
+bz_es_zombie "$C1A" feat/compartida miDevelop && ok "b3j(teeth): feat/compartida (tip local, SIN el commit del colega) es zombie por contenido" || bad "b3j(teeth): test mal armado, no detectó zombie"
+git -C "$C1A" ls-remote --exit-code --heads origin feat/compartida >/dev/null 2>&1 && ok "b3j(teeth): la remota feat/compartida existe ANTES del barrido (con el commit del colega)" || bad "b3j(teeth): remota no existía, test mal armado"
+c1out="$(cd "$C1A" && CLAUDE_INTEGRACION_BASE=miDevelop bash "$HOOKS/limpiar-ramas.sh" 2>&1)"
+printf '%s' "$c1out" | grep -q 'ADELANTE del tip local' && ok "b3j: C-1 — reportó que la remota va ADELANTE del tip local (NO se borra)" || bad "b3j: no avisó que la remota va adelante; got: $c1out"
+git -C "$C1A" ls-remote --exit-code --heads origin feat/compartida >/dev/null 2>&1 && ok "b3j: C-1 — la remota feat/compartida SIGUE existiendo (el commit del colega SOBREVIVIÓ)" || bad "b3j: C-1 REGRESIÓN — la remota se borró, PÉRDIDA DE DATOS del colega"
+git -C "$C1A" fetch -q origin >/dev/null 2>&1
+git -C "$C1A" log origin/feat/compartida --format=%s 2>/dev/null | grep -q "trabajo nuevo del colega" && ok "b3j: el commit del colega sigue en la remota" || bad "b3j: PÉRDIDA DE DATOS — el commit del colega ya no aparece en la remota"
+rm -rf "$C1ROOT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (b3k) limpiar-worktrees: C-2 — protege el worktree de una mini-develop (Develop*) y de keep/* (antes: SIN protección alguna) =="
+C2ROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-c2.XXXXXX")"; C2REPO="$C2ROOT/repo"; mkdir -p "$C2REPO"
+git -C "$C2REPO" init -q >/dev/null 2>&1
+git -C "$C2REPO" symbolic-ref HEAD refs/heads/develop >/dev/null 2>&1
+git -C "$C2REPO" config user.email t@t >/dev/null 2>&1; git -C "$C2REPO" config user.name tester >/dev/null 2>&1
+printf 'base\n' > "$C2REPO/a.txt"; git -C "$C2REPO" add a.txt >/dev/null 2>&1; git -C "$C2REPO" commit -qm base >/dev/null 2>&1
+git -C "$C2REPO" branch DevelopUnjordi >/dev/null 2>&1
+git -C "$C2REPO" branch keep/no-tocar >/dev/null 2>&1
+git -C "$C2REPO" worktree add -q "$C2ROOT/wt-mini" DevelopUnjordi >/dev/null 2>&1
+git -C "$C2REPO" worktree add -q "$C2ROOT/wt-keep" keep/no-tocar >/dev/null 2>&1
+printf 'trabajo del dia\n' > "$C2ROOT/wt-mini/pendiente.md"
+c2out="$(cd "$C2REPO" && bash "$HOOKS/limpiar-worktrees.sh" --dry-run 2>&1)"
+printf '%s' "$c2out" | grep -q 'PROTEGIDA.*wt-mini' && ok "b3k: C-2 — el worktree de la mini-develop (DevelopUnjordi) queda PROTEGIDO" || bad "b3k: NO protegió el worktree de la mini; got: $c2out"
+printf '%s' "$c2out" | grep -q 'PROTEGIDA.*wt-keep' && ok "b3k: C-2 — el worktree de keep/no-tocar queda PROTEGIDO" || bad "b3k: NO protegió keep/*; got: $c2out"
+printf '%s' "$c2out" | grep -qi 'zombie.*wt-mini\|zombie.*wt-keep' && bad "b3k: C-2 REGRESIÓN — listó un worktree protegido como zombie" || ok "b3k: ninguno de los dos se lista como zombie"
+( cd "$C2REPO" && bash "$HOOKS/limpiar-worktrees.sh" >/dev/null 2>&1 )
+[ -d "$C2ROOT/wt-mini" ] && ok "b3k: C-2 — el DIRECTORIO del worktree de la mini SOBREVIVE al barrido real" || bad "b3k: C-2 REGRESIÓN — el worktree de la mini fue BORRADO (PÉRDIDA DE DATOS)"
+[ -f "$C2ROOT/wt-mini/pendiente.md" ] && ok "b3k: C-2 — el archivo sin commitear SOBREVIVE" || bad "b3k: C-2 REGRESIÓN — se perdió el archivo sin commitear"
+[ -d "$C2ROOT/wt-keep" ] && ok "b3k: C-2 — el worktree de keep/* SOBREVIVE" || bad "b3k: C-2 REGRESIÓN — se borró el worktree de keep/*"
+rm -rf "$C2ROOT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (b3l) limpiar-worktrees: C-3 — un worktree ZOMBIE (rama integrada) con cambios SIN COMMITEAR/untracked NO se destruye =="
+C3ROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-c3.XXXXXX")"; C3REPO="$C3ROOT/repo"; mkdir -p "$C3REPO"
+git -C "$C3REPO" init -q >/dev/null 2>&1
+git -C "$C3REPO" symbolic-ref HEAD refs/heads/develop >/dev/null 2>&1
+git -C "$C3REPO" config user.email t@t >/dev/null 2>&1; git -C "$C3REPO" config user.name tester >/dev/null 2>&1
+printf 'base\n' > "$C3REPO/a.txt"; git -C "$C3REPO" add a.txt >/dev/null 2>&1; git -C "$C3REPO" commit -qm base >/dev/null 2>&1
+git -C "$C3REPO" branch feat/uno develop >/dev/null 2>&1
+git -C "$C3REPO" worktree add -q "$C3ROOT/wt-uno" feat/uno >/dev/null 2>&1
+printf 'M\n' >> "$C3ROOT/wt-uno/a.txt"
+printf 'secreto\n' > "$C3ROOT/wt-uno/.env"
+printf 'analisis a medias\n' > "$C3ROOT/wt-uno/borrador.md"
+git -C "$C3REPO" merge-base --is-ancestor feat/uno develop 2>/dev/null && ok "b3l(teeth): feat/uno ES zombie por contenido (ancestro de develop)" || bad "b3l(teeth): test mal armado"
+[ -n "$(git -C "$C3ROOT/wt-uno" status --porcelain 2>/dev/null)" ] && ok "b3l(teeth): el worktree tiene cambios sin commitear/untracked" || bad "b3l(teeth): test mal armado, árbol limpio"
+c3out="$(cd "$C3REPO" && bash "$HOOKS/limpiar-worktrees.sh" 2>&1)"
+printf '%s' "$c3out" | grep -q 'SUCIO' && ok "b3l: C-3 — reportó SUCIO en vez de forzar el borrado" || bad "b3l: no reportó SUCIO; got: $c3out"
+[ -d "$C3ROOT/wt-uno" ] && ok "b3l: C-3 — el directorio del worktree SOBREVIVE (no se forzó --force)" || bad "b3l: C-3 REGRESIÓN — el worktree fue destruido pese a estar sucio (PÉRDIDA DE DATOS)"
+[ -f "$C3ROOT/wt-uno/.env" ] && ok "b3l: C-3 — el .env untracked SOBREVIVE" || bad "b3l: C-3 REGRESIÓN — se perdió el .env untracked"
+[ -f "$C3ROOT/wt-uno/borrador.md" ] && ok "b3l: C-3 — el borrador untracked SOBREVIVE" || bad "b3l: C-3 REGRESIÓN — se perdió el borrador"
+rm -rf "$C3ROOT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (b3m) limpiar-worktrees: A-2 — una opción DESCONOCIDA (typo) aborta con rc=2, nunca corre en modo destructivo =="
+A2ROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-a2.XXXXXX")"; A2REPO="$A2ROOT/repo"; mkdir -p "$A2REPO"
+git -C "$A2REPO" init -q >/dev/null 2>&1
+git -C "$A2REPO" symbolic-ref HEAD refs/heads/develop >/dev/null 2>&1
+git -C "$A2REPO" config user.email t@t >/dev/null 2>&1; git -C "$A2REPO" config user.name tester >/dev/null 2>&1
+printf 'base\n' > "$A2REPO/a.txt"; git -C "$A2REPO" add a.txt >/dev/null 2>&1; git -C "$A2REPO" commit -qm base >/dev/null 2>&1
+git -C "$A2REPO" branch feat/x develop >/dev/null 2>&1
+git -C "$A2REPO" worktree add -q "$A2ROOT/wt-x" feat/x >/dev/null 2>&1
+( cd "$A2REPO" && bash "$HOOKS/limpiar-worktrees.sh" --dryrun >/dev/null 2>&1 )
+a2rc=$?
+[ "$a2rc" = 2 ] && ok "b3m: A-2 — '--dryrun' (typo) aborta con rc=2" || bad "b3m: A-2 — rc inesperado ($a2rc), no abortó"
+[ -d "$A2ROOT/wt-x" ] && ok "b3m: A-2 — el worktree SIGUE existiendo (el typo NO ejecutó en modo destructivo)" || bad "b3m: A-2 REGRESIÓN — el typo borró el worktree (PÉRDIDA DE DATOS)"
+rm -rf "$A2ROOT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (b3n) limpiar-worktrees: A-4 — el pendiente de un worktree VIVO no se re-appendea en cada corrida =="
+A4ROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-a4.XXXXXX")"; A4REPO="$A4ROOT/repo"; mkdir -p "$A4REPO/.claude/memory"
+git -C "$A4REPO" init -q >/dev/null 2>&1
+git -C "$A4REPO" symbolic-ref HEAD refs/heads/develop >/dev/null 2>&1
+git -C "$A4REPO" config user.email t@t >/dev/null 2>&1; git -C "$A4REPO" config user.name tester >/dev/null 2>&1
+printf 'base\n' > "$A4REPO/a.txt"; git -C "$A4REPO" add a.txt >/dev/null 2>&1; git -C "$A4REPO" commit -qm base >/dev/null 2>&1
+git -C "$A4REPO" checkout -q -b feat/viva develop >/dev/null 2>&1
+printf 'y\n' > "$A4REPO/g.txt"; git -C "$A4REPO" add g.txt >/dev/null 2>&1; git -C "$A4REPO" commit -qm viva >/dev/null 2>&1
+git -C "$A4REPO" checkout -q develop >/dev/null 2>&1
+git -C "$A4REPO" worktree add -q "$A4ROOT/wt-viva" feat/viva >/dev/null 2>&1
+: > "$A4REPO/.claude/memory/bitacora.md"
+for i in 1 2 3; do ( cd "$A4REPO" && bash "$HOOKS/limpiar-worktrees.sh" >/dev/null 2>&1 ); done
+n_bloques=$(grep -c 'worktrees pendientes tras barrido' "$A4REPO/.claude/memory/bitacora.md" 2>/dev/null || echo 0)
+[ "$n_bloques" = 1 ] && ok "b3n: A-4 — 3 corridas → EXACTAMENTE 1 bloque en la bitácora (antes: N idénticos)" || bad "b3n: A-4 — se re-appendeó el pendiente ($n_bloques bloques)"
+rm -rf "$A4ROOT"
+
+echo ""
+echo "== (b3n2) limpiar-worktrees: A-4 — un veredicto INDETERMINADO no escribe pendiente en la bitácora (no es una afirmación real) =="
+A4BROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-a4b.XXXXXX")"; A4BREPO="$A4BROOT/repo"; mkdir -p "$A4BREPO/.claude/memory"
+git -C "$A4BREPO" init -q >/dev/null 2>&1
+git -C "$A4BREPO" symbolic-ref HEAD refs/heads/develop >/dev/null 2>&1
+git -C "$A4BREPO" config user.email t@t >/dev/null 2>&1; git -C "$A4BREPO" config user.name tester >/dev/null 2>&1
+git -C "$A4BREPO" remote add origin https://gitlab.com/fake/otra.git >/dev/null 2>&1
+printf 'base\n' > "$A4BREPO/a.txt"; git -C "$A4BREPO" add a.txt >/dev/null 2>&1; git -C "$A4BREPO" commit -qm base >/dev/null 2>&1
+git -C "$A4BREPO" checkout -q -b feat/multi develop >/dev/null 2>&1
+for n in 1 2 3; do printf 'x\n' > "$A4BREPO/f$n.txt"; git -C "$A4BREPO" add "f$n.txt" >/dev/null 2>&1; git -C "$A4BREPO" commit -qm "c$n" >/dev/null 2>&1; done
+git -C "$A4BREPO" checkout -q develop >/dev/null 2>&1
+git -C "$A4BREPO" merge --squash feat/multi >/dev/null 2>&1; git -C "$A4BREPO" commit -qm "squash sin convencion" >/dev/null 2>&1
+git -C "$A4BREPO" worktree add -q "$A4BROOT/wt-multi" feat/multi >/dev/null 2>&1
+: > "$A4BREPO/.claude/memory/bitacora.md"
+( cd "$A4BREPO" && PATH=/usr/bin:/bin bash "$HOOKS/limpiar-worktrees.sh" >/dev/null 2>&1 )
+grep -q 'worktrees pendientes' "$A4BREPO/.claude/memory/bitacora.md" 2>/dev/null && bad "b3n2: A-4 — escribió un pendiente FALSO para un veredicto INDETERMINADO" || ok "b3n2: A-4 — NO escribió pendiente para un veredicto indeterminado (no miente en la bitácora)"
+rm -rf "$A4BROOT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (b3o) bz_resolver_base: M-2 — con VARIAS Develop* locales y HEAD en ninguna, NO se adivina (cae a develop + avisa) =="
+M2ROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-m2.XXXXXX")"; M2REPO="$M2ROOT/repo"; mkdir -p "$M2REPO"
+git -C "$M2REPO" init -q >/dev/null 2>&1
+git -C "$M2REPO" symbolic-ref HEAD refs/heads/develop >/dev/null 2>&1
+git -C "$M2REPO" config user.email t@t >/dev/null 2>&1; git -C "$M2REPO" config user.name tester >/dev/null 2>&1
+printf 'base\n' > "$M2REPO/a.txt"; git -C "$M2REPO" add a.txt >/dev/null 2>&1; git -C "$M2REPO" commit -qm base >/dev/null 2>&1
+git -C "$M2REPO" branch DevelopAna >/dev/null 2>&1
+git -C "$M2REPO" branch DevelopUnjordi >/dev/null 2>&1
+. "$HOOKS/ramas-zombie.sh"
+m2base="$(bz_resolver_base "$M2REPO")"; m2aviso="$(bz_aviso_base "$M2REPO")"
+[ "$m2base" = "develop" ] && ok "b3o: M-2 — con 2 mini-develop y HEAD en ninguna → cae a develop (no adivina)" || bad "b3o: M-2 — no cayó a develop; got: $m2base"
+printf '%s' "$m2aviso" | grep -q 'no se adivina' && ok "b3o: M-2 — deja el aviso de ambigüedad (bz_aviso_base)" || bad "b3o: M-2 — no avisó la ambigüedad; got: $m2aviso"
+m2out="$(cd "$M2REPO" && bash "$HOOKS/limpiar-ramas.sh" --dry-run --no-fetch 2>&1)"
+printf '%s' "$m2out" | grep -q 'aviso:.*no se adivina' && ok "b3o: M-2 — limpiar-ramas.sh también imprime el aviso" || bad "b3o: M-2 — limpiar-ramas.sh no propagó el aviso; got: $m2out"
+rm -rf "$M2ROOT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (b3p) limpiar-worktrees: M-4 — un worktree PRUNABLE (directorio ya borrado) no se reporta 'vivo' ni retiene su rama =="
+M4ROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-m4.XXXXXX")"; M4REPO="$M4ROOT/repo"; mkdir -p "$M4REPO"
+git -C "$M4REPO" init -q >/dev/null 2>&1
+git -C "$M4REPO" symbolic-ref HEAD refs/heads/develop >/dev/null 2>&1
+git -C "$M4REPO" config user.email t@t >/dev/null 2>&1; git -C "$M4REPO" config user.name tester >/dev/null 2>&1
+printf 'base\n' > "$M4REPO/a.txt"; git -C "$M4REPO" add a.txt >/dev/null 2>&1; git -C "$M4REPO" commit -qm base >/dev/null 2>&1
+git -C "$M4REPO" checkout -q -b feat/p develop >/dev/null 2>&1
+printf 'p\n' > "$M4REPO/p.txt"; git -C "$M4REPO" add p.txt >/dev/null 2>&1; git -C "$M4REPO" commit -qm p >/dev/null 2>&1
+git -C "$M4REPO" checkout -q develop >/dev/null 2>&1
+git -C "$M4REPO" worktree add -q "$M4ROOT/wt-p" feat/p >/dev/null 2>&1
+rm -rf "$M4ROOT/wt-p"
+m4out="$(cd "$M4REPO" && bash "$HOOKS/limpiar-worktrees.sh" --dry-run 2>&1)"
+printf '%s' "$m4out" | grep -q 'wt-p' && bad "b3p: M-4 REGRESIÓN — el worktree prunable sigue apareciendo en el reporte (no se podó antes de listar); got: $m4out" || ok "b3p: M-4 — el worktree prunable ya NO aparece (se podó antes de listar)"
+git -C "$M4REPO" worktree list --porcelain 2>/dev/null | grep -q 'wt-p' && bad "b3p: M-4 — el registro del worktree prunable NO se limpió" || ok "b3p: M-4 — el registro del worktree prunable se limpió (git worktree prune)"
+rm -rf "$M4ROOT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (b3q) limpiar-worktrees: M-6 — el worktree PRINCIPAL se detecta por la lista de git (no por el cwd de quien corre el script) =="
+M6ROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-m6.XXXXXX")"; M6REPO="$M6ROOT/repo"; mkdir -p "$M6REPO"
+git -C "$M6REPO" init -q >/dev/null 2>&1
+git -C "$M6REPO" symbolic-ref HEAD refs/heads/feat/main-work >/dev/null 2>&1
+git -C "$M6REPO" config user.email t@t >/dev/null 2>&1; git -C "$M6REPO" config user.name tester >/dev/null 2>&1
+printf 'base\n' > "$M6REPO/a.txt"; git -C "$M6REPO" add a.txt >/dev/null 2>&1; git -C "$M6REPO" commit -qm base >/dev/null 2>&1
+git -C "$M6REPO" branch develop >/dev/null 2>&1
+git -C "$M6REPO" branch feat/q develop >/dev/null 2>&1
+git -C "$M6REPO" worktree add -q "$M6ROOT/wt-q" feat/q >/dev/null 2>&1
+git -C "$M6REPO" merge-base --is-ancestor feat/main-work develop 2>/dev/null && ok "b3q(teeth): feat/main-work (rama del worktree PRINCIPAL) ES ancestro de develop (zombie real por contenido)" || bad "b3q(teeth): test mal armado"
+m6out="$(cd "$M6ROOT/wt-q" && bash "$HOOKS/limpiar-worktrees.sh" --dry-run 2>&1)"
+printf '%s' "$m6out" | grep -qF "zombie: $M6REPO (" && bad "b3q: M-6 REGRESIÓN — el worktree PRINCIPAL se propuso como zombie corriendo desde uno enlazado; got: $m6out" || ok "b3q: M-6 — el worktree principal NO se propone como zombie (protegido pese a correr desde otro worktree)"
+rm -rf "$M6ROOT"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""

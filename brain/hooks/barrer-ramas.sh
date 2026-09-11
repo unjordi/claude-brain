@@ -34,6 +34,13 @@
 # actual/base/develop/main/Develop*/keep/* (justo las que aviso-drift commitea). Fail-open ambos → una
 # colisión degrada sin corromper.
 #
+# ORDEN A-5 (auditoría 2026-09-11): las dos herramientas antes se lanzaban EN PARALELO (`&` cada una) —
+# limpiar-ramas fotografía qué ramas siguen checked-out en un worktree AL ARRANCAR; si limpiar-worktrees
+# libera un worktree zombie DESPUÉS de esa foto, la rama que retenía queda protegida un ciclo entero (con
+# BARRER_RAMAS_HORAS=24, hasta 2 días para que una rama muera). El ciclo rama↔worktree solo converge en
+# UNA pasada si primero se libera el worktree y LUEGO se barren las ramas — por eso `lanzar()` ahora los
+# corre SECUENCIALES (mismo proceso en background, sin paralelismo entre ellos).
+#
 # Escape: CLAUDE_SKIP_BARRER_RAMAS=1. Fail-open SIEMPRE: no-git / sin remoto / sin limpiar-ramas / sin jq
 # (vía B) / cualquier error → silencio, exit 0.
 set -u
@@ -75,8 +82,14 @@ now=$(date +%s)
 log="$stampdir/${slug}.log"
 logwt="$stampdir/${slug}.worktrees.log"
 lanzar() {
-  ( cd "$ROOT" && nohup bash "$LIMPIAR" >"$log" 2>&1 & ) >/dev/null 2>&1 || true
-  [ -f "$LIMPIAR_WT" ] && ( cd "$ROOT" && nohup bash "$LIMPIAR_WT" >"$logwt" 2>&1 & ) >/dev/null 2>&1 || true
+  # A-5: SECUENCIAL, no paralelo — limpiar-worktrees PRIMERO (libera worktrees zombie, con eso las ramas
+  # que retenían dejan de estar protegidas) y limpiar-ramas DESPUÉS, en la MISMA pasada. Sigue siendo
+  # background (nohup … &): no bloquea el turno ni el arranque de sesión.
+  if [ -f "$LIMPIAR_WT" ]; then
+    ( cd "$ROOT" && nohup bash -c 'bash "$1" >"$2" 2>&1; bash "$3" >"$4" 2>&1' _ "$LIMPIAR_WT" "$logwt" "$LIMPIAR" "$log" & ) >/dev/null 2>&1 || true
+  else
+    ( cd "$ROOT" && nohup bash "$LIMPIAR" >"$log" 2>&1 & ) >/dev/null 2>&1 || true
+  fi
 }
 
 # ── Vía (B): TRIGGER AL PUNTO DE MERGE (inmediato; debounce corto anti-estampida de ráfaga de merges). ──
