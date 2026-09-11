@@ -91,3 +91,8 @@ docs/flowcharts/*
 # Worktrees locales de sesiones de trabajo (nunca se versionan: son checkouts, no contenido).
 .git-worktrees/
 CLAUDE.local.md
+
+# Andamio del checkpoint: sus ARTEFACTOS DE PROCESO (lock por-sid y log del extractor) los escribe el hook
+# de PreCompact en CADA repo con el cerebro. El andamio en sí lo cubre el patrón de familia hilo-mental-*;
+# éstos NO caen ahí y quedaban como untracked permanente (y el .log puede llevar rutas de la máquina).
+.claude/memory/.checkpoint-mecanico*

@@ -4138,6 +4138,15 @@ printf '%s' "$F1B" | jq -e '.cita == ["f.md"]' >/dev/null 2>&1 \
 grep -q 'HEURÍSTICA' "$F1D/and.md" 2>/dev/null \
   && ok "f1h: en el andamio va como lista SEPARADA y etiquetada heurística (nunca fusionada con las exactas de Write/Edit)" \
   || bad "f1h: la lista heurística no está separada/etiquetada en el andamio"
+# Los ARTEFACTOS DE PROCESO del hook (lock por-sid + log) se escriben en .claude/memory de CADA repo con
+# el cerebro: sin patrón quedaban como untracked permanente, y el .log puede llevar rutas de la máquina.
+# (El andamio en sí lo cubre el patrón de familia `hilo-mental-*`.)
+if git -C "$SCRIPT_DIR/.." rev-parse --git-dir >/dev/null 2>&1; then
+  git -C "$SCRIPT_DIR/.." check-ignore -q -- ".claude/memory/.checkpoint-mecanico-abc.lock" \
+    && git -C "$SCRIPT_DIR/.." check-ignore -q -- ".claude/memory/.checkpoint-mecanico.log" \
+    && ok "f1i: el .gitignore de este repo cubre los artefactos de proceso del hook (.checkpoint-mecanico*)" \
+    || bad "f1i: .checkpoint-mecanico-<sid>.lock / .log NO están ignorados (untracked permanente en cada repo)"
+fi
 rm -rf "$F1D"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -6576,6 +6585,18 @@ if [ -f "$E2EH" ]; then
   fi
   command rm -f "$E2EHOME/.claude/projects/$E2ENSLUG/bbbbbbbb-0000-0000-0000-0000000000bb.jsonl" \
                "$E2EHOME/.claude/projects/-slug-de-otro-repo/aaaaaaaa-0000-0000-0000-0000000000aa.jsonl"
+  # ── F2 · el HILO del master viaja en el bundle T2 y el DESTINO ya tiene el SUYO (caso NORMAL, no
+  #    excepcional: el mismo master escribe un hilo distinto en cada repo donde trabaja). Antes de este
+  #    cambio, esa diferencia era un CONFLICTO T2 y ABORTABA la mudanza pidiendo merge manual de un
+  #    archivo volátil — un gate que dispara siempre. Ahora se CO-UBICA.
+  E2ET2D="$E2EFIX/t2src"; mkdir -p "$E2ET2D"
+  printf '%s\n' 'HILO-DEL-MASTER-QUE-VIAJA' '> Última actualización: 2026-09-11 · rama vieja · nivel COMPLETO.' > "$E2ET2D/hilo-mental-actual.md"
+  printf '%s\n' 'identidad-del-master' > "$E2ET2D/conocimiento-propio.local.md"
+  tar -C "$E2ET2D" -czf "$E2EDRIVE/$E2EID.brain-local.tgz" .
+  printf '%s\n' 'HILO-PROPIO-DEL-DESTINO' '> Última actualización: 2026-09-11 · rama destino · nivel ligero.' > "$E2EDST/.claude/memory/hilo-mental-actual.md"
+  # G-GITIGNORE: lo sensible y el hilo DEBEN estar ignorados en el destino antes de depositar nada.
+  printf '%s\n' '.claude/memory/*.local.md' '.claude/memory/hilo-mental-*' >> "$E2EDST/.gitignore"
+
   # ── full: los pasos DESTRUCTIVOS, con sus dos citas humanas ──
   E2EFULL="$E2EFIX/full.log"
   if e2e env REUBICAR_LIVENESS_OK=1 REUBICAR_QUIESCE_OK=1 bash "$E2EH" > "$E2EFULL" 2>&1 \
@@ -6596,6 +6617,46 @@ if [ -f "$E2EH" ]; then
   grep -q 'G-SIDECAR' "$E2EFULL" \
     && ok "(e2e) G-SIDECAR corrió como postcondición del full (no es opcional)" \
     || bad "(e2e) G-SIDECAR no apareció en el log del full"
+  # ── F2 · política del HILO en la mudanza: CO-UBICAR, no abortar ni pisar ──────────────────────────
+  grep -q 'HILO-PROPIO-DEL-DESTINO' "$E2EDST/.claude/memory/hilo-mental-actual.md" \
+    && ok "(e2e) F2: el hilo PROPIO del destino quedó INTACTO (el del master no lo pisó)" \
+    || bad "(e2e) F2: el hilo del destino fue sobrescrito por el del master"
+E2ECO="$E2EDST/.claude/memory/hilo-mental-actual.nuevo-master.md"
+  { [ -f "$E2ECO" ] && grep -q 'HILO-DEL-MASTER-QUE-VIAJA' "$E2ECO"; } \
+    && ok "(e2e) F2 CONTRA LA FALLA: el hilo del master aterrizó CO-UBICADO ('hilo-mental-actual.<master>.md') — antes la mudanza ABORTABA pidiendo reconciliación humana" \
+    || bad "(e2e) F2 CONTRA LA FALLA: no hay hilo co-ubicado en el destino (¿abortó, o lo pisó?)"
+  grep -q 'CO-UBICA' "$E2EFULL" \
+    && ok "(e2e) F2: el full DICE que co-ubicó y por qué (el operador no tiene que deducirlo)" \
+    || bad "(e2e) F2: el full no explica la co-ubicación"
+  grep -q 'identidad-del-master' "$E2EDST/.claude/memory/conocimiento-propio.local.md" 2>/dev/null \
+    && ok "(e2e) F2: la IDENTIDAD (T2 de verdad) sí se depositó — la excepción del hilo no aflojó el resto de T2" \
+    || bad "(e2e) F2: no se depositó conocimiento-propio.local.md"
+  # Y la regla DURA sigue viva donde nació: un T2 de IDENTIDAD que difiere SÍ aborta.
+  printf '%s\n' 'identidad-DISTINTA-en-el-destino' > "$E2EDST/.claude/memory/conocimiento-propio.local.md"
+  command mv -f "$E2EDRIVE/$E2EID.brain-local.tgz.aplicado" "$E2EDRIVE/$E2EID.brain-local.tgz" 2>/dev/null
+  E2ECONF="$E2EFIX/t2-conflicto.log"
+  if e2e env REUBICAR_LIVENESS_OK=1 REUBICAR_QUIESCE_OK=1 bash "$E2EH" > "$E2ECONF" 2>&1; then
+    bad "(e2e) F2 CONTRA LA FALLA: un T2 de IDENTIDAD distinto en el destino NO abortó (la excepción del hilo se comió la regla)"
+  else
+    grep -q 'CONFLICTO T2' "$E2ECONF" \
+      && ok "(e2e) F2 CONTRA LA FALLA: identidad/autorizaciones que DIFIEREN siguen abortando (la excepción es SOLO del hilo)" \
+      || bad "(e2e) F2: abortó, pero no por el conflicto de T2: $(tail -2 "$E2ECONF" | tr '\n' ' ')"
+  fi
+  printf '%s\n' 'identidad-del-master' > "$E2EDST/.claude/memory/conocimiento-propio.local.md"
+  command mv -f "$E2EDRIVE/$E2EID.brain-local.tgz" "$E2EDRIVE/$E2EID.brain-local.tgz.aplicado" 2>/dev/null
+  # G-PARITY (subcomando) entiende el co-ubicado: medir 'idéntico' daría ROTA en el 100% de las mudanzas
+  E2EPARH="$E2EFIX/paridad-hilo.log"
+  if e2e bash "$E2ESH" paridad --src-repo "$E2ESRC" --dst-repo "$E2EDST" > "$E2EPARH" 2>&1; then
+    grep -q 'CO-UBICADO como hilo-mental-actual.nuevo-master.md' "$E2EPARH" \
+      && ok "(e2e) F2: G-PARITY reconoce el hilo CO-UBICADO como presencia válida (y lo dice con su nombre)" \
+      || bad "(e2e) F2: G-PARITY no reconoció el co-ubicado: $(grep -i hilo "$E2EPARH" | head -2 | tr '\n' ' ')"
+  else
+    bad "(e2e) F2: G-PARITY bloqueó tras una mudanza correcta: $(grep -E 'FALTA|ROTA' "$E2EPARH" | head -2 | tr '\n' ' ')"
+  fi
+  grep -q 'hilo-mental-actual.md' "$E2EPARH" \
+    && ok "(e2e) F2: el default T2 del subcomando 'paridad' incluye el hilo (era una SEGUNDA lista que driftó de la del generador)" \
+    || bad "(e2e) F2: 'paridad' sigue con su propia lista T2 sin el hilo"
+
   [ "$(jq -r --arg id "$E2EID" '.masters[]|select(.id==$id)|.name' "$E2EDRIVE/masters.json")" = nuevo-master ] \
     && ok "(e2e) masters.json quedó con el nombre NUEVO (UPSERT por id, con lock)" \
     || bad "(e2e) masters.json no refleja el renombre"

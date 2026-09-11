@@ -140,7 +140,7 @@ el cerebro. Se clasifica por **PROPIEDAD** y cada tier viaja por su canal:
 | TIER | Qué es | Canal | Va al destino |
 |---|---|---|---|
 | **T1 — cerebro personal PÚBLICO-SEGURO** | memorias de mantener-el-cerebro, genéricas/compartibles (`handoff-peer-claudes-conciso.md`, `plan-molde-cerebros.md`, `diseno-unificar-cerebro.md`, …). Skills: NINGUNO viaja (las 4 de mantenimiento — `agregar-hook-cerebro`, `cortex-widget`, `cambiar-icono`, `publicar-widget` — YA viven en `cortex/.claude/skills`; las ~35 transversales son GLOBAL y se auto-cargan solas) | **versionado por PR** (merge dedup por CONTENIDO en `$DST/memory`) | **SÍ** |
-| **T2 — cerebro personal SENSIBLE** | identidad y autorizaciones (`conocimiento-propio.local.md`, `autorizaciones-vigentes.local.md`), el HILO vivo del master (`hilo-mental-actual.md` + `-overflow.md` — es del master, no del repo, y está gitignored en origen Y destino ⇒ sin este canal git NO lo recupera), y el `CLAUDE.local.md` de la raíz | **bundle en Drive** (gitignored) — git NO los propaga | **SÍ, gitignored per-máquina** |
+| **T2 — cerebro personal SENSIBLE** | identidad y autorizaciones (`conocimiento-propio.local.md`, `autorizaciones-vigentes.local.md`), el HILO vivo del master (`hilo-mental-actual.md` + `-overflow.md` — gitignored en origen Y destino ⇒ sin este canal git NO lo recupera; y como su llave es (repo × stream), si el destino ya tiene el suyo se **CO-UBICA** en vez de pisar o abortar — §1.0.1.1), y el `CLAUDE.local.md` de la raíz | **bundle en Drive** (gitignored) — git NO los propaga | **SÍ, gitignored per-máquina** |
 | **T3 — PRODUCTO de la plantilla .NET** | los 18 skills .NET + memorias de plantilla/proyecto (`_PROTOCOLO.md`, `flujo-de-trabajo.md`, `decisiones-infra.md`, `release-develop-main.md`, `modulo-notificaciones.md`, `lecciones-migracion-cps.md`, `estado-proyecto.md`, `bitacora.md`, …) | **SE QUEDA en el origen** | **NO** |
 | **T4 — CABLEADO de la sesión** | `.claude/settings.json` del destino (los hooks tier-`repo` **solo se cargan si la sesión INICIA en ese repo**) + `.claude/settings.local.json` per-máquina (de donde sale el `outputStyle`) | **el del DESTINO manda**; nada se copia del origen — se **VERIFICA** que el destino tenga los suyos | **SÍ (verificado, no copiado)** |
 
@@ -188,6 +188,28 @@ operador a declarar el gate "trivialmente satisfecho", que es la ausencia del ca
 corrección en el DESTINO**. Y lo mismo aplica a S5: el bundle T2 puede no existir (`S2` fue no-op) → S5
 **guarda** su `tar` en lugar de correrlo a ciegas (bsdtar avisa y sigue; GNU tar aborta: el mismo comando,
 dos comportamientos opuestos y ninguno correcto).
+
+### 1.0.1.1 · El HILO viaja, pero se CO-UBICA: su llave es (repo × stream), no (master)
+`hilo-mental-actual.md` está en T2 y viaja — sin eso se quedaba por OMISIÓN y, al estar gitignored en los
+dos extremos, **git no lo recupera**. Pero NO es identidad: `conocimiento-propio`/`autorizaciones-vigentes`
+tienen UNA copia buena y que difieran es una anomalía que un humano reconcilia; el hilo, en cambio, es
+**por repo Y por stream de trabajo** — el MISMO master escribe uno distinto en cada repo donde trabaja
+(medido: 70 escrituras al hilo de `cortex` y 61 al de `plantilladotnet`, el mismo master) y el destino
+casi siempre llega con uno **propio y vivo**.
+
+Por eso una diferencia en el hilo **no es un conflicto**: S5 lo **CO-UBICA** como
+`hilo-mental-actual.<nombre-del-master>.md` junto al del destino, que conserva el suyo intacto, y el
+**PRIMER checkpoint del master fusiona** lo que aplique (ahí está el criterio; un `diff -q` no lo tiene).
+Cero pérdida, cero pisada, cero abort.
+
+> **Por qué NO se resuelve abortando** (que es lo que hacía la regla genérica de T2): el conflicto se daría
+> en el 100% de las mudanzas normales, y **un gate que dispara siempre no es un gate, es un peaje** — el
+> operador aprende a saltárselo, que es peor que no tenerlo. La regla de abortar SIGUE VIGENTE para
+> identidad y autorizaciones, que es para lo que se escribió.
+>
+> El `.andamio.md` **no viaja**: es VOLÁTIL-LOCAL y se REGENERA en el destino con
+> `checkpoint-mecanico.js --self --ensure` (lo corre el skill `checkpoint` en su paso 0). Transportar un
+> derivado que se reconstruye en un segundo es acarrear peso sin dueño.
 
 ### 1.0.2 · Lo que el move NO se lleva (decídelo a propósito, no por omisión)
 > **El SIDECAR de la sesión SÍ viaja (H1, fijo):** `~/.claude/projects/<slug>/<sessionId>/`
@@ -738,7 +760,11 @@ con `sessionAliases()` = `$NOMBRE_FINAL`.
   (conocimiento-propio re-inyectado por `aviso-drift-cerebro`); (c) las skills del destino + las GLOBAL
   aparecen; (d) las memorias-del-master (T1∪T2) están; (e) **T4: los hooks tier-`repo` del destino
   disparan y el `outputStyle` es el suyo**; (f) `masters.json` con el **target Y el name** correctos, y el
-  alias apuntando al nombre final. **Verde técnico ≠ LISTO. No se declara a ciegas.**
+  alias apuntando al nombre final; **(g) el HILO del master llegó** — `.claude/memory/hilo-mental-actual.md`
+  o su co-ubicado `hilo-mental-actual.<master>.md` (ver abajo) — **y `rehidratar-hilo` lo reinyectó sin
+  decir «POSIBLEMENTE OBSOLETO»**. Ítem propio porque la pérdida del hilo es INVISIBLE en (a)-(f): el hook
+  es silencioso cuando el archivo no existe, así que el master despierta sin hilo y nadie se entera — un
+  gate que no puede medir su propia falla no es un gate. **Verde técnico ≠ LISTO. No se declara a ciegas.**
 
 ### S7 · RE-VERIFICAR DESPUÉS DEL QA (el paso que faltaba, ahora EJECUTABLE)
 > **El skill terminaba en S6, y el daño ocurre en S6.** El QA es un resume, y un resume MUTA: escribe

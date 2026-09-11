@@ -272,7 +272,9 @@ if [ "${1:-}" = paridad ]; then
     esac
   done
   [ -n "$_p_dst" ] || { printf 'paridad: falta --dst-repo\n' >&2; exit 2; }
-  [ "$_p_t2_dado" -eq 1 ] || _p_t2=(conocimiento-propio.local.md autorizaciones-vigentes.local.md)
+  # MISMO default que el generador (T2_LOCAL): eran dos listas de lo mismo y al entrar el hilo al default
+  # real esta se quedó atrás ⇒ G-PARITY no medía el artefacto que la mudanza acababa de empezar a mover.
+  [ "$_p_t2_dado" -eq 1 ] || _p_t2=(conocimiento-propio.local.md autorizaciones-vigentes.local.md hilo-mental-actual.md hilo-mental-actual-overflow.md)
   _p_srcm="$_p_src/.claude/memory"; _p_dstm="$_p_dst/.claude/memory"
   _p_fail=0
   _p_size(){ stat -c %s "$1" 2>/dev/null || stat -f %z "$1" 2>/dev/null || echo '?'; }
@@ -282,10 +284,37 @@ if [ "${1:-}" = paridad ]; then
   [ -n "$_p_bundle" ] && [ -f "$_p_bundle" ] && _p_enbundle="$(tar -tzf "$_p_bundle" 2>/dev/null | sed 's#^\./##')"
   _p_en_bundle(){ [ -n "$_p_enbundle" ] && printf '%s\n' "$_p_enbundle" | grep -qxF -- "$1"; }
 
+  # El HILO es del (repo x stream), no del master: que DIFIERA del destino es lo normal y S5 lo CO-UBICA
+  # al lado (hilo-mental-actual.<master>.md) en vez de pisar o abortar. G-PARITY mide eso: presencia del
+  # hilo del master en el destino, con su nombre propio O co-ubicado. Medir 'identico' aqui reportaria
+  # ROTA en el 100% de las mudanzas normales.
+  _p_es_hilo(){ case "${1##*/}" in hilo-mental-*) return 0 ;; *) return 1 ;; esac; }
+  # Busca un hilo CO-UBICADO por S5 (hilo-mental-actual.<master>.md) sin necesitar saber el nombre del
+  # master: lo resuelve por glob. EXCLUYE el `.andamio.md`, que casa el mismo patron y NO es un hilo
+  # co-ubicado (es el sidecar mecanico que regenera el checkpoint, otra cosa entera).
+  _p_co_existe(){
+    _b="${1%.md}"
+    for _g in "$_p_dstm/$_b".*.md; do
+      [ -e "$_g" ] || continue
+      case "${_g##*/}" in *.andamio.md) continue ;; esac
+      printf '%s' "${_g##*/}"; return 0
+    done
+    return 1
+  }
+
   # _p_fila <ruta-origen> <ruta-destino> <etiqueta> <es-t2:0|1>
   _p_fila(){
+    if _p_es_hilo "$3"; then
+      _p_conom="$(_p_co_existe "$3" || true)"
+      if [ -n "$_p_conom" ]; then
+        printf '  ok    %s (CO-UBICADO como %s; el destino conserva el suyo, el 1er checkpoint fusiona)\n' "$3" "$_p_conom"
+        return 0
+      fi
+    fi
     if   [ -e "$1" ] && [ -e "$2" ]; then
       if diff -q "$1" "$2" >/dev/null 2>&1; then printf '  ok    %s (idéntica en ambos)\n' "$3"
+      elif _p_es_hilo "$3"; then
+        printf '  ok    %s (existe en ambos y DIFIERE — es lo ESPERADO en un hilo: cada repo tiene el suyo)\n' "$3"
       else printf '  ROTA  %s — existe en ambos y DIFIERE (%s vs %s bytes) => reconciliacion HUMANA, no se pisa\n' \
              "$3" "$(_p_size "$1")" "$(_p_size "$2")"; _p_fail=1; fi
     elif [ -e "$2" ]; then printf '  ok    %s (no venia del origen, ya esta en el destino)\n' "$3"
@@ -1186,13 +1215,31 @@ if [ -f "$TGZ" ]; then
   _t2="$(mktemp -d)"; tar -C "$_t2" -xzf "$TGZ"
   find "$_t2" -type f -print > "$_t2.lista"
   _dst_de(){ if [ "$1" = "$T2_ROOT" ]; then printf '%s' "$DST_POSIX/$T2_ROOT"; else printf '%s' "$DST/memory/$1"; fi; }
+  # ── El HILO no es identidad: su llave es (repo × stream), no (master) ──────────────────────────
+  # `conocimiento-propio` y `autorizaciones-vigentes` son del MASTER: hay UNA copia buena y que difiera
+  # es una anomalía que un humano debe reconciliar. El `hilo-mental-actual.md` NO: cada repo tiene el
+  # suyo, el master escribe uno DISTINTO en cada repo donde trabaja (medido: 70 escrituras al de cortex
+  # y 61 al de plantilladotnet, el MISMO master) y el destino casi siempre llega con uno propio y vivo.
+  # Tratarlo como identidad convertía la mudanza en un merge manual de un archivo VOLÁTIL en el 100% de
+  # los casos normales — un gate que dispara siempre no es un gate, es un peaje. Se CO-UBICA: el destino
+  # conserva el suyo, el del master aterriza al lado con el nombre del master, y el PRIMER checkpoint
+  # (que es quien tiene el criterio) los fusiona. Cero pérdida, cero pisada, cero abort.
+  _es_hilo(){ case "${1##*/}" in hilo-mental-*) return 0 ;; *) return 1 ;; esac; }
+  _co_ubicado(){ case "$1" in *.md) printf '%s.%s.md' "${1%.md}" "$NOMBRE_FINAL" ;; *) printf '%s.%s' "$1" "$NOMBRE_FINAL" ;; esac; }
+  _hilos_co=""
   _conf=0
   while IFS= read -r _p; do
     _f="${_p#$_t2/}"; _d="$(_dst_de "$_f")"
     if [ -e "$_d" ] && ! diff -q "$_p" "$_d" >/dev/null 2>&1; then
-      echo "    CONFLICTO T2: '$_f' existe DISTINTO en el destino ⇒ NO lo piso (misma regla que S1 para T1)"
-      echo "      destino: $_d"; echo "      bundle : $_p"
-      _conf=1
+      if _es_hilo "$_f"; then
+        echo "    HILO distinto en el destino (ESPERADO: el hilo es del repo×stream) ⇒ se CO-UBICA como '$(_co_ubicado "$_f")'"
+        echo "      el destino conserva el suyo; el 1er checkpoint del master FUSIONA lo que aplique"
+        _hilos_co="$_hilos_co $(_co_ubicado "$_f")"
+      else
+        echo "    CONFLICTO T2: '$_f' existe DISTINTO en el destino ⇒ NO lo piso (misma regla que S1 para T1)"
+        echo "      destino: $_d"; echo "      bundle : $_p"
+        _conf=1
+      fi
     fi
   done < "$_t2.lista"
   if [ "$_conf" -eq 1 ]; then
@@ -1203,6 +1250,10 @@ if [ -f "$TGZ" ]; then
   _bkt2="$HOME/.claude/reubicar-backups/$ID.$(date +%s).t2"; mkdir -p "$_bkt2"
   while IFS= read -r _p; do
     _f="${_p#$_t2/}"; _d="$(_dst_de "$_f")"
+    # un HILO que difiere aterriza AL LADO del que ya vive en el destino, nunca encima
+    if _es_hilo "$_f" && [ -e "$_d" ] && ! diff -q "$_p" "$_d" >/dev/null 2>&1; then
+      _d="$(_dst_de "$(_co_ubicado "$_f")")"
+    fi
     [ -e "$_d" ] && cp -a "$_d" "$_bkt2/" || true
     mkdir -p "$(dirname "$_d")"; cp -a "$_p" "$_d"
   done < "$_t2.lista"
@@ -1217,7 +1268,8 @@ else
   echo "    (sin bundle T2: S2 fue no-op o el destino ya lo trae — lo mide G-PARITY, §3)"
 fi
 # fuga: `git status --porcelain` NO lista ignorados ⇒ se exige el marcador !! por ARCHIVO
-for _f in "$T2_ROOT" $(for m in ${T2_LOCAL[@]+"${T2_LOCAL[@]}"}; do printf '.claude/memory/%s\n' "$m"; done); do
+for _f in "$T2_ROOT" $(for m in ${T2_LOCAL[@]+"${T2_LOCAL[@]}"}; do printf '.claude/memory/%s\n' "$m"; done) \
+           $(for m in ${_hilos_co:-}; do printf '.claude/memory/%s\n' "$m"; done); do
   [ -e "$DST_POSIX/$_f" ] || continue
   git -C "$DST_POSIX" check-ignore -q -- "$_f" || _abort "FUGA: '$_f' está en el destino y NO está ignorado ⇒ ABORTA"
   git -C "$DST_POSIX" ls-files --error-unmatch -- "$_f" >/dev/null 2>&1 \
