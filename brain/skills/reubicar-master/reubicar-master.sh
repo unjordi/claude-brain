@@ -48,8 +48,11 @@ Opcionales:
   --dst-protegido <subdir> subdir del destino que JAMÁS se muta (ej. 'brain' en cortex). Vacío = ninguno.
   --t1 <memoria>           memoria T1 a co-ubicar en el destino (Decisión #2). REPETIBLE — es la única
                            forma correcta de pasar nombres con espacios.
-  --t2-local <archivo>     archivo T2 gitignored bajo .claude/memory/. REPETIBLE. Si lo usas UNA vez,
-                           REEMPLAZA el default (conocimiento-propio.local.md autorizaciones-vigentes.local.md).
+  --t2-local <archivo>     archivo T2 gitignored bajo .claude/memory/. REPETIBLE. SUMA al default
+                           (conocimiento-propio.local.md autorizaciones-vigentes.local.md
+                           hilo-mental-actual.md hilo-mental-actual-overflow.md) — no lo reemplaza.
+  --t2-local-solo <archivo> como --t2-local, pero la PRIMERA vez que se usa VACÍA el default: para
+                           cuando de verdad quieres SOLO los archivos que listes, no el default + los tuyos.
   --t2-root <archivo>      T2 en la raíz del repo (default: CLAUDE.local.md). Puede no existir.
   --salida <ruta>          dónde escribir el handoff (default: <drive>/handoff-<id>.sh).
   --dry                    tras generar, corre REUBICAR_MODO=dry (no muta nada). Recomendado.
@@ -97,7 +100,7 @@ DST_PROTEGIDO= T2_ROOT= T2_LOCAL=( MEMORIAS_T1=('
 
 # Un paso obligatorio por marcador. Si un paso se retira A PROPÓSITO, su marcador sale de aquí en el
 # MISMO commit: el candado y el generador se mantienen juntos o dejan de significar algo.
-_MARCADORES='G-SELF-MOVE G-LIVENESS G-QUIESCE --git-branch _reancla S4-2c UPSERT MJ.lock
+_MARCADORES='G-SELF-MOVE G-LIVENESS G-QUIESCE G-SIDECAR --git-branch _reancla S4-2c UPSERT MJ.lock
 _postcondiciones REUBICAR_MODO REUBICAR_LIVENESS_OK REUBICAR_QUIESCE_OK REUBICAR_QUIESCE_ESTRICTO
 ALIAS_ANTES DESHACER fail-closed'
 _MARCADOR_FRASE='PUNTO DE NO RETORNO'
@@ -242,7 +245,10 @@ T2_ROOT="${T2_ROOT:-CLAUDE.local.md}"
 SALIDA="${REUBICAR_SALIDA:-}"
 CORRER_DRY=0
 MEMORIAS_T1=()
-T2_LOCAL=(conocimiento-propio.local.md autorizaciones-vigentes.local.md)
+# hilo-mental-actual.md (+ su overflow): es del MASTER, no del repo — gitignored en origen Y destino, así
+# que si no viaja por aquí (T2) git NO lo recupera (M1/H3, ALTO). Va en el default junto a identidad y
+# autorizaciones: misma clase (T2, gitignored, per-máquina), mismo canal.
+T2_LOCAL=(conocimiento-propio.local.md autorizaciones-vigentes.local.md hilo-mental-actual.md hilo-mental-actual-overflow.md)
 _t2_local_dado=0
 
 while [ "$#" -gt 0 ]; do
@@ -257,8 +263,13 @@ while [ "$#" -gt 0 ]; do
     --t2-root)        T2_ROOT="${2:-}";           shift 2 ;;
     --salida)         SALIDA="${2:-}";            shift 2 ;;
     --t1)             MEMORIAS_T1[${#MEMORIAS_T1[@]}]="${2:-}"; shift 2 ;;
-    --t2-local)
-      [ "$_t2_local_dado" -eq 1 ] || { T2_LOCAL=(); _t2_local_dado=1; }   # el flag REEMPLAZA el default
+    # --t2-local SUMA al default (M2, ALTO: la versión vieja de este flag REEMPLAZABA el default a la
+    # primera vez que se usaba, y un operador que lo usaba para "arreglar" M1 —añadir hilo-mental-actual.md—
+    # tiraba en SILENCIO conocimiento-propio.local.md y autorizaciones-vigentes.local.md: identidad y
+    # autorizaciones, lo más caro). Quien de verdad quiera SOLO lo que liste usa --t2-local-solo.
+    --t2-local)       T2_LOCAL[${#T2_LOCAL[@]}]="${2:-}"; shift 2 ;;
+    --t2-local-solo)
+      [ "$_t2_local_dado" -eq 1 ] || { T2_LOCAL=(); _t2_local_dado=1; }   # SOLO este flag reemplaza, y solo la 1a vez
       T2_LOCAL[${#T2_LOCAL[@]}]="${2:-}"; shift 2 ;;
     --dry)            CORRER_DRY=1;               shift ;;
     -h|--help)        _uso; exit 0 ;;
@@ -453,7 +464,11 @@ echo "preludio OK: $PRELUDIO"
 . "$PRELUDIO"
 echo "SO=$SO  BIN=$BIN  OLD_SLUG=$OLD_SLUG  NEW_SLUG=$NEW_SLUG  DST_CWD=$DST_CWD  TARGET=$TARGET"
 
-H="$DRIVE/handoff-$ID.sh"
+# H4: --salida se asignaba y nunca se leía (la ruta salía SIEMPRE hardcodeada al Drive, sin aviso). Un
+# operador que la redirige FUERA del Drive sincronizado —por privacidad, o porque el Drive es el recurso
+# en disputa del §9— obtenía justo lo contrario de lo que pidió. Ahora manda si se dio.
+H="${SALIDA:-$DRIVE/handoff-$ID.sh}"
+mkdir -p "$(dirname "$H")"
 # ── 1) cabecera: los parámetros HORNEADOS con printf %q (una sustitución controlada; el resto del
 #       guion va en heredocs CITADOS, así que no hay ni un `\$` que escapar a mano) ─────────────
 {
@@ -675,6 +690,15 @@ _postcondiciones(){
     echo "  nota: el slug viejo no tiene 'memory' (puede que nunca lo tuviera — este skill jamás lo crea"
     echo "        ni lo borra; si lo tenía y desapareció, alguien más lo barrió)"
   fi
+  # ── SIDECAR (H1): session-move.js ya lo mueve consigo (subagents/tool-results/workflows) con su propia
+  #    disciplina de copia+verificación+publicación. Aquí solo se ASEVERA que no quedó huérfano en el
+  #    slug VIEJO — si esto dispara, `session-move.js` cambió y dejó de llevárselo: no declares LISTO.
+  if [ -d "$PROJ/$OLD_SLUG/$ID" ]; then
+    _abort "ABORTO [G-SIDECAR]: el sidecar de la sesión ($PROJ/$OLD_SLUG/$ID: subagents/tool-results/workflows)" \
+           "  quedó huérfano en el slug VIEJO — session-move.js debía llevárselo junto con el .jsonl." \
+           "  El master despertaría con su fan-out incompleto. NO declares LISTO."
+  fi
+  echo "  ok [G-SIDECAR]: sin sidecar huérfano en el slug viejo ($PROJ/$OLD_SLUG/$ID)"
 }
 
 # ── RE-ANCLAJE de REPARACIÓN · UNA sola definición, la usan S4 (si el move no dejó el par bueno) y S7
