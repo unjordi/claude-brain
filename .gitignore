@@ -82,8 +82,10 @@ docs/flowcharts/*
 !docs/flowcharts/gen-charts.sh
 
 # hilo-mental per-dev (volátil, se reescribe seguido) + backlog unificado superseded (parche local)
-.claude/memory/hilo-mental-actual.md
-.claude/memory/hilo-mental-overflow.md
+.claude/memory/hilo-mental-*
+# ↑ patrón de FAMILIA, no nombres exactos: el andamio mecánico (`hilo-mental-actual.andamio.md`, que el
+# hook de PreCompact genera con CITAS TEXTUALES del usuario) se coló sin ignorar cuando se le dio nombre
+# nuevo — en un repo PÚBLICO. Un patrón por familia cubre lo que aún no se ha inventado.
 .claude/memory/BACKLOG-UNIFICADO.md
 
 # Worktrees locales de sesiones de trabajo (nunca se versionan: son checkouts, no contenido).
