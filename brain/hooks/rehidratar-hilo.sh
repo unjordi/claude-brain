@@ -51,7 +51,26 @@ source=$(printf '%s' "$input" | { jq -r '.source // "startup"' 2>/dev/null || ec
 # resetea el acumulado, sin bandas ni veredictos — es un reportero tonto) → no necesita un watermark
 # externo. Se retiró el `.contexto-baseline` (antes se escribía aquí).
 
-[ -f "$HILO" ] || exit 0          # sin hilo → nada que rehidratar (silencioso, no estorba)
+# Rec3 (auditoría continuidad 2026-09-09): sin hilo NO siempre es silencio. Si acabas de COMPACTAR
+# (source=compact) en un repo que SÍ usa el sistema de memoria (existe estado-proyecto.md) y NO hay
+# hilo fresco, el detalle de la conversación se DEGRADÓ en el resumen y no hay red que lo recupere.
+# Ese es justo el modo de falla que hace que el checkpoint se ignore: la pérdida es INVISIBLE, nadie
+# la ve hasta que ya cuesta. Emite un aviso VISIBLE (systemMessage, no additionalContext pasivo) que
+# apunta al transcript que SÍ sobrevivió y recuerda correr checkpoint antes del próximo compact. En
+# startup/resume/clear (no compact) o en un repo sin el sistema → silencio (un arranque limpio
+# legítimamente no tiene hilo, y avisar ahí sería ruido). Gate-de-sistema por estado-proyecto.md.
+if [ ! -f "$HILO" ]; then
+  if [ "$source" = "compact" ] && [ -f "$ROOT/.claude/memory/estado-proyecto.md" ]; then
+    tp=$(printf '%s' "$input" | { jq -r '.transcript_path // empty' 2>/dev/null || echo ""; })
+    aviso="⚠️ Compactaste SIN hilo mental fresco (no existe .claude/memory/hilo-mental-actual.md). El detalle de la conversación se degradó en el resumen y NO hay volcado que lo recupere. Reconstruye del transcript${tp:+ ($tp)} + estado-proyecto.md/bitacora ANTES de seguir, y corre el skill checkpoint antes del próximo /compact para no repetirlo."
+    if command -v jq >/dev/null 2>&1; then
+      jq -n --arg m "$aviso" '{systemMessage:$m}'
+    else
+      printf '%s\n' "$aviso"   # sin jq: cae a additionalContext pasivo (mejor que perderlo)
+    fi
+  fi
+  exit 0                         # sin hilo → nada que rehidratar (avisado o silencioso según arriba)
+fi
 
 body=$(cat "$HILO" 2>/dev/null)
 [ -n "${body//[[:space:]]/}" ] || exit 0   # hilo vacío → silencioso

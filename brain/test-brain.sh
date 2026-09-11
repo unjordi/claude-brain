@@ -2833,6 +2833,26 @@ printf '%s' "$rhsame_ctx" | grep -q 'POSIBLEMENTE OBSOLETO' \
 printf '%s' "$rhsame_ctx" | grep -q 'HILO MENTAL ACTUAL' \
   && ok "rehidratar-hilo A8: encabezado normal (rehidrata el hilo vigente pese a la edad)" || bad "rehidratar-hilo A8: no reinyectó con encabezado normal; got: $rhsame_ctx"
 rm -rf "$RHSAME"
+# Rec3 (auditoría continuidad 2026-09-09): sin hilo NO es siempre silencio. Post-compact en un repo con
+# el sistema de memoria (estado-proyecto.md) y sin hilo fresco → aviso VISIBLE (systemMessage) que apunta
+# al transcript sobreviviente. El modo de falla es que la pérdida de detalle es INVISIBLE → el checkpoint
+# se ignora. Solo dispara en source=compact Y con estado-proyecto.md (gate-de-sistema); startup o repo sin
+# el sistema → silencio (un arranque limpio no tiene hilo, avisar sería ruido).
+RHREC3="$(mktemp -d "${TMPDIR:-/tmp}/brain-rh3.XXXXXX")"
+mkdir -p "$RHREC3/.claude/memory"
+: > "$RHREC3/.claude/memory/estado-proyecto.md"   # repo que SÍ usa el sistema, pero SIN hilo fresco
+rh3() { printf '%s' "{\"source\":\"$1\",\"transcript_path\":\"/tmp/t.jsonl\"}" | CLAUDE_PROJECT_DIR="$RHREC3" bash "$HOOKS/rehidratar-hilo.sh"; }
+rh3c="$(rh3 compact)"
+printf '%s' "$rh3c" | jq -e '.systemMessage' >/dev/null 2>&1 \
+  && ok "rehidratar-hilo Rec3: compact + estado-proyecto + sin hilo → systemMessage VISIBLE" || bad "rehidratar-hilo Rec3: esperaba systemMessage; got: $rh3c"
+printf '%s' "$rh3c" | jq -r '.systemMessage' 2>/dev/null | grep -q 'checkpoint' \
+  && ok "rehidratar-hilo Rec3: el aviso recuerda correr checkpoint" || bad "rehidratar-hilo Rec3: el aviso no menciona checkpoint"
+is_silent "$(rh3 startup)" \
+  && ok "rehidratar-hilo Rec3: startup (no compact) + sin hilo → silencio (arranque limpio, sin ruido)" || bad "rehidratar-hilo Rec3: startup sin hilo debió ser silencio"
+rm -f "$RHREC3/.claude/memory/estado-proyecto.md"   # repo SIN el sistema de memoria
+is_silent "$(rh3 compact)" \
+  && ok "rehidratar-hilo Rec3: compact SIN estado-proyecto (repo sin el sistema) → silencio" || bad "rehidratar-hilo Rec3: repo sin sistema debió ser silencio aun en compact"
+rm -rf "$RHREC3"
 rm -rf "$RHGIT" "$RHROOT"
 
 # ─────────────────────────────────────────────────────────────────────────────
