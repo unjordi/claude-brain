@@ -3467,6 +3467,149 @@ acwin() { # $1=window(vacío=sin forzar) $2=ctx → additionalContext, modelo 'o
   && ok "aviso escape hatch: SIN forzar (mismo ctx/modelo) → cae al invariante físico (1M, 30%), distinto del override" \
   || bad "aviso escape hatch: el fallback sin override no coincidió con el invariante; got: $(acwin '' 300000)"
 
+echo ""
+echo "== (b6f) aviso-contexto: debounce RELATIVO a la ventana + libre SIN saturar en 0 (C3/M4, auditoría 2026-09-11) =="
+# Antes del fix: STEP=50000 absoluto → con ventana 200K el ÚLTIMO escalón posible cae al 75% y de ahí el
+# hook enmudece hasta el auto-compact (~92-95%): ~20 puntos de silencio justo en la zona de peligro. Y
+# `libre` saturaba en 0 desde el 95%, indistinguible de 96/99%. TEST CONTRA LA FALLA: con WINDOW=200000,
+# debe EMITIR al menos una vez entre 85% y 95% (hoy: cero), y 95/96/99% deben reportar `libre` DISTINTO.
+ac200() { # $1=ctx → additionalContext, ventana forzada a 200K, dir/stamp frescos
+  local root; root="$(mktemp -d "${TMPDIR:-/tmp}/brain-ac200.XXXXXX")/r"; mkdir -p "$root/.claude/memory"
+  printf '%s\n' "{\"message\":{\"usage\":{\"cache_read_input_tokens\":$1}}}" > "$root/t.jsonl"
+  printf '%s' "{\"transcript_path\":\"$root/t.jsonl\"}" \
+    | env AVISO_CONTEXTO_WINDOW_TOKENS=200000 CLAUDE_PROJECT_DIR="$root" bash "$HOOKS/aviso-contexto.sh" \
+    | jq -r '.hookSpecificOutput.additionalContext // empty'
+  rm -rf "$(dirname "$root")"
+}
+emitio_entre_85_95=0
+for c in 170000 175000 180000 185000 190000; do   # 85%..95% de 200K
+  m="$(ac200 "$c")"
+  ! is_silent "$m" && emitio_entre_85_95=1
+done
+[ "$emitio_entre_85_95" = 1 ] \
+  && ok "aviso debounce relativo: WINDOW=200K → SÍ emite al menos una vez entre 85% y 95% (antes: silencio total)" \
+  || bad "aviso debounce relativo: WINDOW=200K siguió mudo entre 85% y 95% (STEP no se hizo relativo a la ventana)"
+m95="$(ac200 190000)"; m96="$(ac200 192000)"; m99="$(ac200 198000)"
+{ [ "$m95" != "$m96" ] && [ "$m96" != "$m99" ] && [ "$m95" != "$m99" ]; } \
+  && ok "aviso libre sin saturar: 95%/96%/99% reportan mensajes DISTINTOS (antes: los tres daban '0% libre')" \
+  || bad "aviso libre sin saturar: 95/96/99% siguen siendo indistinguibles; got: [95]=$m95 [96]=$m96 [99]=$m99"
+printf '%s' "$m99" | grep -qE -- '-[0-9]+% libre' \
+  && ok "aviso libre sin saturar: al 99% reporta un déficit NEGATIVO explícito (dato crudo, no clamp a 0)" \
+  || bad "aviso libre sin saturar: al 99% no reportó negativo; got: $m99"
+# Retro-compat: con ventana 1M, STEP=WINDOW/20=50000 — el mismo escalón absoluto que el contrato viejo
+# (las pruebas b6 de arriba, que fuerzan WINDOW=1000000, siguen pasando SIN cambiarlas). El debounce es
+# per-sesión (stamp en disco), así que las DOS llamadas deben compartir el MISMO root/sesión — a
+# diferencia de ac200 (que mide un ctx aislado por llamada y no le importa el debounce entre ellas).
+AC1MROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-ac1m.XXXXXX")/r"; mkdir -p "$AC1MROOT/.claude/memory"
+ac1m() { # $1=ctx → additionalContext ('' si el hook quedó SILENCIOSO — igual que is_silent en el resto del archivo)
+  printf '%s\n' "{\"message\":{\"usage\":{\"cache_read_input_tokens\":$1}}}" > "$AC1MROOT/t.jsonl"
+  printf '%s' "{\"transcript_path\":\"$AC1MROOT/t.jsonl\"}" \
+    | env AVISO_CONTEXTO_WINDOW_TOKENS=1000000 CLAUDE_PROJECT_DIR="$AC1MROOT" bash "$HOOKS/aviso-contexto.sh" \
+    | jq -r '.hookSpecificOutput.additionalContext // empty'
+}
+{ ! is_silent "$(ac1m 80000)" && is_silent "$(ac1m 95000)"; } \
+  && ok "aviso retro-compat: con ventana 1M, STEP sigue siendo 50K (80K cruza escalón, 95K sigue en el mismo)" \
+  || bad "aviso retro-compat: el escalón de 1M cambió de tamaño (rompe el contrato viejo)"
+rm -rf "$(dirname "$AC1MROOT")"
+
+echo ""
+echo "== (m1) doc=realidad: ningún doc niega el hook de PreCompact que install-brain.sh SÍ cablea (C1, auditoría 2026-09-11) =="
+# Antes del fix: brain/skills/checkpoint/SKILL.md y docs/flowcharts/05*.dot/.svg afirmaban "sin hook de
+# PreCompact" mientras install-brain.sh lo cablea (exportar-sesion-master, y ahora checkpoint-mecanico).
+# TEST CONTRA LA FALLA: si la doc vuelve a decir la mentira MIENTRAS el instalador cablea PreCompact, falla.
+if grep -rqiE 'sin hook de .?PreCompact|ning[úu]n hook puede correrlo' "$SCRIPT_DIR" "$SCRIPT_DIR/../docs" 2>/dev/null \
+   && grep -q 'PreCompact' "$INSTALLER"; then
+  bad "m1: la doc niega el hook de PreCompact mientras install-brain.sh lo cablea (mentira C1 de vuelta)"
+else
+  ok "m1: ningún doc de brain/docs niega el hook de PreCompact (o el instalador ya no lo cablea)"
+fi
+grep -q 'checkpoint-mecanico' "$INSTALLER" \
+  && ok "m1: checkpoint-mecanico está cableado en install-brain.sh (ev_de)" \
+  || bad "m1: checkpoint-mecanico NO aparece cableado en install-brain.sh"
+grep -qE '^checkpoint-mecanico\s+global\s+hook' "$SCRIPT_DIR/hooks/MANIFEST" \
+  && ok "m1: checkpoint-mecanico está en el MANIFEST (tier global, kind hook)" \
+  || bad "m1: checkpoint-mecanico falta en brain/hooks/MANIFEST"
+
+echo ""
+echo "== (m2) checkpoint-mecanico.js: extractor MECÁNICO en streaming (M2, auditoría 2026-09-11) =="
+# El 80% de un checkpoint COMPLETO a CERO tokens de modelo. TEST CONTRA LA FALLA: memoria acotada (RSS
+# reportado por el propio proceso, no proporcional a un archivo de decenas de MB), reset del ctxTokens en
+# cada boundary de /compact (mismo anclaje que aviso-contexto — anti-staleness), y los mensajes de usuario
+# salen TEXTUALES (byte a byte) — nunca los resúmenes SINTÉTICOS de isCompactSummary.
+CKPT_MEC="$SCRIPT_DIR/../bin/checkpoint-mecanico.js"
+[ -f "$CKPT_MEC" ] && ok "m2: bin/checkpoint-mecanico.js existe" || bad "m2: falta bin/checkpoint-mecanico.js"
+M2DIR="$(mktemp -d "${TMPDIR:-/tmp}/brain-m2.XXXXXX")"
+M2FIX="$M2DIR/fixture.jsonl"
+node -e '
+  const fs=require("fs");
+  const w=fs.createWriteStream(process.argv[1]);
+  const L=(o)=>w.write(JSON.stringify(o)+"\n");
+  L({type:"user",message:{role:"user"},gitBranch:"main",cwd:"/tmp/proj"});
+  L({message:{usage:{cache_read_input_tokens:900000}}});                                   // PRE-compact, grande
+  L({type:"user",isCompactSummary:true,message:{role:"user",content:"resumen sintetico 1"}}); // boundary 1 (NO es del usuario)
+  for (let i=0;i<4000;i++) L({type:"assistant",message:{role:"assistant",content:[{type:"text",text:"x".repeat(200)+i}]}});
+  L({type:"user",message:{role:"user",content:"sigue con el modulo de facturacion, ya casi"}});
+  L({type:"assistant",message:{role:"assistant",content:[{type:"tool_use",name:"Bash",input:{command:"git commit -m \"feat: facturacion v1\""}}]}});
+  L({message:{usage:{cache_read_input_tokens:40000}}});                                    // fresco, chico, ANTES del 2o boundary
+  L({type:"user",isCompactSummary:true,message:{role:"user",content:"resumen sintetico 2"}}); // boundary 2 → resetea ctxTokens (queda null: nada fresco después)
+  L({type:"user",message:{role:"user",content:"ultimo mensaje verbatim: revisa el PR #123"}});
+  w.end(()=>{});
+' "$M2FIX"
+M2OUT="$(node "$CKPT_MEC" "$M2FIX" --json 2>&1)"
+echo "$M2OUT" | jq -e . >/dev/null 2>&1 && ok "m2: el extractor produce JSON válido sobre el fixture" || bad "m2: JSON inválido; got: $M2OUT"
+[ "$(printf '%s' "$M2OUT" | jq -r '.compactaciones')" = "2" ] \
+  && ok "m2: detecta las 2 compactaciones (isCompactSummary) del fixture" \
+  || bad "m2: compactaciones mal contadas; got: $(printf '%s' "$M2OUT" | jq -r '.compactaciones')"
+[ "$(printf '%s' "$M2OUT" | jq -r '.ctxTokens')" = "null" ] \
+  && ok "m2: ctxTokens se RESETEA en el 2º boundary (no arrastra el usage viejo de 900000/40000 — anti-staleness)" \
+  || bad "m2: ctxTokens NO se reseteó tras el último boundary; got: $(printf '%s' "$M2OUT" | jq -r '.ctxTokens')"
+[ "$(printf '%s' "$M2OUT" | jq -r '.commitsTotal')" = "1" ] && [ "$(printf '%s' "$M2OUT" | jq -r '.commits[0]')" = "feat: facturacion v1" ] \
+  && ok "m2: extrae el mensaje de \`git commit -m\` verbatim del Bash tool_use" \
+  || bad "m2: no extrajo el commit esperado; got: $(printf '%s' "$M2OUT" | jq -c '.commits')"
+[ "$(printf '%s' "$M2OUT" | jq -r '.mensajesUsuario')" = "2" ] \
+  && ok "m2: cuenta EXACTAMENTE 2 mensajes de usuario reales (excluye los 2 resúmenes sintéticos de compact)" \
+  || bad "m2: contó de más/menos mensajes de usuario (¿coló un resumen sintético?); got: $(printf '%s' "$M2OUT" | jq -r '.mensajesUsuario')"
+M2RSS="$(printf '%s' "$M2OUT" | jq -r '.rss_MB')"
+awk -v v="$M2RSS" 'BEGIN{exit !(v!="" && v+0<300)}' \
+  && ok "m2: memoria ACOTADA — RSS del proceso ($M2RSS MB) < 300 MB sobre un fixture con 4000+ líneas de relleno" \
+  || bad "m2: RSS por encima de 300 MB ($M2RSS MB) — el streaming dejó de estar acotado"
+node -e '
+  const {extraer} = require(process.argv[1]);
+  const r = extraer(process.argv[2], 12);
+  const textos = r.mensajesUsuario.map(m=>m.texto);
+  const esperado = ["sigue con el modulo de facturacion, ya casi","ultimo mensaje verbatim: revisa el PR #123"];
+  if (JSON.stringify(textos) !== JSON.stringify(esperado)) { console.error("NO-MATCH: " + JSON.stringify(textos)); process.exit(1); }
+' "$CKPT_MEC" "$M2FIX" \
+  && ok "m2: los mensajes de usuario salen TEXTUALES, byte a byte, contra el fixture (sin resumen ni recorte)" \
+  || bad "m2: los mensajes de usuario NO coinciden byte a byte con el fixture"
+rm -rf "$M2DIR"
+
+echo ""
+echo "== (m2b) checkpoint-mecanico.sh: hook de PreCompact — detached, lock por-sid, escritura atómica =="
+grep -qF 'nohup' "$SCRIPT_DIR/hooks/checkpoint-mecanico.sh" \
+  && ok "m2b: el hook corre DETACHED (nohup) — no bloquea el evento PreCompact con un transcript grande" \
+  || bad "m2b: el hook de checkpoint-mecanico ya no es detached"
+grep -qF '_CORTEX_CKPT_MECANICO_RUNNING' "$SCRIPT_DIR/hooks/checkpoint-mecanico.sh" \
+  && ok "m2b: trae centinela anti-recursión por env" \
+  || bad "m2b: falta el centinela anti-recursión"
+M2BDIR="$(mktemp -d "${TMPDIR:-/tmp}/brain-m2b.XXXXXX")/r"
+mkdir -p "$M2BDIR/.claude/memory"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"hola"}}' \
+              '{"message":{"usage":{"cache_read_input_tokens":123}}}' > "$M2BDIR/t.jsonl"
+printf '%s' "{\"session_id\":\"m2b-test\",\"transcript_path\":\"$M2BDIR/t.jsonl\",\"cwd\":\"$M2BDIR\"}" \
+  | CLAUDE_PROJECT_DIR="$M2BDIR" CLAUDE_BRAIN_DIR="$SCRIPT_DIR/.." bash "$SCRIPT_DIR/hooks/checkpoint-mecanico.sh" >/dev/null 2>&1
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f "$M2BDIR/.claude/memory/hilo-mental-actual.andamio.md" ] && break; sleep 0.3; done
+[ -s "$M2BDIR/.claude/memory/hilo-mental-actual.andamio.md" ] \
+  && ok "m2b: end-to-end — el hook PreCompact deja escrito el andamio (detached, sin bloquear)" \
+  || bad "m2b: el andamio NO apareció tras invocar el hook"
+grep -q 'Andamio mecánico' "$M2BDIR/.claude/memory/hilo-mental-actual.andamio.md" 2>/dev/null \
+  && ok "m2b: el andamio trae el encabezado esperado (no pisó/confundió con hilo-mental-actual.md)" \
+  || bad "m2b: el contenido del andamio no es el esperado"
+[ ! -f "$M2BDIR/.claude/memory/hilo-mental-actual.md" ] \
+  && ok "m2b: el hook NUNCA toca hilo-mental-actual.md (solo el sidecar .andamio.md)" \
+  || bad "m2b: el hook escribió/creó hilo-mental-actual.md — no debía tocarlo"
+rm -rf "$(dirname "$M2BDIR")"
+
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "== (b6c) hud-stale: avisa (advisory) al cambiar de rama/proyecto; first-sight silencioso; stamp per-sesión; solo en repos con backlog =="
@@ -3855,7 +3998,8 @@ desinflar-memorias|positivar-doc
 hud-stale|to-do
 drift-cerebro-comun|exportar-sesion-master
 drift-cerebro-comun|proteger-fuente-cerebro
-drift-cerebro-comun|verificar-cerebro"
+drift-cerebro-comun|verificar-cerebro
+checkpoint|checkpoint-mecanico"
 # auditar-coherencia-cerebro|auditar-proceso-algoritmo: FAMILIA declarada, no ciclo — proceso-algoritmo
 # es la METODOLOGÍA y apunta a secciones CONCRETAS de coherencia-cerebro (que es su modo-cerebro
 # empaquetado) donde vive el detalle; el contenido está en los dos lados, así que el lector no da vueltas.
@@ -3863,6 +4007,10 @@ drift-cerebro-comun|verificar-cerebro"
 # Los 3 pares de arriba (OLA1): exportar-sesion-master, proteger-fuente-cerebro y verificar-cerebro
 # ahora SOURCEAN drift-cerebro-comun.sh para reusar su resolve_brain_dir() — es lib<->consumidor
 # (igual que delegacion-comun|delegacion-gate arriba), no una dependencia circular real.
+# checkpoint|checkpoint-mecanico (M2, auditoría 2026-09-11): el SKILL.md documenta que debe LEER/FUSIONAR
+# el andamio que escribe el hook checkpoint-mecanico.sh, y el hook menciona la skill "checkpoint" en su
+# propio encabezado (contexto de por qué existe) — es la misma relación consumidor<->productor documentada
+# de un par de arriba, no un ciclo.
 ce_els=()
 for d in "$SCRIPT_DIR"/skills/*/; do [ -d "$d" ] && ce_els+=("$(basename "$d")"); done
 for h in "$HOOKS"/*.sh; do [ -e "$h" ] && ce_els+=("$(basename "$h" .sh)"); done

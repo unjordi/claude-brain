@@ -1024,6 +1024,9 @@ PlasmoidItem {
                 { emoji: "💾", name: "exportar-sesion-master",  desc: "auto-export de las sesiones *-master a ~/.claude-sessions (o Drive vía CLAUDE_SESSIONS_DRIVE); detached, sobrevive el cleanup de 30 días",
                   event: "Stop · SessionEnd · PreCompact",
                   detail: "Exporta el transcript comprimido de una sesión cuyo título sea *-master (o ya listada en masters.json) a la carpeta de sesiones (default ~/.claude-sessions; override CLAUDE_SESSIONS_DRIVE para una nube → la sesión viaja entre máquinas) para poder --resume la MISMA sesión después. Corre DETACHED (nohup, lock por-sid) con debounce en Stop; SessionEnd fija el estado final y detecta masters nuevos; PreCompact es bonus. Sobrevive el cleanup de 30 días de Claude Code. Silencioso y fail-open: si no es master o falta el motor/node, no hace nada." },
+                { emoji: "🗂️", name: "checkpoint-mecanico",     desc: "el 80% del checkpoint a CERO tokens de modelo, andamio mecánico justo antes de compactar",
+                  event: "PreCompact",
+                  detail: "Justo antes de compactar, corre (detached, lock por-sid, memoria acotada en streaming) bin/checkpoint-mecanico.js sobre el transcript: extrae archivos tocados, mensajes de git commit, citas TEXTUALES del usuario y métricas de sesión — sin gastar tokens de modelo — y las deja en .claude/memory/hilo-mental-actual.andamio.md (sidecar, NUNCA pisa el hilo-mental-actual.md que escribe el modelo). El skill checkpoint lo fusiona; el juicio (en qué estamos, decisión abierta, siguiente paso) lo sigue poniendo el modelo. Fail-open: sin node/jq o sin .claude/memory, no hace nada." },
                 { emoji: "🧺", name: "recordar-cosechar",       desc: "trabajaste y no cosechaste aprendizajes → sugiere /cosechar-sesion",
                   event: "Stop",
                   detail: "Al terminar un turno, si hubo trabajo sustantivo reciente en el repo (commits en las últimas horas o cambios de código sin commitear) pero .claude/memory/aprendizajes.md no se tocó, sugiere —no bloquea— correr /cosechar-sesion antes de cerrar si aprendiste algo durable. Throttle fuerte: 1×/día por repo. Fail-open." },
@@ -1158,7 +1161,7 @@ PlasmoidItem {
 
     // Catálogo conocido (mismos conjuntos que BrainState.knownGlobalHooks / knownRepoHooks del Swift).
     // DEBE coincidir con brain/hooks/MANIFEST; lo verifica el drift-check del widget (test-brain.sh).
-    readonly property var brainGlobalHooks: ["git-branch-guard","merge-squash-guard","confirmar-merge-develop","recordar-dashboard","secret-scan","rama-vieja","proteger-arbol","proteger-fuente-cerebro","limite-gasto","delegacion-gate","delegacion-registrar","delegacion-reporte","recordar-orquestar","rehidratar-hilo","aviso-contexto","aviso-drift-cerebro","hud-stale","exportar-sesion-master","barrer-ramas","entorno-maquina-guard","no-bypass-deploy"]
+    readonly property var brainGlobalHooks: ["git-branch-guard","merge-squash-guard","confirmar-merge-develop","recordar-dashboard","secret-scan","rama-vieja","proteger-arbol","proteger-fuente-cerebro","limite-gasto","delegacion-gate","delegacion-registrar","delegacion-reporte","recordar-orquestar","rehidratar-hilo","aviso-contexto","aviso-drift-cerebro","hud-stale","exportar-sesion-master","checkpoint-mecanico","barrer-ramas","entorno-maquina-guard","no-bypass-deploy"]
     readonly property var brainRepoHooks:   ["sesion-inicio","dod-verificar","recordar-cosechar","recordar-unificar-cerebro"]
 
     // ---------- Pestaña BROKER (idx 6) ----------

@@ -56,7 +56,7 @@ struct BrainState {
         "recordar-dashboard", "secret-scan", "rama-vieja", "proteger-arbol",
         "proteger-fuente-cerebro",
         "limite-gasto", "delegacion-gate", "delegacion-registrar", "delegacion-reporte", "recordar-orquestar",
-        "rehidratar-hilo", "aviso-contexto", "aviso-drift-cerebro", "hud-stale", "exportar-sesion-master", "barrer-ramas",
+        "rehidratar-hilo", "aviso-contexto", "aviso-drift-cerebro", "hud-stale", "exportar-sesion-master", "checkpoint-mecanico", "barrer-ramas",
         "entorno-maquina-guard", "no-bypass-deploy",
     ]
     /// Hooks de tier repo (kind=hook): viajan por-repo, se cargan si la sesión INICIA en el repo.

@@ -55,10 +55,12 @@ volátil lo que tiene casa durable** → reduce lo que el compact puede siquiera
 - Cada **~2h en corridas largas/nocturnas** → **COMPLETO** (el auto-compact no avisa).
 - En una **pausa natural** (terminaste un sub-paso, vas a cambiar de tema) → ligero basta.
 - Cuando quieras dejar un **punto de retorno** por si la sesión se corta → ligero basta.
-- ⚠️ El **auto-compact** (contexto lleno) NO avisa, y `precompact` NO puede salvarte el hilo
-  (PreCompact no tiene canal para inyectar ni para pedirte actuar, y no hay turno entre el hook y la
-  compactación). Por eso el checkpoint es **proactivo**, no de último momento: si vienes trabajando
-  rato, vuelca aunque no vayas a compactar todavía.
+- ⚠️ El **auto-compact** (contexto lleno) no te avisa a TI, y `PreCompact` no puede darte un turno para
+  que TÚ vuelques el juicio (no tiene canal para inyectar contexto ni pedirte actuar). Por eso el
+  checkpoint es **proactivo**, no de último momento: si vienes trabajando rato, vuelca aunque no vayas a
+  compactar todavía. Lo que SÍ pasa en ese evento, sin tu turno: `checkpoint-mecanico.sh` (hook de
+  `PreCompact`) deja el andamio mecánico escrito — ver "Qué NO es" abajo — así que aunque el auto-compact
+  te gane la carrera, el 🗂️ árbol/RESUELTO-HOY/citas del usuario no dependen solo de que TÚ alcanzaras a volcar.
 
 ## Qué hace (el volcado)
 
@@ -200,9 +202,15 @@ volátil lo que tiene casa durable** → reduce lo que el compact puede siquiera
   cosecha aprendizajes de cierre de slice. Cuando de verdad terminaste un slice, usa `cerrar-slice`
   (que hace este mismo volcado + esas etapas). Checkpoint es el "guarda punto" de en medio — ligero o
   completo, sigue siendo un punto de retorno, no un cierre.
-- **No sustituye la disciplina.** Ningún hook puede correrlo por ti (PreCompact no tiene turno) — es
-  una skill que TÚ invocas. `aviso-contexto` te lo RECUERDA cuando el contexto sube; correrlo (y al
-  nivel correcto) sigue siendo tuyo.
+- **No sustituye la disciplina del JUICIO.** `PreCompact` no puede inyectar contexto ni darte un turno
+  — por eso ningún hook puede escribir el "en qué estamos / decisión abierta / siguiente paso" por ti;
+  eso sigue siendo tuyo, vía esta skill. Lo que SÍ hace un hook (C1/M2, auditoría 2026-09-11): en ese
+  MISMO evento, `checkpoint-mecanico.sh` YA corre (detached, cero tokens de modelo) y deja escrito
+  `.claude/memory/hilo-mental-actual.andamio.md` — el 🗂️ árbol de archivos tocados, los mensajes de
+  `git commit`, las citas textuales del usuario y las métricas de sesión, sacados del transcript sin
+  criterio. **Al hacer el checkpoint, LEE ese andamio primero y FUSIÓNALO** al volcado (no lo copies a
+  ciegas: sigue siendo un borrador mecánico, no el hilo). Tú sigues poniendo el juicio; el andamio te
+  ahorra el grep. `aviso-contexto` además te lo RECUERDA cuando el contexto sube.
 
 ## Compartido vs local
 `hilo-mental-actual.md` es memoria de trabajo **VOLÁTIL** (se sobrescribe seguido) y personal de tu

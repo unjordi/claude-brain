@@ -166,6 +166,10 @@ ev_de() {
     # cablear registra cada uno. exportar-sesion-master necesita los 3 (Stop=backbone con debounce,
     # SessionEnd=estado final, PreCompact=bonus) — ver su encabezado.
     exportar-sesion-master) echo "Stop| SessionEnd| PreCompact|" ;;
+    # checkpoint-mecanico (M2/X2, auditoría 2026-09-11): SOLO PreCompact — es el único punto donde ya
+    # sabemos que la ventana se pierde AHORA; no necesita el respaldo continuo de Stop/SessionEnd que sí
+    # justifica exportar-sesion-master (ese cubre sesiones de vida larga que nunca "terminan").
+    checkpoint-mecanico) echo "PreCompact|" ;;
     *) echo "" ;;
   esac
 }

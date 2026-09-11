@@ -101,10 +101,17 @@ done
 # al proceso) → reportarlo MIENTE (unjordi 2026-09-01: "me suena MUY falso"). El dato que SÍ es fiable es el
 # ctx crudo + la ventana; el punto de auto-compact real lo sabe /context, no este hook.
 
-# Debounce GRUESO por PASOS de 50K tokens: emite solo al CRUZAR un nuevo escalón de contexto, NO en cada
-# tool-call (con `ctx > last_ctx` a secas dispararía casi siempre — el ctx sube monótono → ruido). Al
-# compactar (ctx baja) el escalón baja → last_step > step → se re-arma solo para la próxima subida.
-STEP=50000
+# Debounce GRUESO por PASOS, RELATIVOS a la ventana (C3/M4, auditoría 2026-09-11): un escalón ABSOLUTO de
+# 50K quedaba CIEGO en ventanas de 200K — el último escalón posible caía al 75% y de ahí el hook enmudecía
+# hasta el auto-compact (~92-95%): ~20 puntos de silencio justo en la zona de peligro. STEP = 5% de la
+# ventana (WINDOW/20): con ventana de 1M eso YA da 50K, así que el contrato viejo (medido/testeado con esa
+# ventana) queda intacto. Cerca del techo (pctw≥85%, que es donde la resolución más importa) el escalón se
+# afina a 1% de la ventana (WINDOW/100) — para no perder distinción justo donde antes "todo daba 0% libre".
+# Al compactar (ctx baja) el escalón baja → last_step > step → se re-arma solo para la próxima subida.
+pctw_pre=$(( ctx * 100 / WINDOW ))
+STEP=$(( WINDOW / 20 ))
+[ "$pctw_pre" -ge 85 ] && STEP=$(( WINDOW / 100 ))
+[ "$STEP" -gt 0 ] || STEP=1
 step=$(( ctx / STEP ))
 last_step=0
 if [ -f "$AVISO_F" ]; then
@@ -120,9 +127,14 @@ wink=$(( WINDOW / 1000 ))
 pctw=$(( ctx * 100 / WINDOW ))
 # Libre ÚTIL = libre − 5% de RESERVA para el checkpoint mismo (el volcado del hilo consume contexto; no
 # esperes a 0% o el checkpoint no cabe). unjordi 2026-09-01.
-libre=$(( 100 - pctw - 5 )); [ "$libre" -lt 0 ] && libre=0
+# C3 (auditoría 2026-09-11): SIN CLAMP. El clamp a 0 saturaba la señal justo donde más importa — de 95%
+# en adelante, 95/96/99% reportaban TODOS "0% libre", indistinguibles ("llegan RAYANDO al 99.9%" sin que
+# el reportero lo distinga). El reportero tonto reporta el déficit REAL, negativo incluido: es un dato,
+# no un veredicto.
+RESERVA_PCT=5
+libre=$(( 100 - pctw - RESERVA_PCT ))
 
-msg="📊 Contexto: ${ctxk}K tokens (~${pctw}% de tu ventana ${wink}K, ${libre}% libre — reservé 5% para el checkpoint). autoCompactWindow: ${ACW}."
+msg="📊 Contexto: ${ctxk}K tokens (~${pctw}% de tu ventana ${wink}K, ${libre}% libre — reservé ${RESERVA_PCT}% para el checkpoint). autoCompactWindow: ${ACW}."
 # Cierre NEUTRO: dato + deferencia, sin veredicto. El hook REPORTA (dónde está el número autoritativo, qué
 # hace el CLI); NO recomienda un curso ("mejor checkpoint+compact"). La decisión es del lector (unjordi:
 # "cada quién decide cómo morirse"; /context manda).
