@@ -20,15 +20,22 @@
 # SIEMPRE: nunca muta un .claude/ sucio; el push es `|| true`.
 #
 # Uso:
-#   bash barrer-flotilla-cerebro.sh [--dry-run] [--code-dir <dir>] [--roots-file <f>] [--report <path>] [--quiet]
+#   bash barrer-flotilla-cerebro.sh [--dry-run] [--code-dir <dir>] [--roots-file <f>] [--report <path>] [--quiet] [--no-residuo]
 #     --dry-run       : calcula la decisión de cada repo pero NO escribe/commitea/pushea nada (preview).
 #     --code-dir <d>  : raíz del descubrimiento (default $HOME/code).
 #     --roots-file <f>: en vez de descubrir, lee las rutas de repos (una por línea) de <f> (para tests).
 #     --report <p>    : archivo de reporte (default $STATEDIR/flotilla-ultimo-reporte.md).
 #     --quiet         : no imprime el reporte a stdout (útil bajo LaunchAgent con StandardOutPath).
+#     --no-residuo    : salta el barrido de residuo de housekeeping (ver abajo); solo drift de flotilla.
 # Programación (NO se instala vivo aquí — es config de máquina, la decide unjordi):
 #   macOS  : LaunchAgent de ejemplo en macos/launchd/com.local.drift-flotilla.plist (ver ese archivo).
 #   general: la skill `schedule` (routines cron del CLI) o `loop`.
+#
+# ADEMÁS del drift de flotilla, esta corrida es el MECANISMO (ya existe la programación 1×/día) del
+# barrido de RESIDUO de housekeeping que nadie más ejecutaba (respaldos de mudanza sin poda, logs de
+# barrer-ramas acumulados, cachés de corta vida): reusa el script standalone de esa clase al final de la
+# corrida (best-effort, fail-open — un fallo ahí NUNCA aborta el reporte de drift). Detalle de las
+# clases y su política de retención por EDAD en el propio script.
 # bash-3.2-safe.
 set -u
 
@@ -36,7 +43,7 @@ SELFDIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=drift-cerebro-comun.sh
 . "$SELFDIR/drift-cerebro-comun.sh"
 
-DRY_RUN=0; QUIET=0
+DRY_RUN=0; QUIET=0; NO_RESIDUO=0
 CODE_DIR="${CLAUDE_CODE_DIR:-$HOME/code}"
 ROOTS_FILE=""
 STATEDIR="${CLAUDE_DRIFT_STATEDIR:-$HOME/.claude/memory/.drift-cerebro}"
@@ -59,6 +66,7 @@ while [ $# -gt 0 ]; do
     --report) shift; REPORT="${1:-}" ;;
     --report=*) REPORT="${1#--report=}" ;;
     --no-dashboard) DASHBOARD="" ;;
+    --no-residuo) NO_RESIDUO=1 ;;
     -*) echo "ERROR: flag desconocido: $1" >&2; exit 2 ;;
     *)  echo "ERROR: argumento inesperado: $1" >&2; exit 2 ;;
   esac
@@ -149,6 +157,17 @@ done <<EOF
 $(descubrir_flotilla)
 EOF
 
+# ── Residuo de housekeeping (best-effort; NUNCA aborta el reporte de drift si falla) ───────────────────
+residuo_linea=""
+if [ "$NO_RESIDUO" != 1 ]; then
+  LIMRES="$SELFDIR/limpiar-residuo.sh"
+  if [ -f "$LIMRES" ]; then
+    if [ "$DRY_RUN" = 1 ]; then residuo_out="$(bash "$LIMRES" --dry-run 2>/dev/null)" || true
+    else residuo_out="$(bash "$LIMRES" 2>/dev/null)" || true; fi
+    residuo_linea="$(printf '%s\n' "$residuo_out" | tail -1)"
+  fi
+fi
+
 # ── Reporte ──────────────────────────────────────────────────────────────────────────────────────────
 modo="APLICA"; [ "$DRY_RUN" = 1 ] && modo="DRY-RUN (no escribió nada)"
 resumen_linea="barrer-flotilla-cerebro [$modo] $ts — $n_total repo(s): $n_synced sync · $n_syncfail push-fallido · $n_wouldsync would-sync · $n_drift drift · $n_flag personal-flag · $n_clean al día · $n_locked lock · $n_skip n/a"
@@ -163,6 +182,7 @@ resumen_linea="barrer-flotilla-cerebro [$modo] $ts — $n_total repo(s): $n_sync
   if [ -n "$BODY_ATT" ]; then echo ""; echo "## Necesitan atención manual$BODY_ATT"; fi
   if [ -n "$BODY_LOCKED" ]; then echo ""; echo "## Saltados por lock$BODY_LOCKED"; fi
   [ "$n_total" -eq 0 ] && { echo ""; echo "_(no se descubrió ningún repo brained bajo \`$CODE_DIR\`)_"; }
+  if [ -n "$residuo_linea" ]; then echo ""; echo "## Residuo de housekeeping"; echo "$residuo_linea"; fi
 } > "$REPORT" 2>/dev/null || true
 
 # Append de UNA línea (append-only con `>>`, la norma para docs que varias sesiones tocan a la vez → no

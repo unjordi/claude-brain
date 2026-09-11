@@ -25,6 +25,7 @@ for a in "$@"; do
   esac
 done
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "limpiar-ramas: no es un repo git" >&2; exit 1; }
+BITA="$ROOT/.claude/memory/bitacora.md"
 # shellcheck source=ramas-zombie.sh
 . "$(dirname "$0")/ramas-zombie.sh"
 
@@ -87,7 +88,45 @@ barrer_remota() {  # $1 = rama zombie   $2 = nombre del remoto   $3 = SHA del ti
   fi
 }
 
-borradas=0; conservadas=0; total=0
+# ── AVISO (NUNCA borra) de ramas de FAN-OUT abandonadas ────────────────────────────────────────────
+# Un fan-out con isolation:"worktree" deja la rama VIVA a propósito cuando el agente cambió algo — el
+# orquestador decide si la mergea o la descarta. Si nadie decide, la rama queda CONSERVADA para siempre
+# (trabajo sin integrar → bz_es_zombie jamás la toca) y se vuelve invisible: "qué pasa con lo que deja
+# detrás... no todo eran ramas con worktree" (queja real, 2026-09). Aquí NO se borra nada — sería el
+# ÚNICO error inaceptable si el agente aún traía algo útil — solo se REPORTA, una vez por PUNTA
+# (rama+sha, dedupe en un stamp por-repo), a la bitácora, para que un humano decida mergear o
+# `git branch -D`. Llega aquí SOLO lo que ya pasó `protegida()` (no checked-out en ningún worktree) y
+# `bz_es_zombie` (no integrada) — nunca una rama viva/protegida.
+# Patrón configurable (default: la convención del harness para worktrees de fan-out) y edad mínima
+# desde el último commit (para no reportar un fan-out todavía en curso).
+HUERF_PATRON="${LIMPIAR_RAMAS_PATRON_HUERFANA:-worktree-agent-*}"
+HUERF_DIAS="${LIMPIAR_RAMAS_DIAS_HUERFANA:-14}"
+case "$HUERF_DIAS" in ''|*[!0-9]*) HUERF_DIAS=14 ;; esac
+HUERF_ESTADO="$ROOT/.claude/memory/.ramas-huerfanas-estado"
+huerf_ya_reportada() {  # $1=branch $2=sha -> 0 si ESA punta ya se reportó (no repetir en cada corrida)
+  [ -f "$HUERF_ESTADO" ] || return 1
+  grep -qxF "$(printf '%s\t%s' "$1" "$2")" "$HUERF_ESTADO" 2>/dev/null
+}
+reportar_huerfana_si_aplica() {  # $1 = rama ya conservada (no zombie, no protegida, sin worktree)
+  local br="$1" sha ts edad_dias
+  case "$br" in $HUERF_PATRON) ;; *) return 0 ;; esac
+  sha="$(git -C "$ROOT" rev-parse --short "$br" 2>/dev/null)" || return 0
+  ts="$(git -C "$ROOT" log -1 --format=%ct "$br" 2>/dev/null)"; [ -n "$ts" ] || return 0
+  edad_dias=$(( ($(date +%s) - ts) / 86400 ))
+  [ "$edad_dias" -ge "$HUERF_DIAS" ] || return 0
+  huerf_ya_reportada "$br" "$sha" && return 0
+  huerfanas=$((huerfanas + 1))
+  if [ "$DRY" = 1 ]; then
+    echo "  [dry] HUÉRFANA de fan-out, sin worktree (${edad_dias}d) → se reportaría: $br"
+    return 0
+  fi
+  [ -f "$BITA" ] && printf -- '- **[rama de fan-out sin worktree]** `%s` — %s día(s) sin actividad, sin worktree vivo, sin integrar. Revisar: mergear o `git branch -D %s`.\n' "$br" "$edad_dias" "$br" >> "$BITA" 2>/dev/null
+  mkdir -p "$(dirname "$HUERF_ESTADO")" 2>/dev/null
+  printf '%s\t%s\n' "$br" "$sha" >> "$HUERF_ESTADO" 2>/dev/null
+  echo "  HUÉRFANA de fan-out, sin worktree (${edad_dias}d) → reportada a bitácora, NO borrada: $br"
+}
+
+borradas=0; conservadas=0; total=0; huerfanas=0
 omit_ba=0; omit_ba_n=""; omit_cv=0; omit_cv_n=""; omit_wt=0; omit_wt_n=""
 while IFS= read -r br; do
   [ -z "$br" ] && continue
@@ -118,6 +157,7 @@ while IFS= read -r br; do
     else
       conservadas=$((conservadas+1)); echo "  CONSERVADA (trabajo sin integrar): $br"
     fi
+    reportar_huerfana_si_aplica "$br"
   fi
 done < <(git -C "$ROOT" for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)
 
@@ -127,7 +167,7 @@ detalle=""
 [ "$omit_cv" -gt 0 ] && detalle="$(_join '; ' "$detalle" "$omit_cv protegida(s) por convención: $omit_cv_n")"
 [ "$omit_wt" -gt 0 ] && detalle="$(_join '; ' "$detalle" "$omit_wt retenida(s) por worktree: $omit_wt_n")"
 
-resumen="limpiar-ramas: examinadas $total de $total → $borradas integrada(s)$([ "$DRY" = 1 ] && echo ' (dry-run, no borradas)'), $conservadas con trabajo conservada(s)"
+resumen="limpiar-ramas: examinadas $total de $total → $borradas integrada(s)$([ "$DRY" = 1 ] && echo ' (dry-run, no borradas)'), $conservadas con trabajo conservada(s), $huerfanas huérfana(s) de fan-out reportada(s) (nunca borradas)"
 [ "$omit_total" -gt 0 ] && resumen="$resumen, $omit_total omitida(s) ($detalle)"
 resumen="$resumen. Base: $base."
 echo "$resumen"
