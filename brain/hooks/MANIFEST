@@ -73,6 +73,7 @@ cementerio               global  script
 delegacion-comun         global  lib
 ramas-zombie             global  lib
 drift-cerebro-comun      global  lib
+contrato-hilo            global  lib
 
 dod-verificar            repo    hook
 sesion-inicio            repo    hook

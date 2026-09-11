@@ -2849,6 +2849,16 @@ printf '%s' "$rh3c" | jq -r '.systemMessage' 2>/dev/null | grep -q 'checkpoint' 
   && ok "rehidratar-hilo Rec3: el aviso recuerda correr checkpoint" || bad "rehidratar-hilo Rec3: el aviso no menciona checkpoint"
 is_silent "$(rh3 startup)" \
   && ok "rehidratar-hilo Rec3: startup (no compact) + sin hilo → silencio (arranque limpio, sin ruido)" || bad "rehidratar-hilo Rec3: startup sin hilo debió ser silencio"
+# CONTRA LA FALLA (2026-09-11, al integrar #389 con #407): el aviso se emite solo si faltan LOS DOS
+# artefactos. Con andamio presente la máquina YA cubrió la pérdida con evidencia, y avisar ahí sería
+# alarmar por algo que no se perdió — justo el ruido que erosiona a un aviso hasta que se ignora.
+printf '%s\n' '# Andamio mecánico' '- rama X · 3 commits' \
+  > "$RHREC3/.claude/memory/hilo-mental-actual.andamio.md"   # sin hilo, pero CON andamio NO VACÍO
+printf '%s' "$(rh3 compact)" | jq -e '.systemMessage' >/dev/null 2>&1 \
+  && bad "rehidratar-hilo: con andamio presente NO debe avisar de pérdida (el andamio la cubre)" \
+  || ok "rehidratar-hilo: sin hilo pero CON andamio → no avisa de pérdida (la máquina ya dejó la traza)"
+rm -f "$RHREC3/.claude/memory/hilo-mental-actual.andamio.md"
+
 rm -f "$RHREC3/.claude/memory/estado-proyecto.md"   # repo SIN el sistema de memoria
 is_silent "$(rh3 compact)" \
   && ok "rehidratar-hilo Rec3: compact SIN estado-proyecto (repo sin el sistema) → silencio" || bad "rehidratar-hilo Rec3: repo sin sistema debió ser silencio aun en compact"
@@ -3877,7 +3887,9 @@ node -e '
   L({type:"user",message:{role:"user",content:"ultimo mensaje verbatim: revisa el PR #123"}});
   w.end(()=>{});
 ' "$M2FIX"
-M2OUT="$(node "$CKPT_MEC" "$M2FIX" --json 2>&1)"
+# `--ventana todo` a propósito: estas aserciones miden el ACUMULADO del archivo (el default pasó a ser
+# el TRAMO VIVO desde el último /compact — ver f1g y la cabecera del script). Se conservan íntegras.
+M2OUT="$(node "$CKPT_MEC" "$M2FIX" --json --ventana todo 2>&1)"
 echo "$M2OUT" | jq -e . >/dev/null 2>&1 && ok "m2: el extractor produce JSON válido sobre el fixture" || bad "m2: JSON inválido; got: $M2OUT"
 [ "$(printf '%s' "$M2OUT" | jq -r '.compactaciones')" = "2" ] \
   && ok "m2: detecta las 2 compactaciones (isCompactSummary) del fixture" \
@@ -3897,7 +3909,7 @@ awk -v v="$M2RSS" 'BEGIN{exit !(v!="" && v+0<300)}' \
   || bad "m2: RSS por encima de 300 MB ($M2RSS MB) — el streaming dejó de estar acotado"
 node -e '
   const {extraer} = require(process.argv[1]);
-  const r = extraer(process.argv[2], 12);
+  const r = extraer(process.argv[2], 12, {ventana:"todo"});
   const textos = r.mensajesUsuario.map(m=>m.texto);
   const esperado = ["sigue con el modulo de facturacion, ya casi","ultimo mensaje verbatim: revisa el PR #123"];
   if (JSON.stringify(textos) !== JSON.stringify(esperado)) { console.error("NO-MATCH: " + JSON.stringify(textos)); process.exit(1); }
@@ -3931,6 +3943,234 @@ grep -q 'Andamio mecánico' "$M2BDIR/.claude/memory/hilo-mental-actual.andamio.m
   && ok "m2b: el hook NUNCA toca hilo-mental-actual.md (solo el sidecar .andamio.md)" \
   || bad "m2b: el hook escribió/creó hilo-mental-actual.md — no debía tocarlo"
 rm -rf "$(dirname "$M2BDIR")"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (f1) CONTINUIDAD · el LAZO del andamio: contrato-hilo + rehidratar lo LEE + --ensure/--self =="
+# F1 del plan "checkpoint y mudanza unificados" (2026-09-11). El hallazgo que cierra este bloque: el
+# andamio mecánico externalizó la PRODUCCIÓN (hook de PreCompact) y dejó el CONSUMO dentro del modelo —
+# `rehidratar-hilo.sh` abría UN archivo y no era el andamio (medido: 0 menciones). En el único escenario
+# que lo motiva (el auto-compact GANA la carrera), el hilo reinyectado era el VIEJO y el andamio —que
+# describe justo el tramo perdido— se quedaba sin lector. Aquí se prueba el lazo COMPLETO.
+
+F1LIB="$HOOKS/contrato-hilo.sh"
+[ -f "$F1LIB" ] \
+  && ok "f1: existe brain/hooks/contrato-hilo.sh (UNA definición del contrato escritor↔lector)" \
+  || bad "f1: falta brain/hooks/contrato-hilo.sh"
+grep -qE '^contrato-hilo[[:space:]]+global[[:space:]]+lib$' "$HOOKS/MANIFEST" \
+  && ok "f1: contrato-hilo declarado en el MANIFEST (global lib) ⇒ el bootstrap lo instala junto al hook" \
+  || bad "f1: contrato-hilo falta/mal declarado en brain/hooks/MANIFEST"
+grep -qF 'contrato-hilo.sh' "$HOOKS/rehidratar-hilo.sh" \
+  && ok "f1: rehidratar-hilo SOURCEA la lib (el regex del footer deja de estar duplicado)" \
+  || bad "f1: rehidratar-hilo no sourcea contrato-hilo.sh"
+
+F1D="$(mktemp -d "${TMPDIR:-/tmp}/brain-f1.XXXXXX")"
+printf '%s\n' '# Hilo mental actual' '> Última actualización: 2026-09-11 · nivel COMPLETO.' '' '## En qué estamos' 'x' > "$F1D/sin-rama.md"
+printf '%s\n' '# Hilo mental actual' '> Última actualización: 2026-09-11 · rama DevelopUnjordi · nivel COMPLETO.' '' '## En qué estamos' 'x' > "$F1D/con-rama.md"
+printf '%s\n' '# Hilo mental actual' '> Última actualización: hoy · rama X · nivel ligero.' > "$F1D/sin-fecha.md"
+printf '%s\n' '# Hilo mental actual' '> Última actualización: 2026-09-11 · rama feat/diagrama-x · nivel ligero.' > "$F1D/rama-golosa.md"
+
+# (f1a) CONTRA LA FALLA — el estado REAL medido el 2026-09-11 sobre los 9 hilos de ~/code: 2 de 9 (22%)
+# no traen el footer `· rama`, así que su hilo VIGENTE se degrada a "⚠️ POSIBLEMENTE OBSOLETO" en cada
+# rehidratado. Nadie lo verificaba: la skill lo PRESCRIBÍA y el hook lo CONSUMÍA, sin gate en medio.
+( . "$F1LIB"; verificar_hilo "$F1D/sin-rama.md" ) >/dev/null 2>&1 \
+  && bad "f1a CONTRA LA FALLA: un hilo SIN '· rama <x>' PASÓ el contrato (rehidratar lo enterraría como obsoleto)" \
+  || ok "f1a CONTRA LA FALLA: un hilo SIN footer '· rama <x>' FALLA el contrato (es el estado real de 2 de 9 hilos de ~/code)"
+( . "$F1LIB"; verificar_hilo "$F1D/con-rama.md" ) >/dev/null 2>&1 \
+  && ok "f1a: un hilo CON footer y fecha absoluta pasa el contrato" \
+  || bad "f1a: un hilo bien formado NO pasó el contrato (falso positivo del verificador)"
+( . "$F1LIB"; verificar_hilo "$F1D/sin-fecha.md" ) >/dev/null 2>&1 \
+  && bad "f1a: un hilo con fecha RELATIVA ('hoy') pasó el contrato" \
+  || ok "f1a: un hilo sin fecha ABSOLUTA falla el contrato (una fecha relativa miente sobre su antigüedad)"
+[ "$( . "$F1LIB"; hilo_rama "$F1D/rama-golosa.md" )" = "feat/diagrama-x" ] \
+  && ok "f1a regresión A8: la rama sale ANCLADA al '·' (una rama que CONTIENE 'rama' no parte la extracción)" \
+  || bad "f1a regresión A8: hilo_rama devolvió '$( . "$F1LIB"; hilo_rama "$F1D/rama-golosa.md" )' en vez de feat/diagrama-x"
+[ "$( . "$F1LIB"; hilo_edad_legible 183600 )" = "2d 3h" ] \
+  && ok "f1a: hilo_edad_legible formatea la edad en prosa corta (183600 s = 2d 3h)" \
+  || bad "f1a: hilo_edad_legible dio '$( . "$F1LIB"; hilo_edad_legible 183600 )'"
+
+# ── (f1b) el LAZO: rehidratar INYECTA el andamio cuando es MÁS FRESCO que el hilo ────────────────────
+f1reh() { printf '%s' "$1" | env CLAUDE_PROJECT_DIR="$2" bash "$HOOKS/rehidratar-hilo.sh"; }
+f1ctx() { printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
+F1R="$F1D/repo"; mkdir -p "$F1R/.claude/memory"
+F1H="$F1R/.claude/memory/hilo-mental-actual.md"
+F1A="$F1R/.claude/memory/hilo-mental-actual.andamio.md"
+printf '%s\n' '# Hilo mental actual' '> Última actualización: 2026-01-01 · rama main · nivel ligero.' '' 'EL-HILO-VIEJO-DE-ENERO' > "$F1H"
+printf '%s\n' '# Andamio mecánico del checkpoint (auto-generado — NO es el hilo)' '' 'EL-ANDAMIO-RECIEN-HECHO' > "$F1A"
+touch -t 202601010000 "$F1H"          # hilo VIEJO · andamio recién escrito (mtime = ahora)
+F1OUT="$(f1ctx "$(f1reh '{"source":"compact"}' "$F1R")")"
+printf '%s' "$F1OUT" | grep -q 'EL-ANDAMIO-RECIEN-HECHO' \
+  && ok "f1b CONTRA LA FALLA: con el andamio MÁS FRESCO que el hilo, rehidratar lo INYECTA (antes: rehidratar abría un solo archivo y no era éste)" \
+  || bad "f1b CONTRA LA FALLA: el andamio fresco NO llegó al additionalContext — el lazo sigue abierto"
+printf '%s' "$F1OUT" | grep -q 'EL-HILO-VIEJO-DE-ENERO' \
+  && ok "f1b: el hilo se sigue inyectando junto al andamio (el andamio SUMA, no sustituye)" \
+  || bad "f1b: al añadir el andamio se perdió el hilo"
+printf '%s' "$F1OUT" | grep -q 'ANDAMIO MECÁNICO' && printf '%s' "$F1OUT" | grep -qE 'HILO (MENTAL ACTUAL|POSIBLEMENTE)' \
+  && ok "f1b: los DOS van con encabezados DISTINTOS (evidencia vs juicio) — el andamio nunca se presenta como el hilo" \
+  || bad "f1b: falta alguno de los dos encabezados distintos (¿se fusionaron?)"
+printf '%s' "$F1OUT" | grep -q 'NO es juicio' \
+  && ok "f1b: el encabezado del andamio dice explícitamente que NO es juicio" \
+  || bad "f1b: el andamio se inyecta sin advertir que es evidencia mecánica"
+
+# (f1b2) ¿de QUIÉN es este andamio? Es per-REPO pero lo escribe UNA sesión. Tras una mudanza —o con otro
+# stream trabajando en el mismo repo— el del disco es AJENO, y inyectarlo callado repite con la EVIDENCIA
+# el modo de falla que el gate del hilo evita con el JUICIO: presentar contexto ajeno como propio.
+printf '%s\n' '# Andamio mecánico del checkpoint (auto-generado — NO es el hilo)' '' '## Corte (para juzgar su frescura)' '- Sesión (sid): OTRA-SESION-AJENA' '' 'EL-ANDAMIO-RECIEN-HECHO' > "$F1A"
+F1OUTX="$(f1ctx "$(f1reh '{"source":"compact","session_id":"MI-SESION"}' "$F1R")")"
+printf '%s' "$F1OUTX" | grep -q 'DE OTRA SESIÓN' \
+  && ok "f1b2 CONTRA LA FALLA: un andamio de OTRA sesión se inyecta ETIQUETADO como ajeno (tras una mudanza, el andamio del repo destino NO es del master que acaba de llegar)" \
+  || bad "f1b2 CONTRA LA FALLA: el andamio ajeno se presentó como propio"
+printf '%s\n' '# Andamio mecánico del checkpoint (auto-generado — NO es el hilo)' '' '## Corte (para juzgar su frescura)' '- Sesión (sid): MI-SESION' '' 'EL-ANDAMIO-RECIEN-HECHO' > "$F1A"
+printf '%s' "$(f1ctx "$(f1reh '{"source":"compact","session_id":"MI-SESION"}' "$F1R")")" | grep -q 'DE OTRA SESIÓN' \
+  && bad "f1b2: marcó como ajeno un andamio de la PROPIA sesión (falso positivo)" \
+  || ok "f1b2: el andamio de la propia sesión NO lleva la advertencia (la etiqueta discrimina, no adorna)"
+
+# (f1c) al revés: hilo MÁS FRESCO ⇒ el andamio ya se fusionó al volcar ⇒ se MENCIONA, no se re-inyecta
+touch "$F1H"                          # ahora el hilo es el más fresco
+F1OUT2="$(f1ctx "$(f1reh '{"source":"startup"}' "$F1R")")"
+printf '%s' "$F1OUT2" | grep -q 'EL-ANDAMIO-RECIEN-HECHO' \
+  && bad "f1c: se re-inyectó un andamio MÁS VIEJO que el hilo (gasta ventana dos veces)" \
+  || ok "f1c: con el hilo más fresco, el andamio NO se re-inyecta (solo se menciona) — no se paga ventana dos veces"
+printf '%s' "$F1OUT2" | grep -q 'MÁS VIEJO que este hilo' \
+  && ok "f1c: pero SÍ se menciona que existe (el modelo puede abrirlo si duda)" \
+  || bad "f1c: no se menciona el andamio existente"
+
+# (f1d) el caso PEOR: nunca hubo checkpoint (no hay hilo) y el compact ganó ⇒ el andamio es lo ÚNICO
+rm -f "$F1H"
+F1OUT3="$(f1ctx "$(f1reh '{"source":"compact"}' "$F1R")")"
+printf '%s' "$F1OUT3" | grep -q 'EL-ANDAMIO-RECIEN-HECHO' \
+  && ok "f1d CONTRA LA FALLA: SIN hilo pero CON andamio, rehidratar inyecta el andamio (antes: exit 0 silencioso, se perdía todo)" \
+  || bad "f1d CONTRA LA FALLA: sin hilo, el andamio no se inyectó — el peor caso sigue sin cubrirse"
+rm -f "$F1A"
+is_silent "$(f1reh '{"source":"startup"}' "$F1R")" \
+  && ok "f1d: sin hilo y sin andamio sigue en SILENCIO (no estorba en repos sin el sistema)" \
+  || bad "f1d: habló sin tener ni hilo ni andamio"
+
+# (f1e) la EDAD como DATO en el encabezado: en una rama PERMANENTE el gate de rama no discrimina nunca
+F1G="$F1D/repogit"; mkdir -p "$F1G/.claude/memory"
+git -C "$F1G" init -q 2>/dev/null; git -C "$F1G" config user.email t@t >/dev/null 2>&1
+git -C "$F1G" config user.name t >/dev/null 2>&1; git -C "$F1G" checkout -q -b develop 2>/dev/null
+printf 'r\n' > "$F1G/README.md"; git -C "$F1G" add -A >/dev/null 2>&1; git -C "$F1G" commit -qm i >/dev/null 2>&1
+printf '%s\n' '# Hilo mental actual' '> Última actualización: 2026-01-01 · rama develop · nivel ligero.' '' 'HILO-EN-RAMA-PERMANENTE' \
+  > "$F1G/.claude/memory/hilo-mental-actual.md"
+touch -t 202601010000 "$F1G/.claude/memory/hilo-mental-actual.md"
+F1OUT4="$(f1ctx "$(f1reh '{"source":"startup"}' "$F1G")")"
+printf '%s' "$F1OUT4" | grep -q 'volcado hace' \
+  && ok "f1e: el encabezado reporta la EDAD del volcado — en rama permanente la rama NO discrimina y sin la edad un hilo de meses pasa por vigente" \
+  || bad "f1e: el encabezado no trae la edad del hilo"
+printf '%s' "$F1OUT4" | grep -q 'HILO MENTAL ACTUAL' \
+  && ok "f1e: y NO lo degrada a obsoleto (la rama sigue mandando; la edad es dato, no veredicto — el gate no se aflojó ni se endureció)" \
+  || bad "f1e: el hilo de rama coincidente se marcó obsoleto (se cambió la semántica del gate)"
+
+# ── (f1f) `--ensure` / `--self`: el SKILL puede regenerar el andamio SIN depender de PreCompact ──────
+# Restricción dura del dueño (textual): "no que PreCompact sea el único mecanismo". Sin esto, un
+# /checkpoint a mano encuentra el andamio viejo O ausente y no puede distinguir cuál.
+F1S="$F1D/self"; mkdir -p "$F1S/.claude/memory" "$F1D/cfg/projects"
+F1SID="11111111-2222-3333-4444-555555555555"
+F1SLUG="$(node -e 'console.log(require(process.argv[1]).slugForRepo(process.argv[2]))' "$SCRIPT_DIR/../bin/session-lib.js" "$F1S" 2>/dev/null)"
+mkdir -p "$F1D/cfg/projects/$F1SLUG"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"arregla el lazo del andamio"}}' \
+              '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git commit -m \"fix: el lazo\""}}]}}' \
+  > "$F1D/cfg/projects/$F1SLUG/$F1SID.jsonl"
+f1self() { ( cd "$F1S" && env CLAUDE_CONFIG_DIR="$F1D/cfg" CLAUDE_CODE_SESSION_ID="$F1SID" \
+            CLAUDE_CODE_CHILD_SESSION="${1:-}" node "$SCRIPT_DIR/../bin/checkpoint-mecanico.js" --self --ensure ); }
+F1SOUT="$(f1self 2>&1)"; F1SRC=$?
+[ "$F1SRC" -eq 0 ] && [ -s "$F1S/.claude/memory/hilo-mental-actual.andamio.md" ] \
+  && ok "f1f CONTRA LA FALLA: '--self --ensure' resuelve su PROPIO transcript y deja el andamio escrito, SIN que haya ocurrido un PreCompact" \
+  || bad "f1f CONTRA LA FALLA: --self --ensure no produjo el andamio (rc=$F1SRC): $(printf '%s' "$F1SOUT" | tail -2 | tr '\n' ' ')"
+grep -q 'fix: el lazo' "$F1S/.claude/memory/hilo-mental-actual.andamio.md" 2>/dev/null \
+  && ok "f1f: el andamio regenerado trae el commit del tramo (el extractor corrió de verdad, no tocó un archivo vacío)" \
+  || bad "f1f: el andamio regenerado no trae el contenido esperado"
+F1SOUT2="$(f1self 2>&1)"
+printf '%s' "$F1SOUT2" | jq -e '.ensure == "no-op"' >/dev/null 2>&1 \
+  && ok "f1f: re-invocarlo con el andamio ya fresco es un no-op VERIFICADO (lo dice, no calla)" \
+  || bad "f1f: --ensure regeneró de nuevo un andamio ya fresco (o no reportó el no-op); got: $(printf '%s' "$F1SOUT2" | head -3 | tr '\n' ' ')"
+touch -t 202601010000 "$F1S/.claude/memory/hilo-mental-actual.andamio.md"
+printf '%s' "$(f1self 2>&1)" | jq -e '.ensure == "regenerado"' >/dev/null 2>&1 \
+  && ok "f1f: con el andamio ATRÁS del transcript, --ensure lo regenera" \
+  || bad "f1f: --ensure no regeneró un andamio stale"
+# CONTRA LA FALLA (fail-CLOSED): dentro de un SUBAGENTE, CLAUDE_CODE_SESSION_ID es el sid del PADRE
+# (MEDIDO 2026-09-11). Regenerar ahí produciría el andamio de OTRA sesión: un artefacto que certifica
+# lo que no verificó. Debe NEGARSE, no adivinar.
+f1self 1 >/dev/null 2>&1 \
+  && bad "f1f CONTRA LA FALLA: --self corrió dentro de un SUBAGENTE (habría escrito el andamio del PADRE)" \
+  || ok "f1f CONTRA LA FALLA: --self FALLA CERRADO con CLAUDE_CODE_CHILD_SESSION=1 (el sid del entorno es el del padre)"
+( cd "$F1S" && env CLAUDE_CONFIG_DIR="$F1D/cfg" CLAUDE_CODE_SESSION_ID= \
+  node "$SCRIPT_DIR/../bin/checkpoint-mecanico.js" --self --ensure ) >/dev/null 2>&1 \
+  && bad "f1f: --self corrió sin CLAUDE_CODE_SESSION_ID (¿contra qué transcript?)" \
+  || ok "f1f: --self sin session-id en el entorno falla cerrado, no adivina"
+
+# ── (f1g) la VENTANA del andamio: el TRAMO VIVO, no el acumulado de semanas ──────────────────────────
+# MEDIDO sobre dos masters reales (192/201 MB, 13 compactaciones): con la ventana en el archivo entero,
+# los top-N los ganaba el trabajo VIEJO Y TERMINADO por volumen (`reporte_ejecutivo_v2.tex` 34×, los 10
+# commits del día anterior, 4 ramas `worktree-agent-*` muertas). Un andamio de checkpoint describe lo
+# que está POR PERDERSE = el tramo desde la última frontera de /compact.
+F1V="$F1D/ventana.jsonl"
+node -e '
+  const fs=require("fs"); const w=fs.createWriteStream(process.argv[1]);
+  const L=(o)=>w.write(JSON.stringify(o)+"\n");
+  L({type:"assistant",gitBranch:"worktree-vieja",message:{role:"assistant",content:[{type:"tool_use",name:"Write",input:{file_path:"/viejo/TERMINADO.tex"}}]}});
+  L({type:"assistant",message:{role:"assistant",content:[{type:"tool_use",name:"Bash",input:{command:"git commit -m \"chore: de la semana pasada\""}}]}});
+  L({type:"user",message:{role:"user",content:"mensaje VIEJO de otro tramo"}});
+  L({type:"user",isCompactSummary:true,message:{role:"user",content:"resumen sintetico"}});
+  L({type:"assistant",gitBranch:"DevelopUnjordi",message:{role:"assistant",content:[{type:"tool_use",name:"Write",input:{file_path:"/vivo/DE-HOY.md"}}]}});
+  L({type:"user",message:{role:"user",content:"mensaje VIVO del tramo actual"}});
+  w.end(()=>{});
+' "$F1V"
+F1VJ="$(node "$SCRIPT_DIR/../bin/checkpoint-mecanico.js" "$F1V" --json 2>&1)"
+printf '%s' "$F1VJ" | jq -e '[.topEscrituras[].item] == ["/vivo/DE-HOY.md"]' >/dev/null 2>&1 \
+  && ok "f1g CONTRA LA FALLA: la ventana por default es el TRAMO VIVO — el archivo del tramo anterior ya no encabeza el andamio" \
+  || bad "f1g CONTRA LA FALLA: el andamio sigue listando el trabajo de tramos ya compactados; got: $(printf '%s' "$F1VJ" | jq -c '[.topEscrituras[].item]')"
+printf '%s' "$F1VJ" | jq -e '.commitsTotal == 0 and (.ramas == ["DevelopUnjordi"]) and (.mensajesUsuario == 1)' >/dev/null 2>&1 \
+  && ok "f1g: commits, ramas y mensajes del tramo vivo también (la rama muerta y el commit viejo salieron del listado)" \
+  || bad "f1g: algún colector sigue acumulando desde antes del boundary; got: $(printf '%s' "$F1VJ" | jq -c '{commitsTotal,ramas,mensajesUsuario}')"
+printf '%s' "$F1VJ" | jq -e '.tramosPrevios.tramos == 1 and .tramosPrevios.commits == 1 and ([.tramosPrevios.ramas[]]|index("worktree-vieja") != null)' >/dev/null 2>&1 \
+  && ok "f1g: lo histórico NO se tira — se CUENTA aparte y etiquetado (tramosPrevios), nunca mezclado" \
+  || bad "f1g: se perdió la contabilidad de los tramos previos; got: $(printf '%s' "$F1VJ" | jq -c '.tramosPrevios')"
+printf '%s' "$(node "$SCRIPT_DIR/../bin/checkpoint-mecanico.js" "$F1V" --json --ventana todo 2>&1)" \
+  | jq -e '.ventana == "todo" and ([.topEscrituras[].item]|index("/viejo/TERMINADO.tex") != null)' >/dev/null 2>&1 \
+  && ok "f1g: '--ventana todo' sigue dando el acumulado completo (para auditar una sesión, no para un checkpoint)" \
+  || bad "f1g: --ventana todo ya no acumula todo el archivo"
+node "$SCRIPT_DIR/../bin/checkpoint-mecanico.js" "$F1V" --out "$F1D/and.md" >/dev/null 2>&1
+grep -q 'TRAMO VIVO' "$F1D/and.md" 2>/dev/null && grep -q 'Sesión (sid)' "$F1D/and.md" 2>/dev/null \
+  && ok "f1g: el andamio declara su CORTE (ventana + sid + líneas + compactaciones) ⇒ su frescura es auditable al leerlo" \
+  || bad "f1g: el andamio no declara su corte"
+
+# ── (f1h) el colector de escrituras VÍA BASH (heurística declarada) ──────────────────────────────────
+# MEDIDO 2026-09-11 en el tramo vivo de un master real: 0 escrituras por Write/Edit y 45 por Bash. En
+# modo auto casi todo se escribe con heredocs/redirecciones: sin este colector, el 🗂️ árbol sale VACÍO.
+F1B="$(node -e '
+  const {destinosDeEscrituraBash:d} = require(process.argv[1]);
+  const r = {
+    redir: d("echo hola > /tmp/a.txt"), append: d("printf x >> docs/b.md"),
+    tee: d("cat x | tee -a /var/log/c.log"), fd: d("cmd 2>&1 >/dev/null"),
+    flecha: d("node -e \"a.map(s => s.replace(1,2))\""),
+    cita: d("cat <<EOF > f.md\n> una cita de markdown dentro del heredoc\nEOF"),
+  };
+  console.log(JSON.stringify(r));
+' "$SCRIPT_DIR/../bin/checkpoint-mecanico.js" 2>&1)"
+printf '%s' "$F1B" | jq -e '.redir == ["/tmp/a.txt"] and .append == ["docs/b.md"] and .tee == ["/var/log/c.log"]' >/dev/null 2>&1 \
+  && ok "f1h: la heurística de Bash caza '>', '>>' y 'tee' (en modo auto, la mayoría de las escrituras no pasan por Write/Edit)" \
+  || bad "f1h: la heurística no cazó una redirección básica; got: $F1B"
+printf '%s' "$F1B" | jq -e '.fd == [] and .flecha == []' >/dev/null 2>&1 \
+  && ok "f1h CONTRA LA FALLA: NO confunde '2>&1'/'>/dev/null' ni la flecha '=>' de JS con una escritura" \
+  || bad "f1h CONTRA LA FALLA: falsos positivos de fd/flecha; got: $F1B"
+printf '%s' "$F1B" | jq -e '.cita == ["f.md"]' >/dev/null 2>&1 \
+  && ok "f1h CONTRA LA FALLA: una CITA de markdown ('> texto') dentro de un heredoc no cuenta, y la redirección real del mismo comando sí" \
+  || bad "f1h CONTRA LA FALLA: la cita de markdown se coló como destino (era el FP medido '/AUDITOR-' y '/'); got: $F1B"
+grep -q 'HEURÍSTICA' "$F1D/and.md" 2>/dev/null \
+  && ok "f1h: en el andamio va como lista SEPARADA y etiquetada heurística (nunca fusionada con las exactas de Write/Edit)" \
+  || bad "f1h: la lista heurística no está separada/etiquetada en el andamio"
+# Los ARTEFACTOS DE PROCESO del hook (lock por-sid + log) se escriben en .claude/memory de CADA repo con
+# el cerebro: sin patrón quedaban como untracked permanente, y el .log puede llevar rutas de la máquina.
+# (El andamio en sí lo cubre el patrón de familia `hilo-mental-*`.)
+if git -C "$SCRIPT_DIR/.." rev-parse --git-dir >/dev/null 2>&1; then
+  git -C "$SCRIPT_DIR/.." check-ignore -q -- ".claude/memory/.checkpoint-mecanico-abc.lock" \
+    && git -C "$SCRIPT_DIR/.." check-ignore -q -- ".claude/memory/.checkpoint-mecanico.log" \
+    && ok "f1i: el .gitignore de este repo cubre los artefactos de proceso del hook (.checkpoint-mecanico*)" \
+    || bad "f1i: .checkpoint-mecanico-<sid>.lock / .log NO están ignorados (untracked permanente en cada repo)"
+fi
+rm -rf "$F1D"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
@@ -4321,7 +4561,8 @@ hud-stale|to-do
 drift-cerebro-comun|exportar-sesion-master
 drift-cerebro-comun|proteger-fuente-cerebro
 drift-cerebro-comun|verificar-cerebro
-checkpoint|checkpoint-mecanico"
+checkpoint|checkpoint-mecanico
+checkpoint|contrato-hilo"
 # auditar-coherencia-cerebro|auditar-proceso-algoritmo: FAMILIA declarada, no ciclo — proceso-algoritmo
 # es la METODOLOGÍA y apunta a secciones CONCRETAS de coherencia-cerebro (que es su modo-cerebro
 # empaquetado) donde vive el detalle; el contenido está en los dos lados, así que el lector no da vueltas.
@@ -4333,6 +4574,9 @@ checkpoint|checkpoint-mecanico"
 # el andamio que escribe el hook checkpoint-mecanico.sh, y el hook menciona la skill "checkpoint" en su
 # propio encabezado (contexto de por qué existe) — es la misma relación consumidor<->productor documentada
 # de un par de arriba, no un ciclo.
+# checkpoint|contrato-hilo (F1, 2026-09-11): la lib es el CONTRATO del footer del hilo — la skill la
+# corre al volcar (fail-loud) y la lib documenta a su consumidor. Es lib<->consumidor, como los 3
+# pares de drift-cerebro-comun de arriba; el contenido no rebota entre los dos.
 ce_els=()
 for d in "$SCRIPT_DIR"/skills/*/; do [ -d "$d" ] && ce_els+=("$(basename "$d")"); done
 for h in "$HOOKS"/*.sh; do [ -e "$h" ] && ce_els+=("$(basename "$h" .sh)"); done
@@ -6364,6 +6608,18 @@ if [ -f "$E2EH" ]; then
   fi
   command rm -f "$E2EHOME/.claude/projects/$E2ENSLUG/bbbbbbbb-0000-0000-0000-0000000000bb.jsonl" \
                "$E2EHOME/.claude/projects/-slug-de-otro-repo/aaaaaaaa-0000-0000-0000-0000000000aa.jsonl"
+  # ── F2 · el HILO del master viaja en el bundle T2 y el DESTINO ya tiene el SUYO (caso NORMAL, no
+  #    excepcional: el mismo master escribe un hilo distinto en cada repo donde trabaja). Antes de este
+  #    cambio, esa diferencia era un CONFLICTO T2 y ABORTABA la mudanza pidiendo merge manual de un
+  #    archivo volátil — un gate que dispara siempre. Ahora se CO-UBICA.
+  E2ET2D="$E2EFIX/t2src"; mkdir -p "$E2ET2D"
+  printf '%s\n' 'HILO-DEL-MASTER-QUE-VIAJA' '> Última actualización: 2026-09-11 · rama vieja · nivel COMPLETO.' > "$E2ET2D/hilo-mental-actual.md"
+  printf '%s\n' 'identidad-del-master' > "$E2ET2D/conocimiento-propio.local.md"
+  tar -C "$E2ET2D" -czf "$E2EDRIVE/$E2EID.brain-local.tgz" .
+  printf '%s\n' 'HILO-PROPIO-DEL-DESTINO' '> Última actualización: 2026-09-11 · rama destino · nivel ligero.' > "$E2EDST/.claude/memory/hilo-mental-actual.md"
+  # G-GITIGNORE: lo sensible y el hilo DEBEN estar ignorados en el destino antes de depositar nada.
+  printf '%s\n' '.claude/memory/*.local.md' '.claude/memory/hilo-mental-*' >> "$E2EDST/.gitignore"
+
   # ── full: los pasos DESTRUCTIVOS, con sus dos citas humanas ──
   E2EFULL="$E2EFIX/full.log"
   if e2e env REUBICAR_LIVENESS_OK=1 REUBICAR_QUIESCE_OK=1 bash "$E2EH" > "$E2EFULL" 2>&1 \
@@ -6384,6 +6640,46 @@ if [ -f "$E2EH" ]; then
   grep -q 'G-SIDECAR' "$E2EFULL" \
     && ok "(e2e) G-SIDECAR corrió como postcondición del full (no es opcional)" \
     || bad "(e2e) G-SIDECAR no apareció en el log del full"
+  # ── F2 · política del HILO en la mudanza: CO-UBICAR, no abortar ni pisar ──────────────────────────
+  grep -q 'HILO-PROPIO-DEL-DESTINO' "$E2EDST/.claude/memory/hilo-mental-actual.md" \
+    && ok "(e2e) F2: el hilo PROPIO del destino quedó INTACTO (el del master no lo pisó)" \
+    || bad "(e2e) F2: el hilo del destino fue sobrescrito por el del master"
+E2ECO="$E2EDST/.claude/memory/hilo-mental-actual.nuevo-master.md"
+  { [ -f "$E2ECO" ] && grep -q 'HILO-DEL-MASTER-QUE-VIAJA' "$E2ECO"; } \
+    && ok "(e2e) F2 CONTRA LA FALLA: el hilo del master aterrizó CO-UBICADO ('hilo-mental-actual.<master>.md') — antes la mudanza ABORTABA pidiendo reconciliación humana" \
+    || bad "(e2e) F2 CONTRA LA FALLA: no hay hilo co-ubicado en el destino (¿abortó, o lo pisó?)"
+  grep -q 'CO-UBICA' "$E2EFULL" \
+    && ok "(e2e) F2: el full DICE que co-ubicó y por qué (el operador no tiene que deducirlo)" \
+    || bad "(e2e) F2: el full no explica la co-ubicación"
+  grep -q 'identidad-del-master' "$E2EDST/.claude/memory/conocimiento-propio.local.md" 2>/dev/null \
+    && ok "(e2e) F2: la IDENTIDAD (T2 de verdad) sí se depositó — la excepción del hilo no aflojó el resto de T2" \
+    || bad "(e2e) F2: no se depositó conocimiento-propio.local.md"
+  # Y la regla DURA sigue viva donde nació: un T2 de IDENTIDAD que difiere SÍ aborta.
+  printf '%s\n' 'identidad-DISTINTA-en-el-destino' > "$E2EDST/.claude/memory/conocimiento-propio.local.md"
+  command mv -f "$E2EDRIVE/$E2EID.brain-local.tgz.aplicado" "$E2EDRIVE/$E2EID.brain-local.tgz" 2>/dev/null
+  E2ECONF="$E2EFIX/t2-conflicto.log"
+  if e2e env REUBICAR_LIVENESS_OK=1 REUBICAR_QUIESCE_OK=1 bash "$E2EH" > "$E2ECONF" 2>&1; then
+    bad "(e2e) F2 CONTRA LA FALLA: un T2 de IDENTIDAD distinto en el destino NO abortó (la excepción del hilo se comió la regla)"
+  else
+    grep -q 'CONFLICTO T2' "$E2ECONF" \
+      && ok "(e2e) F2 CONTRA LA FALLA: identidad/autorizaciones que DIFIEREN siguen abortando (la excepción es SOLO del hilo)" \
+      || bad "(e2e) F2: abortó, pero no por el conflicto de T2: $(tail -2 "$E2ECONF" | tr '\n' ' ')"
+  fi
+  printf '%s\n' 'identidad-del-master' > "$E2EDST/.claude/memory/conocimiento-propio.local.md"
+  command mv -f "$E2EDRIVE/$E2EID.brain-local.tgz" "$E2EDRIVE/$E2EID.brain-local.tgz.aplicado" 2>/dev/null
+  # G-PARITY (subcomando) entiende el co-ubicado: medir 'idéntico' daría ROTA en el 100% de las mudanzas
+  E2EPARH="$E2EFIX/paridad-hilo.log"
+  if e2e bash "$E2ESH" paridad --src-repo "$E2ESRC" --dst-repo "$E2EDST" > "$E2EPARH" 2>&1; then
+    grep -q 'CO-UBICADO como hilo-mental-actual.nuevo-master.md' "$E2EPARH" \
+      && ok "(e2e) F2: G-PARITY reconoce el hilo CO-UBICADO como presencia válida (y lo dice con su nombre)" \
+      || bad "(e2e) F2: G-PARITY no reconoció el co-ubicado: $(grep -i hilo "$E2EPARH" | head -2 | tr '\n' ' ')"
+  else
+    bad "(e2e) F2: G-PARITY bloqueó tras una mudanza correcta: $(grep -E 'FALTA|ROTA' "$E2EPARH" | head -2 | tr '\n' ' ')"
+  fi
+  grep -q 'hilo-mental-actual.md' "$E2EPARH" \
+    && ok "(e2e) F2: el default T2 del subcomando 'paridad' incluye el hilo (era una SEGUNDA lista que driftó de la del generador)" \
+    || bad "(e2e) F2: 'paridad' sigue con su propia lista T2 sin el hilo"
+
   [ "$(jq -r --arg id "$E2EID" '.masters[]|select(.id==$id)|.name' "$E2EDRIVE/masters.json")" = nuevo-master ] \
     && ok "(e2e) masters.json quedó con el nombre NUEVO (UPSERT por id, con lock)" \
     || bad "(e2e) masters.json no refleja el renombre"

@@ -107,7 +107,7 @@ digraph flujos {
     CHK   [shape=diamond, fillcolor="#2b2622", color="#d97757",
            label="💾 checkpoint  (skill — TÚ lo invocas, PROACTIVO)\n¿nivel? viene compact / >2h / crítico → COMPLETO ; pausa casual → ligero\n(ante la duda: COMPLETO)"];
     DUMP  [color="#7fb069", penwidth=2,
-           label="📝 ESCRIBE (memoria, NO git) · 🟢 vuelca el HILO → .claude/memory/hilo-mental-actual.md\nGARANTÍA DURA antes de pisar: LEE el hilo previo y fusiona lo vivo (read-before-overwrite)\n+ SUBE todo pendiente/decisión DURABLE a estado-proyecto.md/bitácora (>>) — el hilo volátil\nSUBE al backlog durable, NUNCA al revés\nLIGERO: en qué estamos · decisión abierta · siguiente paso\nCOMPLETO: + PLAN con el CÓMO · RESUELTO HOY (anti-fantasma) · COSECHA DURABLE a memorias/skills\n(en las PROPIAS palabras del modelo → re-instanciar releyendo, no confabular)\n(repos COMPARTIDOS: gitignoreado per-dev — ver skill checkpoint §Compartido vs local)"];
+           label="📝 ESCRIBE (memoria, NO git) · 🟢 vuelca el HILO → .claude/memory/hilo-mental-actual.md\nGARANTÍA DURA antes de pisar: LEE el hilo previo y fusiona lo vivo (read-before-overwrite)\n+ SUBE todo pendiente/decisión DURABLE a estado-proyecto.md/bitácora (>>) — el hilo volátil\nSUBE al backlog durable, NUNCA al revés\nPASO 0: REGENERA el andamio (`checkpoint-mecanico.js --self --ensure`) y LÉELO — el hook solo corre en\nPreCompact y la mayoría de los checkpoints NO vienen de un compact (~5 volcados por compact)\nAL CERRAR: `verificar_hilo` (contrato-hilo.sh) — sin el footer `· rama <x>` el propio hook de arriba\ndegrada este hilo a «POSIBLEMENTE OBSOLETO» (medido: 2 de 9 hilos reales de ~/code no lo traen)\nLIGERO: en qué estamos · decisión abierta · siguiente paso\nCOMPLETO: + PLAN con el CÓMO · RESUELTO HOY (anti-fantasma) · COSECHA DURABLE a memorias/skills\n(en las PROPIAS palabras del modelo → re-instanciar releyendo, no confabular)\n(repos COMPARTIDOS: gitignoreado per-dev — ver skill checkpoint §Compartido vs local)"];
 
     // ── El compact ──
     COMPACT [shape=diamond, fillcolor="#2b2622", color="#d97757",
@@ -123,9 +123,11 @@ digraph flujos {
     SINI  [color="#e08e45",
            label="🔔🧭 sesion-inicio  (SessionStart · POR-REPO)\n🟠 reinyecta rama + NORMA de git + orden de leer MEMORY/estado-proyecto/AGENTS"];
     REHID [shape=diamond, fillcolor="#2b2622", color="#d97757",
-           label="🔔🧵 rehidratar-hilo  (SessionStart · GLOBAL)\n¿existe hilo-mental-actual.md (no vacío)? → reinyecta vía additionalContext\nGATE DE FRESCURA: ¿la rama del hilo = la actual?\n🟡 canal FIABLE depende de jq: sin jq, emite printf crudo (SessionStart NO lo consume como contexto)"];
+           label="🔔🧵 rehidratar-hilo  (SessionStart · GLOBAL) — LECTOR de DOS artefactos (F1, 2026-09-11)\n(1) hilo-mental-actual.md → GATE DE FRESCURA: ¿la rama del hilo = la actual? (+ la EDAD, siempre, como DATO)\n(2) hilo-mental-actual.andamio.md → si es MÁS FRESCO que el hilo, se inyecta TAMBIÉN, etiquetado aparte\n🟡 canal FIABLE depende de jq: sin jq, emite printf crudo (SessionStart NO lo consume como contexto)"];
     NOHILO [style="rounded,filled", fillcolor="#232323", color="#8a8a8a", fontcolor="#cfc8c0",
-            label="silencioso: no existe hilo-mental-actual.md, o está vacío → exit 0\n(caso normal en repos que no usan el sistema)"];
+            label="silencioso: NI hilo NI andamio (o ambos vacíos) → exit 0\n(caso normal en repos que no usan el sistema)"];
+    ANDIN [color="#7fb069",
+           label="🟢 «🤖 ANDAMIO MECÁNICO — NO es el hilo y NO es juicio»  (se inyecta ADEMÁS del hilo)\nel andamio es MÁS FRESCO que el hilo ⇒ describe el tramo que el hilo NO alcanzó a cubrir\n(el caso que lo motiva: el auto-compact GANÓ la carrera y no hubo checkpoint)\nva ACOTADO (ANDAMIO_MAX_LINEAS=140) y con etiqueta propia: EVIDENCIA, nunca razonamiento\n⚠️ si su sid ≠ el de esta sesión → se marca «DE OTRA SESIÓN» (tras una mudanza, el andamio\ndel repo destino es del stream que ya vivía ahí, no del master que acaba de llegar)\nsi el hilo es MÁS fresco: solo se MENCIONA (ya se fusionó al volcar; no se paga ventana dos veces)"];
     FRESCO [color="#7fb069",
             label="🟢 «🧵 HILO MENTAL ACTUAL»\n(rama coincide → la vigencia la manda la RAMA, no el reloj; A8\n· o rama indeterminada —sin git/sin línea de rama— y mtime<12h → proxy de respaldo aún fresco)"];
     STALE [color="#c9a227",
@@ -161,11 +163,13 @@ digraph flujos {
     SS -> SINI;
     SS -> REHID [label="misma SessionStart"];
     SINI -> RESUME;
-    REHID -> NOHILO [label="no existe / vacío\n(exit 0, silencioso)"];
+    REHID -> NOHILO [label="ni hilo ni andamio\n(exit 0, silencioso)"];
+    REHID -> ANDIN  [label="hay andamio y es\nMÁS FRESCO que el hilo\n(o no hay hilo)", color="#7fb069", fontcolor="#7fb069"];
     REHID -> FRESCO [label="rama coincide  ·  o\nindeterminada y mtime<12h"];
     REHID -> STALE  [label="rama distinta, o\nindeterminada y mtime≥12h"];
     REHID -> NOJQ   [label="sin jq: printf crudo\n(SessionStart lo ignora)", color="#c9a227", fontcolor="#c9a227"];
     FRESCO -> RESUME;
+    ANDIN -> RESUME;
     STALE -> VALIDA;
     VALIDA -> RESUME [label="si aplica\n(validado)"];
     VALIDA -> CHK [label="si NO aplica\n→ re-vuelca (checkpoint)", color="#c9a227", fontcolor="#c9a227"];
