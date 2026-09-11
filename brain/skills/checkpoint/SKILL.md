@@ -71,6 +71,28 @@ volátil lo que tiene casa durable** → reduce lo que el compact puede siquiera
 > genera ni pisa el HUD/backlog desde la memoria volátil de un Claude — eso invertiría la fuente de verdad).
 > Recién entonces el hilo se puede TIRAR sin perder nada. Mecánica y matices en el paso 2.
 
+0. **REGENERA el andamio mecánico y LÉELO (primer paso, ambos niveles).** Antes de escribir una sola
+   línea del hilo:
+   ```bash
+   node "$(ls ~/.local/bin/checkpoint-mecanico.js ~/.cortex/bin/checkpoint-mecanico.js 2>/dev/null | head -1)" \
+        --self --ensure          # regenera SOLO si quedó atrás del transcript; si no, dice "no-op"
+   cat .claude/memory/hilo-mental-actual.andamio.md
+   ```
+   **Por qué es TU paso y no solo del hook** (restricción dura de unjordi, textual: *"no que PreCompact
+   sea el único mecanismo"*): el hook `checkpoint-mecanico` solo corre en `PreCompact`, y la mayoría de
+   los checkpoints NO vienen de una compactación (medido: ~5 volcados por cada compact). Sin este paso,
+   un `/checkpoint` a mano encuentra el andamio viejo **o ausente, sin poder distinguir cuál** — un
+   insumo de frescura desconocida presentado como vigente, que es justo el modo de falla que el gate del
+   hilo existe para evitar. Con `--ensure`, el andamio SIEMPRE está al día cuando lo lees, venga o no de
+   un compact. (Dentro de un SUBAGENTE `--self` se niega a correr y lo dice: el `CLAUDE_CODE_SESSION_ID`
+   que ve un subagente es el del PADRE y regeneraría el andamio de otra sesión.)
+   El andamio te da GRATIS y sin gastar ventana: el 🗂️ árbol de archivos tocados (los de Write/Edit y,
+   aparte, los escritos desde Bash), las skills invocadas, los `git commit` del tramo y **las últimas
+   citas TEXTUALES del usuario** — la materia prima de la PROCEDENCIA `[user: "…"]`, que reconstruida de
+   memoria es justo donde se lava una idea tuya en la voz del usuario. Su ventana es el **TRAMO VIVO**
+   (desde el último `/compact`): describe lo que está por perderse, no el acumulado de semanas.
+   **NO lo copies al hilo**: es evidencia, no juicio. Lo FUSIONAS tú, con criterio, en los pasos de abajo.
+
 1. **El HILO (siempre, ambos niveles).** Va a `.claude/memory/hilo-mental-actual.md` (créalo si no
    existe: `mkdir -p .claude/memory`). No es log ni backlog — es "de qué va ESTO ahora mismo".
 
@@ -128,6 +150,15 @@ volátil lo que tiene casa durable** → reduce lo que el compact puede siquiera
     con sus rutas. La promoción se hace COMO PARTE del checkpoint completo, no "después".>
    ```
    Pon la **FECHA real** (córrela con `date` de bash, NO el metadato de sesión): `rehidratar-hilo` la muestra al retomar para que juzgues si el hilo quedó viejo.
+
+   **VERIFICA el contrato al terminar de escribir (paso mecánico, 1 comando).** El footer
+   `> Última actualización: <AAAA-MM-DD> · rama <rama> · nivel <x>` no es decoración: `rehidratar-hilo`
+   decide con él si tu hilo se reinyecta como VIGENTE o degradado a "⚠️ POSIBLEMENTE OBSOLETO". Medido el
+   2026-09-11 sobre los 9 hilos reales de `~/code`: **2 de 9 no lo traían** ⇒ su hilo VIGENTE se presenta
+   como obsoleto en cada rehidratado. Córrelo y arregla lo que marque:
+   ```bash
+   . ~/.claude/hooks/contrato-hilo.sh && verificar_hilo .claude/memory/hilo-mental-actual.md
+   ```
 
    **🗂️ ÁRBOL de memorias + tooling al PRINCIPIO (regla dura).** El hilo SIEMPRE abre con las memorias
    durables + herramientas/scripts que el tema toca, **cada una con su RUTA** — es la lista "lee esto al
@@ -208,9 +239,12 @@ volátil lo que tiene casa durable** → reduce lo que el compact puede siquiera
   MISMO evento, `checkpoint-mecanico.sh` YA corre (detached, cero tokens de modelo) y deja escrito
   `.claude/memory/hilo-mental-actual.andamio.md` — el 🗂️ árbol de archivos tocados, los mensajes de
   `git commit`, las citas textuales del usuario y las métricas de sesión, sacados del transcript sin
-  criterio. **Al hacer el checkpoint, LEE ese andamio primero y FUSIÓNALO** al volcado (no lo copies a
-  ciegas: sigue siendo un borrador mecánico, no el hilo). Tú sigues poniendo el juicio; el andamio te
-  ahorra el grep. `aviso-contexto` además te lo RECUERDA cuando el contexto sube.
+  criterio. **Al hacer el checkpoint, REGENÉRALO y LÉELO primero (paso 0), y FUSIÓNALO** al volcado (no
+  lo copies a ciegas: sigue siendo un borrador mecánico, no el hilo). Y si el compact te GANA la carrera,
+  ya no se pierde: `rehidratar-hilo` (SessionStart) inyecta el andamio junto al hilo cuando es MÁS FRESCO
+  que él, con encabezado propio y etiquetado como evidencia — nunca como si fuera tu razonamiento. Tú
+  sigues poniendo el juicio; el andamio te ahorra el grep. `aviso-contexto` además te lo RECUERDA cuando
+  el contexto sube.
 
 ## Compartido vs local
 `hilo-mental-actual.md` es memoria de trabajo **VOLÁTIL** (se sobrescribe seguido) y personal de tu
