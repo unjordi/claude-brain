@@ -2849,6 +2849,16 @@ printf '%s' "$rh3c" | jq -r '.systemMessage' 2>/dev/null | grep -q 'checkpoint' 
   && ok "rehidratar-hilo Rec3: el aviso recuerda correr checkpoint" || bad "rehidratar-hilo Rec3: el aviso no menciona checkpoint"
 is_silent "$(rh3 startup)" \
   && ok "rehidratar-hilo Rec3: startup (no compact) + sin hilo → silencio (arranque limpio, sin ruido)" || bad "rehidratar-hilo Rec3: startup sin hilo debió ser silencio"
+# CONTRA LA FALLA (2026-09-11, al integrar #389 con #407): el aviso se emite solo si faltan LOS DOS
+# artefactos. Con andamio presente la máquina YA cubrió la pérdida con evidencia, y avisar ahí sería
+# alarmar por algo que no se perdió — justo el ruido que erosiona a un aviso hasta que se ignora.
+printf '%s\n' '# Andamio mecánico' '- rama X · 3 commits' \
+  > "$RHREC3/.claude/memory/hilo-mental-actual.andamio.md"   # sin hilo, pero CON andamio NO VACÍO
+printf '%s' "$(rh3 compact)" | jq -e '.systemMessage' >/dev/null 2>&1 \
+  && bad "rehidratar-hilo: con andamio presente NO debe avisar de pérdida (el andamio la cubre)" \
+  || ok "rehidratar-hilo: sin hilo pero CON andamio → no avisa de pérdida (la máquina ya dejó la traza)"
+rm -f "$RHREC3/.claude/memory/hilo-mental-actual.andamio.md"
+
 rm -f "$RHREC3/.claude/memory/estado-proyecto.md"   # repo SIN el sistema de memoria
 is_silent "$(rh3 compact)" \
   && ok "rehidratar-hilo Rec3: compact SIN estado-proyecto (repo sin el sistema) → silencio" || bad "rehidratar-hilo Rec3: repo sin sistema debió ser silencio aun en compact"
