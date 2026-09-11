@@ -4002,6 +4002,19 @@ printf '%s' "$F1OUT" | grep -q 'NO es juicio' \
   && ok "f1b: el encabezado del andamio dice explícitamente que NO es juicio" \
   || bad "f1b: el andamio se inyecta sin advertir que es evidencia mecánica"
 
+# (f1b2) ¿de QUIÉN es este andamio? Es per-REPO pero lo escribe UNA sesión. Tras una mudanza —o con otro
+# stream trabajando en el mismo repo— el del disco es AJENO, y inyectarlo callado repite con la EVIDENCIA
+# el modo de falla que el gate del hilo evita con el JUICIO: presentar contexto ajeno como propio.
+printf '%s\n' '# Andamio mecánico del checkpoint (auto-generado — NO es el hilo)' '' '## Corte (para juzgar su frescura)' '- Sesión (sid): OTRA-SESION-AJENA' '' 'EL-ANDAMIO-RECIEN-HECHO' > "$F1A"
+F1OUTX="$(f1ctx "$(f1reh '{"source":"compact","session_id":"MI-SESION"}' "$F1R")")"
+printf '%s' "$F1OUTX" | grep -q 'DE OTRA SESIÓN' \
+  && ok "f1b2 CONTRA LA FALLA: un andamio de OTRA sesión se inyecta ETIQUETADO como ajeno (tras una mudanza, el andamio del repo destino NO es del master que acaba de llegar)" \
+  || bad "f1b2 CONTRA LA FALLA: el andamio ajeno se presentó como propio"
+printf '%s\n' '# Andamio mecánico del checkpoint (auto-generado — NO es el hilo)' '' '## Corte (para juzgar su frescura)' '- Sesión (sid): MI-SESION' '' 'EL-ANDAMIO-RECIEN-HECHO' > "$F1A"
+printf '%s' "$(f1ctx "$(f1reh '{"source":"compact","session_id":"MI-SESION"}' "$F1R")")" | grep -q 'DE OTRA SESIÓN' \
+  && bad "f1b2: marcó como ajeno un andamio de la PROPIA sesión (falso positivo)" \
+  || ok "f1b2: el andamio de la propia sesión NO lleva la advertencia (la etiqueta discrimina, no adorna)"
+
 # (f1c) al revés: hilo MÁS FRESCO ⇒ el andamio ya se fusionó al volcar ⇒ se MENCIONA, no se re-inyecta
 touch "$F1H"                          # ahora el hilo es el más fresco
 F1OUT2="$(f1ctx "$(f1reh '{"source":"startup"}' "$F1R")")"

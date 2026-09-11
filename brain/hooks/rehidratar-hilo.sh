@@ -86,6 +86,7 @@ fi
 # Lo drenamos SIEMPRE (aunque no haya hilo) para no dejar el pipe colgado.
 input=$(cat 2>/dev/null || true)
 source=$(printf '%s' "$input" | { jq -r '.source // "startup"' 2>/dev/null || echo startup; })
+sid_actual=$(printf '%s' "$input" | { jq -r '.session_id // ""' 2>/dev/null || echo ""; })
 
 # Nota: este hook YA NO fija un "baseline de contexto". aviso-contexto.sh mide el llenado con los
 # TOKENS REALES del último `usage` del transcript, ANCLADOS al último /compact (un `isCompactSummary`
@@ -214,7 +215,19 @@ if [ "$hay_andamio" -eq 1 ]; then
         *) aedad=" · generado hace $(hilo_edad_legible $(( now - mt_and )))";;
       esac
     fi
-    ahdr="🤖 ANDAMIO MECÁNICO — NO es el hilo y NO es juicio${aedad}. Lo extrajo una máquina del transcript (bin/checkpoint-mecanico.js), sin turno del modelo, del TRAMO VIVO desde el último /compact. Está aquí porque es MÁS FRESCO que el hilo de arriba: describe el tramo que el hilo NO alcanzó a cubrir. Trátalo como EVIDENCIA (rutas, commits, citas textuales), no como razonamiento: el «en qué estamos / decisión abierta / siguiente paso» sigue siendo tuyo."
+    # ¿es MÍO este andamio? El andamio es per-REPO (un archivo por repo) pero lo escribe UNA sesión, y
+    # su cabecera declara cuál. Dos casos reales en que el del disco es AJENO: otra sesión trabajó en
+    # este repo, o el master acaba de MUDARSE aquí (su hilo llegó co-ubicado y el `hilo-mental-actual.md`
+    # y el andamio de este repo son del stream que ya vivía acá). Inyectarlo sin decirlo repetiría, con
+    # la evidencia, el modo de falla que el gate del hilo existe para evitar: presentar contexto AJENO
+    # como propio. No se oculta ni se suprime — se ETIQUETA, que es lo que el lector necesita.
+    asid=$(grep -m1 '^- Sesión (sid): ' "$ANDAMIO" 2>/dev/null | sed 's/^- Sesión (sid): //' | tr -d ' ')
+    aajeno=""
+    if [ -n "$asid" ] && [ -n "$sid_actual" ] && [ "$asid" != "$sid_actual" ] \
+       && [ "$asid" != "(no disponible)" ]; then
+      aajeno=" ⚠️ DE OTRA SESIÓN ($asid, no la tuya): trátalo como contexto AJENO — puede ser de otro stream de trabajo en este mismo repo, o del repo al que te acabas de mudar. Verifica antes de apoyarte en él, y regenera el tuyo con \`checkpoint-mecanico.js --self --ensure\`."
+    fi
+    ahdr="🤖 ANDAMIO MECÁNICO — NO es el hilo y NO es juicio${aedad}.${aajeno} Lo extrajo una máquina del transcript (bin/checkpoint-mecanico.js), sin turno del modelo, del TRAMO VIVO desde el último /compact. Está aquí porque es MÁS FRESCO que el hilo de arriba: describe el tramo que el hilo NO alcanzó a cubrir. Trátalo como EVIDENCIA (rutas, commits, citas textuales), no como razonamiento: el «en qué estamos / decisión abierta / siguiente paso» sigue siendo tuyo."
     anote="→ Al hacer tu próximo checkpoint, FUSIONA lo que aplique de este andamio al hilo y regenéralo (\`checkpoint-mecanico.js --self --ensure\`). Las citas del usuario que trae son textuales: úsalas para la PROCEDENCIA \`[user: \"…\"]\` en vez de reconstruirlas de memoria."
     if [ -n "$ctx" ]; then
       ctx=$(printf '%s\n\n---\n\n%s\n\n%s%s\n\n%s\n' "$ctx" "$ahdr" "$abody" "$corte" "$anote")
