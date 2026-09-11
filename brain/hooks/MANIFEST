@@ -67,6 +67,7 @@ delegacion-reporte       global  hook
 recordar-orquestar       global  hook
 limpiar-worktrees        global  script
 limpiar-ramas            global  script
+limpiar-residuo          global  script
 verificar-cerebro        global  script
 barrer-flotilla-cerebro  global  script
 cementerio               global  script

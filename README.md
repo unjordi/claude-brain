@@ -159,7 +159,17 @@ a la acumulación de ramitas squasheadas: el squash rompe `git branch -d` y `fet
 locales) y, si tras borrar la local su **rama REMOTA** aún cuelga (un MR squash-mergeado sin
 `--delete-branch`), la borra también (fail-open sin red). Ambos comparten la lógica "zombie"
 ([`ramas-zombie.sh`](brain/hooks/ramas-zombie.sh)) → una sola definición de "mergeada", y `barrer-ramas`
-los lanza a **ambos** (ramas + worktrees) en el mismo trigger.
+los lanza a **ambos** (ramas + worktrees) en el mismo trigger. `limpiar-ramas` además REPORTA (nunca
+borra) las ramas de fan-out abandonadas (convención `worktree-agent-*`, sin worktree vivo, viejas y sin
+integrar): una vez por punta a la bitácora del repo, para que un humano decida.
+
+Más allá de ramas/worktrees git, [`limpiar-residuo.sh`](brain/hooks/limpiar-residuo.sh) barre el resto
+del residuo de housekeeping que nadie más podaba (queja real, 2026-09: *"qué pasa con lo que deja
+detrás... no todo eran ramas con worktree"*): los respaldos del skill de mudanza (`reubicar-backups/`,
+antes SIN poda alguna), los logs/stamps de `barrer-ramas` acumulados por repo visitado, y las cachés de
+corta vida de `analizar-comando-git`. Retención **por EDAD, nunca por cantidad** (un respaldo existe
+para recuperar un desastre; podar "los primeros N" botaría el único bueno tras una ráfaga). Corre como
+parte de `barrer-flotilla-cerebro` (reusa su programación diaria) o standalone con `--dry-run` para previsualizar.
 
 ### 🗺️ El mapa del cerebro — fuente de verdad visual
 
