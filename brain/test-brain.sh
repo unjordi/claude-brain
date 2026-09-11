@@ -1956,6 +1956,62 @@ rm -rf "$LR2ROOT"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
+echo "== (b3c3) limpiar-ramas: REPORTA (nunca borra) ramas de fan-out huérfanas (worktree-agent-*, sin worktree, viejas) =="
+# Queja real (2026-09): "qué pasa con lo que deja detrás... no todo eran ramas con worktree". Un fan-out
+# (isolation:worktree) deja la rama viva si el agente cambió algo; si nadie decide mergear/descartar, la
+# rama queda CONSERVADA (bz_es_zombie nunca la toca: tiene commits propios) y se acumula EN SILENCIO. La
+# clase nueva: reportar (jamás borrar) esas puntas viejas+sin-worktree a la bitácora, una sola vez.
+LR3ROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-lr3.XXXXXX")"; LR3REPO="$LR3ROOT/repo"; mkdir -p "$LR3REPO/.claude/memory"
+printf '# bitacora\n' > "$LR3REPO/.claude/memory/bitacora.md"
+git -C "$LR3REPO" init -q >/dev/null 2>&1
+git -C "$LR3REPO" symbolic-ref HEAD refs/heads/develop >/dev/null 2>&1
+git -C "$LR3REPO" config user.email t@t >/dev/null 2>&1; git -C "$LR3REPO" config user.name tester >/dev/null 2>&1
+printf 'base\n' > "$LR3REPO/base.txt"; git -C "$LR3REPO" add base.txt >/dev/null 2>&1; git -C "$LR3REPO" commit -qm base >/dev/null 2>&1
+OLDTS=$(( $(date +%s) - 28*86400 ))
+# (1) rama de fan-out VIEJA (28d), sin worktree, con trabajo único → candidata a reportar
+git -C "$LR3REPO" checkout -q -b worktree-agent-oldstale develop >/dev/null 2>&1
+printf 'x\n' > "$LR3REPO/f.txt"; git -C "$LR3REPO" add f.txt >/dev/null 2>&1
+GIT_COMMITTER_DATE="@$OLDTS" git -C "$LR3REPO" commit -q -m "trabajo viejo del agente" --date "@$OLDTS" >/dev/null 2>&1
+# (2) rama de fan-out RECIENTE (misma convención) → NO debe reportarse (fan-out aún en curso)
+git -C "$LR3REPO" checkout -q -b worktree-agent-recent develop >/dev/null 2>&1
+printf 'y\n' > "$LR3REPO/g.txt"; git -C "$LR3REPO" add g.txt >/dev/null 2>&1; git -C "$LR3REPO" commit -qm "trabajo reciente" >/dev/null 2>&1
+# (3) rama vieja normal (NO matchea el patrón) → nunca se reporta ni se toca
+git -C "$LR3REPO" checkout -q -b feat/normal-vieja develop >/dev/null 2>&1
+printf 'z\n' > "$LR3REPO/h.txt"; git -C "$LR3REPO" add h.txt >/dev/null 2>&1
+GIT_COMMITTER_DATE="@$OLDTS" git -C "$LR3REPO" commit -q -m "feature legítima vieja" --date "@$OLDTS" >/dev/null 2>&1
+git -C "$LR3REPO" checkout -q develop >/dev/null 2>&1
+
+lr3dry="$(cd "$LR3REPO" && CLAUDE_INTEGRACION_BASE=develop bash "$HOOKS/limpiar-ramas.sh" --dry-run --no-fetch 2>&1)"
+printf '%s' "$lr3dry" | grep -q 'HUÉRFANA.*worktree-agent-oldstale' \
+  && ok "b3c3: dry-run detecta la huérfana vieja (worktree-agent-oldstale)" || bad "b3c3: no detectó la huérfana; got: $lr3dry"
+printf '%s' "$lr3dry" | grep -q 'worktree-agent-recent.*HUÉRFANA\|HUÉRFANA.*worktree-agent-recent' \
+  && bad "b3c3: reportó la rama RECIENTE (aún en curso) — no debía" || ok "b3c3: la rama reciente NO se reporta (todavía en curso)"
+[ "$(cat "$LR3REPO/.claude/memory/bitacora.md")" = "$(printf '# bitacora')" ] \
+  && ok "b3c3: dry-run NO escribe nada a la bitácora" || bad "b3c3: dry-run mutó la bitácora"
+
+cd "$LR3REPO" && CLAUDE_INTEGRACION_BASE=develop bash "$HOOKS/limpiar-ramas.sh" --no-fetch >/dev/null 2>&1
+git -C "$LR3REPO" rev-parse --verify -q refs/heads/worktree-agent-oldstale >/dev/null 2>&1 \
+  && ok "b3c3: la rama huérfana NUNCA se borra (solo se reporta)" || bad "b3c3: ¡BORRÓ la rama huérfana! (pérdida de datos)"
+grep -q 'worktree-agent-oldstale' "$LR3REPO/.claude/memory/bitacora.md" \
+  && ok "b3c3: la huérfana quedó anotada en la bitácora del repo" || bad "b3c3: no anotó la huérfana en la bitácora"
+grep -q 'worktree-agent-recent' "$LR3REPO/.claude/memory/bitacora.md" \
+  && bad "b3c3: anotó la rama reciente (no debía)" || ok "b3c3: la reciente no quedó anotada"
+grep -q 'feat/normal-vieja' "$LR3REPO/.claude/memory/bitacora.md" \
+  && bad "b3c3: anotó una rama que NO matchea el patrón de fan-out (falso positivo)" || ok "b3c3: una rama vieja normal (fuera del patrón) nunca se reporta"
+n_lineas_antes="$(grep -c 'worktree-agent-oldstale' "$LR3REPO/.claude/memory/bitacora.md")"
+cd "$LR3REPO" && CLAUDE_INTEGRACION_BASE=develop bash "$HOOKS/limpiar-ramas.sh" --no-fetch >/dev/null 2>&1
+n_lineas_despues="$(grep -c 'worktree-agent-oldstale' "$LR3REPO/.claude/memory/bitacora.md")"
+[ "$n_lineas_antes" = "$n_lineas_despues" ] \
+  && ok "b3c3: dedupe — una 2ª corrida NO repite el aviso de la misma punta" || bad "b3c3: repitió el aviso (spam de bitácora); antes=$n_lineas_antes después=$n_lineas_despues"
+# patrón/edad configurables
+lr3cfg="$(cd "$LR3REPO" && CLAUDE_INTEGRACION_BASE=develop LIMPIAR_RAMAS_DIAS_HUERFANA=999 bash "$HOOKS/limpiar-ramas.sh" --dry-run --no-fetch 2>&1)"
+printf '%s' "$lr3cfg" | grep -q 'HUÉRFANA' \
+  && bad "b3c3: LIMPIAR_RAMAS_DIAS_HUERFANA=999 debía silenciar el aviso (nada es tan vieja)" \
+  || ok "b3c3: LIMPIAR_RAMAS_DIAS_HUERFANA configurable (umbral alto → sin avisos)"
+rm -rf "$LR3ROOT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
 echo "== (b3d) bz_resolver_base: AUTO-detecta la mini-develop (Develop<Usuario>) sin CLAUDE_INTEGRACION_BASE =="
 # Bug real (2026-07-28): en un repo con flujo mini-develop (rama personal DevelopUnjordi sacada de develop),
 # el resolver caía a `develop` porque existía local → las ramitas integradas a la MINI se veían "no
@@ -4562,7 +4618,8 @@ drift-cerebro-comun|exportar-sesion-master
 drift-cerebro-comun|proteger-fuente-cerebro
 drift-cerebro-comun|verificar-cerebro
 checkpoint|checkpoint-mecanico
-checkpoint|contrato-hilo"
+checkpoint|contrato-hilo
+barrer-flotilla-cerebro|limpiar-residuo"
 # auditar-coherencia-cerebro|auditar-proceso-algoritmo: FAMILIA declarada, no ciclo — proceso-algoritmo
 # es la METODOLOGÍA y apunta a secciones CONCRETAS de coherencia-cerebro (que es su modo-cerebro
 # empaquetado) donde vive el detalle; el contenido está en los dos lados, así que el lector no da vueltas.
@@ -6721,6 +6778,86 @@ else
 fi
 rm -rf "$E2EFIX"
 fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (h) limpiar-residuo: barre por EDAD (nunca por cantidad) solo patrones RECONOCIDOS, fail-open =="
+# Queja real (2026-09): "qué pasa con lo que deja detrás... no todo eran ramas con worktree". Clases
+# medidas: respaldos de mudanza sin poda (reubicar-backups), logs de barrer-ramas acumulados, cachés de
+# analizar-comando-git en $TMPDIR. Retención por EDAD (nunca por cantidad — un respaldo es para recuperar
+# un desastre; "los primeros N" botaría el único bueno tras una ráfaga).
+HRESIDUO="$HOOKS/limpiar-residuo.sh"
+HDIA=86400
+HHOME="$(mktemp -d "${TMPDIR:-/tmp}/brain-hresiduo.XXXXXX")"
+HTMP="$(mktemp -d "${TMPDIR:-/tmp}/brain-hresiduo-tmp.XXXXXX")"
+mkdir -p "$HHOME/.claude/reubicar-backups" "$HHOME/.claude/memory/.barrer-ramas"
+_old() { touch -t "$(date -v-"${1}"d +%Y%m%d%H%M 2>/dev/null || date -d "-${1} days" +%Y%m%d%H%M)" "$2"; }
+# 1) reubicar-backups: viejo (120d) se barre, nuevo (hoy) y un patrón AJENO (nunca reconocido) sobreviven
+: > "$HHOME/.claude/reubicar-backups/idOLD.111.pre-reubicar.jsonl"; _old 120 "$HHOME/.claude/reubicar-backups/idOLD.111.pre-reubicar.jsonl"
+: > "$HHOME/.claude/reubicar-backups/idNEW.222.pre-reubicar.jsonl"
+mkdir -p "$HHOME/.claude/reubicar-backups/idOLD.333.t2"; _old 120 "$HHOME/.claude/reubicar-backups/idOLD.333.t2"
+: > "$HHOME/.claude/reubicar-backups/README-no-tocar.md"; _old 200 "$HHOME/.claude/reubicar-backups/README-no-tocar.md"   # patrón AJENO, aunque viejísimo
+# 2) logs/stamps de barrer-ramas: viejos (90d) se barren, uno reciente sobrevive
+: > "$HHOME/.claude/memory/.barrer-ramas/1111111111.log"; _old 90 "$HHOME/.claude/memory/.barrer-ramas/1111111111.log"
+: > "$HHOME/.claude/memory/.barrer-ramas/1111111111"; _old 90 "$HHOME/.claude/memory/.barrer-ramas/1111111111"
+: > "$HHOME/.claude/memory/.barrer-ramas/9999999999.log"
+# 3) cachés de analizar-comando-git en TMPDIR propio (aislado, nunca el real): viejo (10d) se barre
+: > "$HTMP/acg-mrdest-oldkey"; _old 10 "$HTMP/acg-mrdest-oldkey"
+: > "$HTMP/acg-mrdest-newkey"
+: > "$HTMP/otro-archivo-cualquiera"; _old 400 "$HTMP/otro-archivo-cualquiera"   # nunca reconocido, aunque viejo
+
+hdry="$(CLAUDE_CONFIG_DIR="$HHOME/.claude" TMPDIR="$HTMP" bash "$HRESIDUO" --dry-run 2>&1)"
+[ -f "$HHOME/.claude/reubicar-backups/idOLD.111.pre-reubicar.jsonl" ] \
+  && ok "h: --dry-run NO borra nada (el viejo pre-reubicar sigue ahí)" || bad "h: --dry-run ya borró algo"
+printf '%s' "$hdry" | grep -q 'idOLD.111.pre-reubicar.jsonl' && ok "h: dry-run detecta el backup viejo como candidato" || bad "h: no detectó el backup viejo; got: $hdry"
+
+hout="$(CLAUDE_CONFIG_DIR="$HHOME/.claude" TMPDIR="$HTMP" bash "$HRESIDUO" 2>&1)"
+[ ! -f "$HHOME/.claude/reubicar-backups/idOLD.111.pre-reubicar.jsonl" ] \
+  && ok "h: aplica — backup VIEJO de mudanza (120d) se barre" || bad "h: el backup viejo sobrevivió a la aplicación real"
+[ -f "$HHOME/.claude/reubicar-backups/idNEW.222.pre-reubicar.jsonl" ] \
+  && ok "h: aplica — backup NUEVO de mudanza se CONSERVA" || bad "h: ¡borró un backup nuevo! (retención por edad rota)"
+[ ! -d "$HHOME/.claude/reubicar-backups/idOLD.333.t2" ] \
+  && ok "h: aplica — el depósito .t2 viejo se barre" || bad "h: el .t2 viejo sobrevivió"
+[ -f "$HHOME/.claude/reubicar-backups/README-no-tocar.md" ] \
+  && ok "h: un patrón AJENO (no reconocido) NUNCA se toca, aunque sea viejísimo" || bad "h: ¡borró un archivo fuera de los patrones reconocidos! (blanket delete)"
+[ ! -f "$HHOME/.claude/memory/.barrer-ramas/1111111111.log" ] && [ ! -f "$HHOME/.claude/memory/.barrer-ramas/1111111111" ] \
+  && ok "h: aplica — logs/stamps viejos de barrer-ramas se barren" || bad "h: los logs/stamps viejos sobrevivieron"
+[ -f "$HHOME/.claude/memory/.barrer-ramas/9999999999.log" ] \
+  && ok "h: aplica — un log RECIENTE de barrer-ramas se CONSERVA" || bad "h: ¡borró un log reciente!"
+[ ! -f "$HTMP/acg-mrdest-oldkey" ] && ok "h: aplica — la caché VIEJA de analizar-comando-git se barre" || bad "h: la caché acg vieja sobrevivió"
+[ -f "$HTMP/acg-mrdest-newkey" ] && ok "h: aplica — la caché NUEVA de acg se CONSERVA" || bad "h: ¡borró una caché acg nueva!"
+[ -f "$HTMP/otro-archivo-cualquiera" ] && ok "h: un archivo cualquiera de \$TMPDIR (fuera del patrón acg-mrdest-*) NUNCA se toca" || bad "h: ¡borró un archivo de TMPDIR fuera de su patrón!"
+printf '%s' "$hout" | grep -qE '^limpiar-residuo: [0-9]+ elemento' && ok "h: imprime el resumen final (elementos + KB liberados)" || bad "h: no imprimió el resumen; got: $hout"
+
+# umbral configurable por flag: con --dias-backups=99999 ni el backup de 120d (que SÍ se barre por default) es candidato
+: > "$HHOME/.claude/reubicar-backups/idOLD.111.pre-reubicar.jsonl" 2>/dev/null   # re-crea el que la corrida real ya barrió, para probar el flag aislado
+_old 120 "$HHOME/.claude/reubicar-backups/idOLD.111.pre-reubicar.jsonl"
+hnoop="$(CLAUDE_CONFIG_DIR="$HHOME/.claude" TMPDIR="$HTMP" bash "$HRESIDUO" --dry-run --dias-backups=99999 2>&1)"
+printf '%s' "$hnoop" | grep -q 'idOLD.111' && bad "h: --dias-backups=99999 debía dejar fuera de umbral incluso al backup de 120d" || ok "h: --dias-backups=N configurable (umbral alto → sin candidatos)"
+rm -f "$HHOME/.claude/reubicar-backups/idOLD.111.pre-reubicar.jsonl"
+
+# opción desconocida → error claro, no silencioso
+CLAUDE_CONFIG_DIR="$HHOME/.claude" bash "$HRESIDUO" --flag-inventado >/dev/null 2>&1 \
+  && bad "h: una opción desconocida debía salir con error" || ok "h: opción desconocida → exit≠0 (no falla en silencio)"
+
+rm -rf "$HHOME" "$HTMP"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (h2) barrer-flotilla-cerebro: corre limpiar-residuo al final (mecanismo reusado); --no-residuo lo salta =="
+H2CODE="$(mktemp -d "${TMPDIR:-/tmp}/brain-h2-code.XXXXXX")"
+H2HOME="$(mktemp -d "${TMPDIR:-/tmp}/brain-h2-home.XXXXXX")"
+H2REP="$H2HOME/report.md"
+mkdir -p "$H2HOME/.claude/reubicar-backups"
+: > "$H2HOME/.claude/reubicar-backups/old.1.pre-reubicar.jsonl"
+touch -t "$(date -v-120d +%Y%m%d%H%M 2>/dev/null || date -d '-120 days' +%Y%m%d%H%M)" "$H2HOME/.claude/reubicar-backups/old.1.pre-reubicar.jsonl"
+h2out="$(HOME="$H2HOME" bash "$HOOKS/barrer-flotilla-cerebro.sh" --dry-run --code-dir "$H2CODE" --no-dashboard --report "$H2REP" --quiet 2>&1)"
+grep -q 'Residuo de housekeeping' "$H2REP" && ok "h2: el reporte de flotilla incluye la sección de residuo" || bad "h2: falta la sección de residuo en el reporte; got: $(cat "$H2REP")"
+[ -f "$H2HOME/.claude/reubicar-backups/old.1.pre-reubicar.jsonl" ] \
+  && ok "h2: --dry-run de flotilla NO borra el residuo (solo lo reporta)" || bad "h2: ¡flotilla en dry-run borró el residuo!"
+HOME="$H2HOME" bash "$HOOKS/barrer-flotilla-cerebro.sh" --dry-run --code-dir "$H2CODE" --no-dashboard --report "$H2REP" --quiet --no-residuo >/dev/null 2>&1
+grep -q 'Residuo de housekeeping' "$H2REP" && bad "h2: --no-residuo debía SALTAR la sección de residuo" || ok "h2: --no-residuo salta el barrido de residuo"
+rm -rf "$H2CODE" "$H2HOME"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
