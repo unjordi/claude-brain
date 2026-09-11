@@ -2308,9 +2308,27 @@ git -C "$M6REPO" branch develop >/dev/null 2>&1
 git -C "$M6REPO" branch feat/q develop >/dev/null 2>&1
 git -C "$M6REPO" worktree add -q "$M6ROOT/wt-q" feat/q >/dev/null 2>&1
 git -C "$M6REPO" merge-base --is-ancestor feat/main-work develop 2>/dev/null && ok "b3q(teeth): feat/main-work (rama del worktree PRINCIPAL) ES ancestro de develop (zombie real por contenido)" || bad "b3q(teeth): test mal armado"
+# el path REAL (resuelto por git, p. ej. con /private en macOS) puede diferir del literal de $M6REPO
+# (mktemp bajo $TMPDIR sin resolver symlinks) — comparar contra el que GIT reporta, no el crudo.
+M6REPO_REAL="$(git -C "$M6REPO" rev-parse --show-toplevel)"
 m6out="$(cd "$M6ROOT/wt-q" && bash "$HOOKS/limpiar-worktrees.sh" --dry-run 2>&1)"
-printf '%s' "$m6out" | grep -qF "zombie: $M6REPO (" && bad "b3q: M-6 REGRESIÓN — el worktree PRINCIPAL se propuso como zombie corriendo desde uno enlazado; got: $m6out" || ok "b3q: M-6 — el worktree principal NO se propone como zombie (protegido pese a correr desde otro worktree)"
+printf '%s' "$m6out" | grep -qF "zombie: $M6REPO_REAL (" && bad "b3q: M-6 REGRESIÓN — el worktree PRINCIPAL se propuso como zombie corriendo desde uno enlazado; got: $m6out" || ok "b3q: M-6 — el worktree principal NO se propone como zombie (protegido pese a correr desde otro worktree)"
 rm -rf "$M6ROOT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "== (b3r) limpiar-worktrees: M-3 — un worktree en HEAD DETACHED se NOMBRA (antes: invisible, ni zombie ni vivo, se acumulaba para siempre) =="
+M3ROOT="$(mktemp -d "${TMPDIR:-/tmp}/brain-m3.XXXXXX")"; M3REPO="$M3ROOT/repo"; mkdir -p "$M3REPO"
+git -C "$M3REPO" init -q >/dev/null 2>&1
+git -C "$M3REPO" symbolic-ref HEAD refs/heads/develop >/dev/null 2>&1
+git -C "$M3REPO" config user.email t@t >/dev/null 2>&1; git -C "$M3REPO" config user.name tester >/dev/null 2>&1
+printf 'base\n' > "$M3REPO/a.txt"; git -C "$M3REPO" add a.txt >/dev/null 2>&1; git -C "$M3REPO" commit -qm base >/dev/null 2>&1
+M3SHA="$(git -C "$M3REPO" rev-parse develop)"
+git -C "$M3REPO" worktree add -q --detach "$M3ROOT/wt-det" "$M3SHA" >/dev/null 2>&1
+git -C "$M3REPO" worktree list --porcelain 2>/dev/null | grep -q '^detached$' && ok "b3r(teeth): el worktree quedó en HEAD detached (sin línea 'branch')" || bad "b3r(teeth): test mal armado"
+m3out="$(cd "$M3REPO" && bash "$HOOKS/limpiar-worktrees.sh" --dry-run 2>&1)"
+printf '%s' "$m3out" | grep -q 'DETACHED.*wt-det' && ok "b3r: M-3 — el worktree detached se NOMBRA explícitamente en el reporte" || bad "b3r: M-3 — el worktree detached sigue invisible; got: $m3out"
+rm -rf "$M3ROOT"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
@@ -3355,6 +3373,52 @@ is_silent "$(brm 'ls -la')" && ok "barrer-ramas(B): Bash no-merge → silencio" 
 # (7) debounce: 2º merge inmediato → silencio (el barrido recién lanzado ya cubre este)
 is_silent "$(brm 'glab mr merge 7 --squash')" && ok "barrer-ramas(B): debounce — 2º merge inmediato → silencio" || bad "barrer-ramas(B): no respetó el debounce del merge"
 rm -rf "$BRFIX"
+
+# ── (b5e2) barrer-ramas: A-5 — lanzar() corre limpiar-worktrees ANTES que limpiar-ramas (SECUENCIAL) ──
+echo ""
+echo "== (b5e2) barrer-ramas: A-5 — lanzar() corre limpiar-worktrees ANTES que limpiar-ramas (una sola pasada, no en paralelo) =="
+# Antes: 'nohup … &' para CADA uno → corrían en paralelo. limpiar-ramas fotografía qué ramas siguen
+# checked-out en un worktree AL ARRANCAR; si limpiar-worktrees libera un worktree DESPUÉS de esa foto, la
+# rama queda protegida un ciclo entero. Los stubs registran su nombre + un timestamp en ns en un log
+# compartido — si worktrees no corre ANTES, el orden (o el timestamp) no lo demuestra.
+A5FIX="$(mktemp -d "${TMPDIR:-/tmp}/brain-a5.XXXXXX")"
+A5HOME="$A5FIX/home"; A5HOOKS="$A5FIX/hooks"; A5REPO="$A5FIX/repo"
+mkdir -p "$A5HOME" "$A5HOOKS" "$A5REPO"
+git -C "$A5REPO" init -q >/dev/null 2>&1
+git -C "$A5REPO" remote add origin /tmp/fake-no-red-a5 >/dev/null 2>&1
+cp "$HOOKS/barrer-ramas.sh" "$A5HOOKS/barrer-ramas.sh"
+ORDERLOG="$A5FIX/orden.log"
+# Diseño que SÍ discrimina paralelo de secuencial (un simple "quién escribe primero" NO alcanza: si el
+# stub de ramas duerme y el de worktrees no, worktrees siempre "gana" la carrera aunque corran en
+# paralelo — eso hacía que esta prueba pasara incluso contra el código VIEJO). En cambio: el stub de
+# worktrees duerme y AL TERMINAR dej a un marker "wt-done"; el stub de ramas, SIN dormir, revisa AL
+# ARRANCAR si "wt-done" ya existe — eso solo es cierto si de verdad ESPERÓ a que worktrees terminara
+# (secuencial, mismo proceso). En paralelo, ramas arranca casi al mismo tiempo que worktrees y el marker
+# aún no existe.
+WTDONE="$A5FIX/wt-done"
+cat > "$A5HOOKS/limpiar-worktrees.sh" <<'STUBEOF'
+#!/usr/bin/env bash
+sleep 0.3
+touch "$(dirname "$0")/../wt-done"
+STUBEOF
+chmod +x "$A5HOOKS/limpiar-worktrees.sh"
+cat > "$A5HOOKS/limpiar-ramas.sh" <<'STUBEOF'
+#!/usr/bin/env bash
+if [ -f "$(dirname "$0")/../wt-done" ]; then
+  printf 'secuencial\n' >> "$(dirname "$0")/../orden.log"
+else
+  printf 'paralelo\n' >> "$(dirname "$0")/../orden.log"
+fi
+STUBEOF
+chmod +x "$A5HOOKS/limpiar-ramas.sh"
+printf '%s' '{"source":"startup"}' | HOME="$A5HOME" CLAUDE_PROJECT_DIR="$A5REPO" bash "$A5HOOKS/barrer-ramas.sh" >/dev/null 2>&1
+_wait_archivo() { local f="$1" i=0; while [ "$i" -lt 40 ]; do [ -s "$f" ] && return 0; i=$((i+1)); sleep 0.05; done; return 1; }
+_wait_archivo "$ORDERLOG"
+veredicto="$(cat "$ORDERLOG" 2>/dev/null)"
+[ "$veredicto" = "secuencial" ] \
+  && ok "A-5: limpiar-ramas arrancó DESPUÉS de que limpiar-worktrees terminara (secuencial, misma pasada — no en paralelo)" \
+  || bad "A-5: no corrieron secuenciales (limpiar-ramas no esperó a limpiar-worktrees); got: '$veredicto'"
+rm -rf "$A5FIX"
 
 # ── (b5g) recordar-cosechar: nudge DOBLE (cosecha + backlog durable) (fail-open; heurístico; throttle) ──
 echo ""
